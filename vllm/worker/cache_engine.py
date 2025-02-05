@@ -58,26 +58,14 @@ class CacheEngine:
                                              self.block_size,
                                              model_config.is_attention_free)
 
-        self.gpu_cpu_cache_ratio = 2
+        self.gpu_cpu_cache_ratio = 1
         self.cpu_cache_num = int(self.num_attention_layers / (self.gpu_cpu_cache_ratio + 1))
-        self.gpu_cache_num = int(self.num_attention_layers - self.cpu_cache_num)
+        self.gpu_cache_num = int(self.num_attention_layers - self.cpu_cache_num) + 1
 
         # Initialize the cache.
         self.gpu_cache = self._allocate_kv_cache(
             self.num_gpu_blocks, self.device_config.device_type)
         self.cpu_cache = self._allocate_kv_cache_cpu(self.num_cpu_blocks, "cpu")
-        
-    def wait_and_get_cache(self, layer_num, prefetch_stream):
-        is_offloaded = layer_num % (self.gpu_cpu_cache_ratio + 1) == 0
-        offloaded_num = int(layer_num / (self.gpu_cpu_cache_ratio + 1))
-        if is_offloaded:
-            if self.prefetching_layer != layer_num:
-                print(f"offloaded cache is used by other layer: {self.prefetching_layer}, current layer: {layer_num}")
-            torch.cuda.default_stream().wait_stream(prefetch_stream)
-            return self.gpu_cache_offloaded
-        else:
-            return self.gpu_cache[layer_num-offloaded_num]
-
 
     def _allocate_kv_cache_gpu(
         self,
