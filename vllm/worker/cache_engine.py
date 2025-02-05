@@ -58,11 +58,92 @@ class CacheEngine:
                                              self.block_size,
                                              model_config.is_attention_free)
 
+        self.gpu_cpu_cache_ratio = 2
+        self.cpu_cache_num = int(self.num_attention_layers / (self.gpu_cpu_cache_ratio + 1))
+        self.gpu_cache_num = int(self.num_attention_layers - self.cpu_cache_num)
+
         # Initialize the cache.
         self.gpu_cache = self._allocate_kv_cache(
             self.num_gpu_blocks, self.device_config.device_type)
-        self.cpu_cache = self._allocate_kv_cache(self.num_cpu_blocks, "cpu")
+        self.cpu_cache = self._allocate_kv_cache_cpu(self.num_cpu_blocks, "cpu")
+        
+    def wait_and_get_cache(self, layer_num, prefetch_stream):
+        is_offloaded = layer_num % (self.gpu_cpu_cache_ratio + 1) == 0
+        offloaded_num = int(layer_num / (self.gpu_cpu_cache_ratio + 1))
+        if is_offloaded:
+            if self.prefetching_layer != layer_num:
+                print(f"offloaded cache is used by other layer: {self.prefetching_layer}, current layer: {layer_num}")
+            torch.cuda.default_stream().wait_stream(prefetch_stream)
+            return self.gpu_cache_offloaded
+        else:
+            return self.gpu_cache[layer_num-offloaded_num]
 
+
+    def _allocate_kv_cache_gpu(
+        self,
+        num_blocks: int,
+        device: str,
+    ) -> List[torch.Tensor]:
+        """Allocates KV cache on the specified device."""
+        kv_cache_shape = self.attn_backend.get_kv_cache_shape(
+            num_blocks, self.block_size, self.num_kv_heads, self.head_size)
+        pin_memory = is_pin_memory_available() if device == "cpu" else False
+        kv_cache: List[torch.Tensor] = []
+        total_gpu_bytes = 0
+            
+        for _ in range(self.gpu_cache_num):
+            # null block in CpuGpuBlockAllocator requires at least that
+            # block to be zeroed-out.
+            # We zero-out everything for simplicity.
+            new_layer_kv_cache = torch.zeros(kv_cache_shape,
+                            dtype=self.dtype,
+                            # pin_memory=pin_memory,
+                            device=device)
+            # new_layer_kv_cache = torch.ones(kv_cache_shape,
+            #                 dtype=self.dtype,
+            #                 # pin_memory=pin_memory,
+            #                 device=device)
+                        
+            kv_cache.append(new_layer_kv_cache)
+            byte_size = 2 * new_layer_kv_cache.numel()
+            total_gpu_bytes += byte_size
+        total_gpu_bytes = total_gpu_bytes / 1024 / 1024
+        print(f"GPU cache allocated {total_gpu_bytes} MB -> per layer {byte_size/1024/1024} MB")
+        return kv_cache
+    
+    def _allocate_kv_cache_cpu(
+        self,
+        num_blocks: int,
+        device: str,
+    ) -> List[torch.Tensor]:
+        """Allocates KV cache on the specified device."""
+        kv_cache_shape = self.attn_backend.get_kv_cache_shape(
+            num_blocks, self.block_size, self.num_kv_heads, self.head_size)
+        # pin_memory = is_pin_memory_available() if device == "cpu" else False
+        kv_cache: List[torch.Tensor] = []
+        total_cpu_bytes = 0
+        for i in range(self.num_attention_layers):
+            device = "cuda" if i == 0 else "cpu"
+            pin_memory = is_pin_memory_available() if device == "cpu" else False
+            # null block in CpuGpuBlockAllocator requires at least that
+            # block to be zeroed-out.
+            # We zero-out everything for simplicity.
+            new_layer_kv_cache = torch.zeros(kv_cache_shape,
+                            dtype=self.dtype,
+                            pin_memory=pin_memory,
+                            device=device)            
+            # new_layer_kv_cache = torch.ones(kv_cache_shape,
+            #                 dtype=self.dtype,
+            #                 # pin_memory=pin_memory,
+            #                 device=device)
+                        
+            kv_cache.append(new_layer_kv_cache)
+            byte_size = 2 * new_layer_kv_cache.numel()
+            total_cpu_bytes += byte_size
+        total_cpu_bytes = total_cpu_bytes / 1024 / 1024
+        print(f"CPU allocated {total_cpu_bytes} MB -> per layer {byte_size/1024/1024} MB")
+        return kv_cache
+    
     def _allocate_kv_cache(
         self,
         num_blocks: int,

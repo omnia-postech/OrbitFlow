@@ -1,0 +1,60 @@
+HONG: args.input_len: 256
+32
+INFO 01-22 02:54:41 __init__.py:179] Automatically detected platform cuda.
+INFO 01-22 02:54:52 config.py:517] This model supports multiple tasks: {'embed', 'classify', 'generate', 'score', 'reward'}. Defaulting to 'generate'.
+WARNING 01-22 02:54:52 arg_utils.py:1113] The model has a long context length (77808). This may cause OOM errors during the initial memory profiling phase, or result in low performance due to small KV cache space. Consider setting --max-model-len to a smaller value.
+WARNING 01-22 02:54:52 cuda.py:98] To see benefits of async output processing, enable CUDA graph. Since, enforce-eager is enabled, async output processor cannot be used
+WARNING 01-22 02:54:52 config.py:651] Async output processing is not supported on the current platform type cuda.
+INFO 01-22 02:54:52 llm_engine.py:234] Initializing an LLM engine (v0.6.6.post2.dev47+ga115ac46.d20250113) with config: model='meta-llama/Meta-Llama-3.1-8B-Instruct', speculative_config=None, tokenizer='meta-llama/Meta-Llama-3.1-8B-Instruct', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, override_neuron_config=None, tokenizer_revision=None, trust_remote_code=False, dtype=torch.bfloat16, max_seq_len=77808, download_dir=None, load_format=LoadFormat.AUTO, tensor_parallel_size=1, pipeline_parallel_size=1, disable_custom_all_reduce=False, quantization=None, enforce_eager=True, kv_cache_dtype=auto, quantization_param_path=None, device_config=cuda, decoding_config=DecodingConfig(guided_decoding_backend='xgrammar'), observability_config=ObservabilityConfig(otlp_traces_endpoint=None, collect_model_forward_time=False, collect_model_execute_time=False), seed=0, served_model_name=meta-llama/Meta-Llama-3.1-8B-Instruct, num_scheduler_steps=1, multi_step_stream_outputs=True, enable_prefix_caching=False, chunked_prefill_enabled=False, use_async_output_proc=False, disable_mm_preprocessor_cache=False, mm_processor_kwargs=None, pooler_config=None, compilation_config={"splitting_ops":["vllm.unified_attention","vllm.unified_attention_with_output"],"candidate_compile_sizes":[],"compile_sizes":[],"capture_sizes":[],"max_capture_size":0}, use_cached_outputs=False, 
+INFO 01-22 02:54:54 selector.py:120] Using Flash Attention backend.
+INFO 01-22 02:54:55 model_runner.py:1094] Starting to load model meta-llama/Meta-Llama-3.1-8B-Instruct...
+INFO 01-22 02:54:56 weight_utils.py:251] Using model weights format ['*.safetensors']
+Loading safetensors checkpoint shards:   0% Completed | 0/4 [00:00<?, ?it/s]
+Loading safetensors checkpoint shards:  25% Completed | 1/4 [00:00<00:02,  1.13it/s]
+Loading safetensors checkpoint shards:  50% Completed | 2/4 [00:01<00:01,  1.82it/s]
+Loading safetensors checkpoint shards:  75% Completed | 3/4 [00:02<00:00,  1.42it/s]
+Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:03<00:00,  1.25it/s]
+Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:03<00:00,  1.32it/s]
+
+INFO 01-22 02:55:00 model_runner.py:1099] Loading model weights took 14.9888 GB
+INFO 01-22 02:55:00 gpu_executor.py:76] # GPU blocks: 10086, # CPU blocks: 10086
+INFO 01-22 02:55:00 gpu_executor.py:80] Maximum concurrency for 77808 tokens per request: 2.07x
+GPU cache allocated 1260.75 MB -> per layer 630.375 MB
+CPU allocated 20172.0 MB -> per layer 630.375 MB
+INFO 01-22 02:55:13 llm_engine.py:431] init engine (profile, create kv cache, warmup model) took 13.05 seconds
+Processed prompts:   0%|          | 0/1 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts: 100%|██████████| 1/1 [00:01<00:00,  1.13s/it, est. speed input: 227.01 toks/s, output: 1.77 toks/s]Processed prompts: 100%|██████████| 1/1 [00:01<00:00,  1.13s/it, est. speed input: 227.01 toks/s, output: 1.77 toks/s]
+Prefill detected at layer0. Skipping prefetch.
+Prefill detected at layer1. Skipping prefetch.
+Prefill detected at layer2. Skipping prefetch.
+Prefill detected at layer3. Skipping prefetch.
+Prefill detected at layer4. Skipping prefetch.
+Prefill detected at layer5. Skipping prefetch.
+Prefill detected at layer6. Skipping prefetch.
+Prefill detected at layer7. Skipping prefetch.
+Prefill detected at layer8. Skipping prefetch.
+Prefill detected at layer9. Skipping prefetch.
+Prefill detected at layer10. Skipping prefetch.
+Prefill detected at layer11. Skipping prefetch.
+Prefill detected at layer12. Skipping prefetch.
+Prefill detected at layer13. Skipping prefetch.
+Prefill detected at layer14. Skipping prefetch.
+Prefill detected at layer15. Skipping prefetch.
+Prefill detected at layer16. Skipping prefetch.
+Prefill detected at layer17. Skipping prefetch.
+Prefill detected at layer18. Skipping prefetch.
+Prefill detected at layer19. Skipping prefetch.
+Prefill detected at layer20. Skipping prefetch.
+Prefill detected at layer21. Skipping prefetch.
+Prefill detected at layer22. Skipping prefetch.
+Prefill detected at layer23. Skipping prefetch.
+Prefill detected at layer24. Skipping prefetch.
+Prefill detected at layer25. Skipping prefetch.
+Prefill detected at layer26. Skipping prefetch.
+Prefill detected at layer27. Skipping prefetch.
+Prefill detected at layer28. Skipping prefetch.
+Prefill detected at layer29. Skipping prefetch.
+Prefill detected at layer30. Skipping prefetch.
+inference time 1.1291990280151367
+Prompt: None, 
+Generated text: 'Cloud'
+Generated token length: 2

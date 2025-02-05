@@ -357,9 +357,115 @@ class LlamaModel(nn.Module):
 
         for i in range(self.start_layer, self.end_layer):
             layer = self.layers[i]
-            hidden_states, residual = layer(positions, hidden_states,
-                                            kv_caches[i - self.start_layer],
-                                            attn_metadata, residual)
+            # TODO(HONG): Implement prefetching here
+            next_layer = i + 1
+            # Implement sync -> wait for prefetch stream to finish
+            # if self._prefetch_stream is not None: 
+            #     torch.cuda.default_stream().wait_stream(self._prefetch_stream)
+
+            # Implement prefetch(i+1 layer) with stream.
+
+                
+            # block_mapping = attn_metadata.block_tables.to('cpu')
+            # positions.numel() == 1 # for decoding == attn_metadata.num_decode_tokens
+
+            positions_min = positions.min().item()            
+            
+            kv_cache = None
+            kv_cache_write = None
+
+            if positions_min == 0: 
+                print(f"Prefill detected at layer{i}. Skipping prefetch.")
+                pass
+            else:
+                if is_recomp:
+                    start_page = 0
+                    end_page = recomputation_vars["start_recomp_page"]
+                    
+                    layer_num = i
+                    gpu_cpu_cache_ratio = 2
+                    offloaded_num = int((layer_num + 1) / (gpu_cpu_cache_ratio + 1))
+                    
+                    if (layer_num + 1) % (gpu_cpu_cache_ratio + 1) == 0:
+                        kv_cache = kv_caches[-1]
+                        kv_cache_write = kv_caches_cpu[i]
+                        if self._prefetch_stream is not None: 
+                            torch.cuda.default_stream().wait_stream(self._prefetch_stream)
+                    elif (layer_num + 1) % (gpu_cpu_cache_ratio + 1) == 1:
+                        prefetch_layer = layer_num + gpu_cpu_cache_ratio
+                        if prefetch_layer <= 31:
+                            with torch.cuda.stream(self._prefetch_stream):
+                                # Copy only needed pages in the cache (efficient)
+                                # shape = [num_blocks, block_size, num_kv_heads, head_size]
+                                with nvtx.annotate(f"Key Prefetching{next_layer}"):
+                                    kv_caches[-1][0][start_page:end_page, :, :, :].copy_(
+                                        kv_caches_cpu[prefetch_layer][0][start_page:end_page, :, :, :], non_blocking=True
+                                    )
+
+                                with nvtx.annotate(f"Value Prefetetching{next_layer}"):
+                                    kv_caches[-1][1][start_page:end_page, :, :, :].copy_(
+                                        kv_caches_cpu[prefetch_layer][1][start_page:end_page, :, :, :], non_blocking=True
+                                    )
+                        kv_cache = kv_caches[layer_num-offloaded_num]
+                        kv_cache_write = kv_caches_cpu[i]
+                    else:
+                        kv_cache = kv_caches[layer_num-offloaded_num]
+                        kv_cache_write = kv_caches_cpu[i]
+
+                else:
+                    if next_layer <= 31:
+                        PAGE_SIZE = 16
+                        page_end = (positions_min - 1) // PAGE_SIZE
+                        if page_end < 0: 
+                            page_ends = 0
+                        # needed_pages = torch.arange(0, page_end + 1, dtype=torch.int32)
+
+                        start_page = 0
+                        end_page = page_end + 1
+
+                        with torch.cuda.stream(self._prefetch_stream):
+                            # Copy only needed pages in the cache (efficient)
+                            # shape = [num_blocks, block_size, num_kv_heads, head_size]
+                            with nvtx.annotate(f"Key Prefetching{next_layer}"):
+                                kv_caches[next_layer & 1][0][start_page:end_page, :, :, :].copy_(
+                                    kv_caches_cpu[next_layer][0][start_page:end_page, :, :, :], non_blocking=True
+                                )
+                            with nvtx.annotate(f"Value Prefetetching{next_layer}"):
+                                kv_caches[next_layer & 1][1][start_page:end_page, :, :, :].copy_(
+                                    kv_caches_cpu[next_layer][1][start_page:end_page, :, :, :], non_blocking=True
+                                )
+
+            if i == 0: # first layer
+                if recomputation_vars is not None and attn_metadata.num_prefills == 0:
+                    hidden_states, residual = layer(recomputation_vars["recomp_position"], recomputation_vars["recomp_hidden_states"],
+                                                        kv_caches_cpu[i],
+                                                        kv_caches_cpu[i],
+                                                        i,
+                                                        attn_metadata, residual, is_recomp)
+                    recomputation_vars["recomp_hidden_states"] = hidden_states
+                else:
+                    hidden_states, residual = layer(positions, hidden_states,
+                                                        kv_caches_cpu[i],
+                                                        kv_caches_cpu[i],
+                                                        i,
+                                                        attn_metadata, residual)
+            else:
+                if recomputation_vars is not None and attn_metadata.num_prefills == 0:
+                    hidden_states, residual = layer(recomputation_vars["recomp_position"], recomputation_vars["recomp_hidden_states"],
+                                                        kv_cache,
+                                                        kv_cache_write,
+                                                        i,
+                                                        attn_metadata, residual, is_recomp)
+                    recomputation_vars["recomp_hidden_states"] = hidden_states
+                else:    
+                    hidden_states, residual = layer(positions, hidden_states,
+                                                        kv_caches[i & 1],
+                                                        kv_caches_cpu[i],
+                                                        i,
+                                                        attn_metadata, residual)
+            # hidden_states, residual = layer(positions, hidden_states,
+            #                                 kv_caches[i - self.start_layer],
+            #                                 attn_metadata, residual)
 
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({

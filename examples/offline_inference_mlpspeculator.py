@@ -38,7 +38,7 @@ if __name__ == "__main__":
     sampling_params = SamplingParams(temperature=0.0, max_tokens=200)
 
     # Create an LLM without spec decoding
-    llm = LLM(model="meta-llama/Llama-2-13b-chat-hf")
+    llm = LLM(model="meta-llama/Meta-Llama-3.1-8B-Instruct")
 
     print("Without speculation")
     time_generation(llm, prompts, sampling_params)
@@ -48,8 +48,9 @@ if __name__ == "__main__":
 
     # Create an LLM with spec decoding
     llm = LLM(
-        model="meta-llama/Llama-2-13b-chat-hf",
-        speculative_model="ibm-fms/llama-13b-accelerator",
+        model="meta-llama/Meta-Llama-3.1-8B-Instruct",
+        speculative_model="meta-llama/Llama-3.2-1B",
+        num_speculative_tokens=3
     )
 
     print("With speculation")
