@@ -347,7 +347,7 @@ class LlamaModel(nn.Module):
         attn_metadata: AttentionMetadata
     ):        
         PAGE_SIZE = 16
-        recomp_ratio = 0.0
+        recomp_ratio = 0.1
 
         cached_all_token_ids_tensor = torch.tensor(cached_all_token_ids, device='cuda:0')
         total_tokens = cached_all_token_ids_tensor.shape[0]
@@ -429,7 +429,7 @@ class LlamaModel(nn.Module):
             
             kv_cache = None
             kv_cache_write = None
-            gpu_cpu_cache_ratio = 1
+            gpu_cpu_cache_ratio = 3
             layer_num = i
             offloaded_num = int((layer_num + 1) / (gpu_cpu_cache_ratio + 1))
 

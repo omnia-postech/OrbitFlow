@@ -205,3 +205,6 @@ benchmarks/*.json
 # Linting
 actionlint
 shellcheck*/
+scripts/nsys/
+scripts/output/
+samples
