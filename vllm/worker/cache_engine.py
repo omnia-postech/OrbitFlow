@@ -58,7 +58,7 @@ class CacheEngine:
                                              self.block_size,
                                              model_config.is_attention_free)
 
-        self.gpu_cpu_cache_ratio = 3
+        self.gpu_cpu_cache_ratio = 1
         self.cpu_cache_num = int(self.num_attention_layers / (self.gpu_cpu_cache_ratio + 1))
         self.gpu_cache_num = int(self.num_attention_layers - self.cpu_cache_num) + 1
 

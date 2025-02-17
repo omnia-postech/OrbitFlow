@@ -56,12 +56,9 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
                     make_empty_intermediate_tensors_factory, make_layers,
                     maybe_prefix)
 
-<<<<<<< HEAD
-=======
 import time
 
 import nvtx
->>>>>>> 4bb82734... multi prefetch done
 
 class LlamaMLP(nn.Module):
 
@@ -278,10 +275,16 @@ class LlamaDecoderLayer(nn.Module):
         else:
             hidden_states, residual = self.input_layernorm(
                 hidden_states, residual)
-        hidden_states = self.self_attn(positions=positions,
-                                       hidden_states=hidden_states,
-                                       kv_cache=kv_cache,
-                                       attn_metadata=attn_metadata)
+        with nvtx.annotate(f"attention block[{layer}]", color="yellow"):
+            # if is_recomp:
+            #     attn_metadata.num_decode_tokens = hidden_states.shape[0]
+            hidden_states = self.self_attn(positions=positions,
+                                        hidden_states=hidden_states,
+                                        kv_cache=kv_cache,
+                                        kv_cache_cpu=kv_cache_cpu,
+                                        layer=layer,
+                                        attn_metadata=attn_metadata,
+                                        is_recomp=is_recomp)
 
         # Fully Connected
         hidden_states, residual = self.post_attention_layernorm(
@@ -347,7 +350,7 @@ class LlamaModel(nn.Module):
         attn_metadata: AttentionMetadata
     ):        
         PAGE_SIZE = 16
-        recomp_ratio = 0.1
+        recomp_ratio = 0.82
 
         cached_all_token_ids_tensor = torch.tensor(cached_all_token_ids, device='cuda:0')
         total_tokens = cached_all_token_ids_tensor.shape[0]
@@ -399,8 +402,6 @@ class LlamaModel(nn.Module):
             assert intermediate_tensors is not None
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
-<<<<<<< HEAD
-=======
         
         is_recomp = True
         recomputation_vars = None
@@ -409,7 +410,6 @@ class LlamaModel(nn.Module):
             recomputation_vars = self._initialize_recomputation(cached_all_token_ids, attn_metadata)
             
         start = time.time()
->>>>>>> 4bb82734... multi prefetch done
 
         for i in range(self.start_layer, self.end_layer):
             layer = self.layers[i]
@@ -425,11 +425,11 @@ class LlamaModel(nn.Module):
             # block_mapping = attn_metadata.block_tables.to('cpu')
             # positions.numel() == 1 # for decoding == attn_metadata.num_decode_tokens
 
-            positions_min = positions.min().item()            
+            positions_min = positions.min().item()
             
             kv_cache = None
             kv_cache_write = None
-            gpu_cpu_cache_ratio = 3
+            gpu_cpu_cache_ratio = 1
             layer_num = i
             offloaded_num = int((layer_num + 1) / (gpu_cpu_cache_ratio + 1))
 
@@ -505,8 +505,8 @@ class LlamaModel(nn.Module):
             
         elased_time = time.time() - start
         
-        print("32 layer time", elased_time)
-        print(f"total gpu mem {len(kv_cache) * kv_cache[0].numel() * kv_cache.element_size()} bytes")
+        # print("32 layer time", elased_time)
+        # print(f"total gpu mem {len(kv_cache) * kv_cache[0].numel() * kv_cache.element_size()} bytes")
 
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({

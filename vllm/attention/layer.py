@@ -141,6 +141,9 @@ class Attention(nn.Module):
                                      attn_type=attn_type)
         elif self.use_output:
             output = torch.empty_like(query)
+            # if is_recomp is True:
+                # output = output[-1:].clone()
+                # output = output.clone()
             hidden_size = query.size(-1)
             # Reshape the query, key, and value tensors.
             # NOTE(woosuk): We do this outside the custom op to minimize the

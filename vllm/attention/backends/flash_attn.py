@@ -26,6 +26,8 @@ if TYPE_CHECKING:
 from vllm.vllm_flash_attn import (flash_attn_varlen_func,
                                   flash_attn_with_kvcache)
 
+import nvtx 
+import time
 
 class FlashAttentionBackend(AttentionBackend):
 
@@ -775,6 +777,8 @@ class FlashAttentionImpl(AttentionImpl):
             # Decoding run.
             # Use flash_attn_varlen_func kernel for speculative decoding
             # because different queries might have different lengths.
+            
+            start = time.time()
 
             assert decode_meta.max_decode_query_len is not None
             # use only for actual varlen decoding
@@ -805,19 +809,26 @@ class FlashAttentionImpl(AttentionImpl):
                     _,
                     block_tables_arg,
                 ) = get_seq_len_block_table_args(decode_meta, False, attn_type)
-                flash_attn_with_kvcache(
-                    q=decode_query.unsqueeze(1),
-                    k_cache=key_cache,
-                    v_cache=value_cache,
-                    block_table=block_tables_arg,
-                    cache_seqlens=seq_lens_arg,
-                    softmax_scale=softmax_scale,
-                    causal=True,
-                    window_size=window_size,
-                    alibi_slopes=alibi_slopes,
-                    softcap=logits_soft_cap,
-                    out=decode_output.unsqueeze(1),
-                )
+                # if decode_query.shape[0] > 1:
+                #     print("query is bigger than 1")
+                #     seq_lens_arg = seq_lens_arg - decode_query.shape[0] + 1
+
+                with nvtx.annotate(f"Decoding FA(2) for layer{layer}"):
+                    flash_attn_with_kvcache(
+                        q=recomp_query.unsqueeze(0),
+                        k_cache=key_cache,
+                        v_cache=value_cache,
+                        block_table=block_tables_arg,
+                        cache_seqlens=seq_lens_arg,
+                        softmax_scale=softmax_scale,
+                        causal=True,
+                        window_size=window_size,
+                        alibi_slopes=alibi_slopes,
+                        softcap=logits_soft_cap,
+                        out=recomp_output.unsqueeze(0),
+                    )
+            
+            print(f"decoding interval: {time.time() - start}")
         return output
 
 
