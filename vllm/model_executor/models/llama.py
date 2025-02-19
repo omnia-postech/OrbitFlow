@@ -276,8 +276,8 @@ class LlamaDecoderLayer(nn.Module):
             hidden_states, residual = self.input_layernorm(
                 hidden_states, residual)
         with nvtx.annotate(f"attention block[{layer}]", color="yellow"):
-            # if is_recomp:
-            #     attn_metadata.num_decode_tokens = hidden_states.shape[0]
+            if is_recomp:
+                attn_metadata.num_decode_tokens = hidden_states.shape[0]
             hidden_states = self.self_attn(positions=positions,
                                         hidden_states=hidden_states,
                                         kv_cache=kv_cache,
@@ -340,6 +340,11 @@ class LlamaModel(nn.Module):
         self.make_empty_intermediate_tensors = (
             make_empty_intermediate_tensors_factory(
                 ["hidden_states", "residual"], config.hidden_size))
+        
+        self._prefetch_stream = torch.cuda.Stream()
+        self.PAGE_SIZE = 16
+        self.recomp_ratio = 0.1
+        self.gpu_cpu_cache_ratio = 1
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
@@ -347,10 +352,9 @@ class LlamaModel(nn.Module):
     def _initialize_recomputation(
         self,
         cached_all_token_ids: List[int],
-        attn_metadata: AttentionMetadata
+        attn_metadata: AttentionMetadata,
+        recomp_ratio: int
     ):        
-        PAGE_SIZE = 16
-        recomp_ratio = 0.82
 
         cached_all_token_ids_tensor = torch.tensor(cached_all_token_ids, device='cuda:0')
         total_tokens = cached_all_token_ids_tensor.shape[0]
@@ -360,7 +364,7 @@ class LlamaModel(nn.Module):
         # print(f"total pages = {num_pages} num_recomp_pages = {num_recomp_pages}")
 
         start_recomp_page = num_pages - num_recomp_pages
-        start_recomp_token = start_recomp_page * PAGE_SIZE if start_recomp_page *PAGE_SIZE < total_tokens - 1 else total_tokens - 1
+        start_recomp_token = start_recomp_page * self.PAGE_SIZE if start_recomp_page *self.PAGE_SIZE < total_tokens - 1 else total_tokens - 1
         end_recomp_position = total_tokens - 1
 
         recomp_input_ids = cached_all_token_ids_tensor[start_recomp_token:].contiguous()
@@ -407,7 +411,7 @@ class LlamaModel(nn.Module):
         recomputation_vars = None
 
         if is_recomp and attn_metadata.num_prefills == 0:
-            recomputation_vars = self._initialize_recomputation(cached_all_token_ids, attn_metadata)
+            recomputation_vars = self._initialize_recomputation(cached_all_token_ids, attn_metadata, self.recomp_ratio)
             
         start = time.time()
 
@@ -429,13 +433,12 @@ class LlamaModel(nn.Module):
             
             kv_cache = None
             kv_cache_write = None
-            gpu_cpu_cache_ratio = 1
             layer_num = i
-            offloaded_num = int((layer_num + 1) / (gpu_cpu_cache_ratio + 1))
+            offloaded_num = int((layer_num + 1) / (self.gpu_cpu_cache_ratio + 1))
 
             if positions_min == 0: 
                 print(f"Prefill detected at layer{i}. Skipping prefetch.")
-                if (layer_num + 1) % (gpu_cpu_cache_ratio + 1) == 0:
+                if (layer_num + 1) % (self.gpu_cpu_cache_ratio + 1) == 0:
                     kv_cache = kv_caches[-1]
                     kv_cache_write = kv_caches_cpu[i]
                 else:
@@ -445,13 +448,28 @@ class LlamaModel(nn.Module):
                 start_page = 0
                 end_page = recomputation_vars["start_recomp_page"]
                 
-                if (layer_num + 1) % (gpu_cpu_cache_ratio + 1) == 0:
+                if (layer_num + 1) % (self.gpu_cpu_cache_ratio + 1) == 0:
+                    # cached_all_token_ids_tensor = torch.tensor(cached_all_token_ids, device='cuda:0')
+                    # total_tokens = cached_all_token_ids_tensor.shape[0]
+
+                    # num_pages = len(attn_metadata.block_tables[0])
+                    # num_recomp_pages = int(num_pages * recomp_ratio)
+                    # # print(f"total pages = {num_pages} num_recomp_pages = {num_recomp_pages}")
+
+                    # start_recomp_page = num_pages - num_recomp_pages
+                    # start_recomp_token = start_recomp_page * self.PAGE_SIZE if start_recomp_page * self.PAGE_SIZE < total_tokens - 1 else total_tokens - 1
+                    # end_recomp_position = total_tokens - 1
+                    # recomp_input_ids = cached_all_token_ids_tensor[start_recomp_token:].contiguous()
+                    # recomp_position = torch.arange(start_recomp_token, end_recomp_position + 1, device='cuda:0').contiguous()
+                    # recomp_hidden_states = self.get_input_embeddings(recomp_input_ids)
+                    
+                    recomp_pos = recomputation_vars["recomp_position"]
                     kv_cache = kv_caches[-1]
                     kv_cache_write = kv_caches_cpu[i]
                     if self._prefetch_stream is not None: 
                         torch.cuda.default_stream().wait_stream(self._prefetch_stream)
-                elif (layer_num + 1) % (gpu_cpu_cache_ratio + 1) == 1:
-                    prefetch_layer = layer_num + gpu_cpu_cache_ratio
+                elif (layer_num + 1) % (self.gpu_cpu_cache_ratio + 1) == 1:
+                    prefetch_layer = layer_num + self.gpu_cpu_cache_ratio
                     if prefetch_layer <= 31:
                         with torch.cuda.stream(self._prefetch_stream):
                             # Copy only needed pages in the cache (efficient)
@@ -465,15 +483,18 @@ class LlamaModel(nn.Module):
                                 kv_caches[-1][1][start_page:end_page, :, :, :].copy_(
                                     kv_caches_cpu[prefetch_layer][1][start_page:end_page, :, :, :], non_blocking=True
                                 )
+                    recomp_pos = positions
                     kv_cache = kv_caches[layer_num-offloaded_num]
                     kv_cache_write = kv_caches_cpu[i]
+
                 else:
+                    recomp_pos = positions
                     kv_cache = kv_caches[layer_num-offloaded_num]
                     kv_cache_write = kv_caches_cpu[i]
 
             if i == 0: # first layer
                 if recomputation_vars is not None and attn_metadata.num_prefills == 0:
-                    hidden_states, residual = layer(recomputation_vars["recomp_position"], recomputation_vars["recomp_hidden_states"],
+                    hidden_states, residual = layer(recomp_pos, recomputation_vars["recomp_hidden_states"],
                                                         kv_caches_cpu[i],
                                                         kv_caches_cpu[i],
                                                         i,
@@ -487,7 +508,7 @@ class LlamaModel(nn.Module):
                                                         attn_metadata, residual)
             else:
                 if recomputation_vars is not None and attn_metadata.num_prefills == 0:
-                    hidden_states, residual = layer(recomputation_vars["recomp_position"], recomputation_vars["recomp_hidden_states"],
+                    hidden_states, residual = layer(recomp_pos, recomputation_vars["recomp_hidden_states"],
                                                         kv_cache,
                                                         kv_cache_write,
                                                         i,
