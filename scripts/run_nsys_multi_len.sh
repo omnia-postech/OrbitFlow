@@ -2,7 +2,7 @@
 
 # 테스트할 input length 리스트
 lengths=(256 512 1024 2048 4096 8192 16384 32768 65536)
-lengths=(65536)
+lengths=(131040)
 
 
 # 리스트의 각 length에 대해 테스트 실행
@@ -14,7 +14,7 @@ for length in "${lengths[@]}"; do
         --trace cuda,cudnn,nvtx \
         --force-overwrite=true \
         --gpu-metrics-device 1 \
-        --output nsys/test_recomp_${length} \
+        --output nsys/test_recomp_${length}-0 \
         ./run_offline_inference_offloading_length.sh $length \
         > output/test_recomp_${length}.txt 2>&1
 

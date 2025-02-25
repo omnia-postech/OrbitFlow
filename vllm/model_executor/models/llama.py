@@ -343,7 +343,7 @@ class LlamaModel(nn.Module):
         
         self._prefetch_stream = torch.cuda.Stream()
         self.PAGE_SIZE = 16
-        self.recomp_ratio = 0.1
+        self.recomp_ratio = 0.5
         self.gpu_cpu_cache_ratio = 1
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
@@ -361,6 +361,7 @@ class LlamaModel(nn.Module):
 
         num_pages = len(attn_metadata.block_tables[0])
         num_recomp_pages = int(num_pages * recomp_ratio)
+        # num_recomp_pages = 0
         # print(f"total pages = {num_pages} num_recomp_pages = {num_recomp_pages}")
 
         start_recomp_page = num_pages - num_recomp_pages
@@ -494,7 +495,7 @@ class LlamaModel(nn.Module):
 
             if i == 0: # first layer
                 if recomputation_vars is not None and attn_metadata.num_prefills == 0:
-                    hidden_states, residual = layer(recomp_pos, recomputation_vars["recomp_hidden_states"],
+                    hidden_states, residual = layer(recomputation_vars["recomp_position"], recomputation_vars["recomp_hidden_states"],
                                                         kv_caches_cpu[i],
                                                         kv_caches_cpu[i],
                                                         i,
@@ -508,7 +509,7 @@ class LlamaModel(nn.Module):
                                                         attn_metadata, residual)
             else:
                 if recomputation_vars is not None and attn_metadata.num_prefills == 0:
-                    hidden_states, residual = layer(recomp_pos, recomputation_vars["recomp_hidden_states"],
+                    hidden_states, residual = layer(recomputation_vars["recomp_position"], recomputation_vars["recomp_hidden_states"],
                                                         kv_cache,
                                                         kv_cache_write,
                                                         i,
