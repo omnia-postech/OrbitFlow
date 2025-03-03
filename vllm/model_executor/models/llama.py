@@ -343,8 +343,7 @@ class LlamaModel(nn.Module):
         
         self._prefetch_stream = torch.cuda.Stream()
         self.PAGE_SIZE = 16
-        self.recomp_ratio = 0.5
-        self.gpu_cpu_cache_ratio = 1
+        self.recomp_ratio = 0.0
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
@@ -361,7 +360,7 @@ class LlamaModel(nn.Module):
 
         num_pages = len(attn_metadata.block_tables[0])
         num_recomp_pages = int(num_pages * recomp_ratio)
-        # num_recomp_pages = 0
+        # num_recomp_pages = 60
         # print(f"total pages = {num_pages} num_recomp_pages = {num_recomp_pages}")
 
         start_recomp_page = num_pages - num_recomp_pages
@@ -393,6 +392,8 @@ class LlamaModel(nn.Module):
         input_ids: Optional[torch.Tensor],
         positions: torch.Tensor,
         kv_caches: List[torch.Tensor],
+        kv_caches_cpu: List[torch.Tensor],
+        gpu_cpu_cache_ratio: int,
         attn_metadata: AttentionMetadata,
         intermediate_tensors: Optional[IntermediateTensors],
         inputs_embeds: Optional[torch.Tensor] = None,
@@ -435,11 +436,11 @@ class LlamaModel(nn.Module):
             kv_cache = None
             kv_cache_write = None
             layer_num = i
-            offloaded_num = int((layer_num + 1) / (self.gpu_cpu_cache_ratio + 1))
+            offloaded_num = int((layer_num + 1) / (gpu_cpu_cache_ratio + 1))
 
             if positions_min == 0: 
                 print(f"Prefill detected at layer{i}. Skipping prefetch.")
-                if (layer_num + 1) % (self.gpu_cpu_cache_ratio + 1) == 0:
+                if (layer_num + 1) % (gpu_cpu_cache_ratio + 1) == 0:
                     kv_cache = kv_caches[-1]
                     kv_cache_write = kv_caches_cpu[i]
                 else:
@@ -449,7 +450,7 @@ class LlamaModel(nn.Module):
                 start_page = 0
                 end_page = recomputation_vars["start_recomp_page"]
                 
-                if (layer_num + 1) % (self.gpu_cpu_cache_ratio + 1) == 0:
+                if (layer_num + 1) % (gpu_cpu_cache_ratio + 1) == 0:
                     # cached_all_token_ids_tensor = torch.tensor(cached_all_token_ids, device='cuda:0')
                     # total_tokens = cached_all_token_ids_tensor.shape[0]
 
@@ -469,8 +470,8 @@ class LlamaModel(nn.Module):
                     kv_cache_write = kv_caches_cpu[i]
                     if self._prefetch_stream is not None: 
                         torch.cuda.default_stream().wait_stream(self._prefetch_stream)
-                elif (layer_num + 1) % (self.gpu_cpu_cache_ratio + 1) == 1:
-                    prefetch_layer = layer_num + self.gpu_cpu_cache_ratio
+                elif (layer_num + 1) % (gpu_cpu_cache_ratio + 1) == 1:
+                    prefetch_layer = layer_num + gpu_cpu_cache_ratio
                     if prefetch_layer <= 31:
                         with torch.cuda.stream(self._prefetch_stream):
                             # Copy only needed pages in the cache (efficient)
@@ -730,11 +731,13 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         input_ids: torch.Tensor,
         positions: torch.Tensor,
         kv_caches: List[torch.Tensor],
+        kv_caches_cpu: List[torch.Tensor],        
+        gpu_cpu_cache_ratio: int,
         attn_metadata: AttentionMetadata,
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, IntermediateTensors]:
-        model_output = self.model(input_ids, positions, kv_caches,
+        model_output = self.model(input_ids, positions, cached_all_token_ids, kv_caches, kv_caches_cpu, gpu_cpu_cache_ratio,
                                   attn_metadata, intermediate_tensors,
                                   inputs_embeds)
         return model_output

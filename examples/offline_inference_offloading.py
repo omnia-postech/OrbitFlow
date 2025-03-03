@@ -79,10 +79,10 @@ if __name__ == "__main__":
     parser = FlexibleArgumentParser(description="offloading test.")    
     parser.add_argument("--max-tokens",
                         type=int,
-                        default=256,
+                        default=10000,
                         help="Output length for each request. Overrides the "
                         "output length from the dataset.")
-    parser.add_argument('--input', default='../samples/128k.md', type=str)
+    parser.add_argument('--input', default='../samples/2k.md', type=str)
     # parser.add_argument('--model', default='meta-llama/Meta-Llama-3.1-8B-Instruct', type=str)
     # parser.add_argument(
     #     '--tokenizer-mode',

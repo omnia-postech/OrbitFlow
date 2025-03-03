@@ -14,7 +14,7 @@ for length in "${lengths[@]}"; do
         --trace cuda,cudnn,nvtx \
         --force-overwrite=true \
         --gpu-metrics-device 1 \
-        --output nsys/test_recomp_${length}-0 \
+        --output nsys/test_recomp_${length}-60 \
         ./run_offline_inference_offloading_length.sh $length \
         > output/test_recomp_${length}.txt 2>&1
 

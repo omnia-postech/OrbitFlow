@@ -3,6 +3,8 @@ from typing import List
 
 import torch
 
+import gc
+
 from vllm.attention import get_attn_backend
 from vllm.config import CacheConfig, DeviceConfig, ModelConfig, ParallelConfig
 from vllm.logger import init_logger
@@ -58,14 +60,40 @@ class CacheEngine:
                                              self.block_size,
                                              model_config.is_attention_free)
 
-        self.gpu_cpu_cache_ratio = 1
-        self.cpu_cache_num = int(self.num_attention_layers / (self.gpu_cpu_cache_ratio + 1))
-        self.gpu_cache_num = int(self.num_attention_layers - self.cpu_cache_num) + 1
+        self.gpu_cpu_cache_ratio = 10
+        self.cpu_cache_num, self.gpu_cache_num = self.determine_cache_num_with_ratio(self.gpu_cpu_cache_ratio)
+        # self.gpu_cache_num = 32
+        
+        free_mem, total_mem = torch.cuda.mem_get_info()
+        print(f"Free Memory: {free_mem / 1024 / 1024} MB")
+        print(f"Total Memory: {total_mem / 1024 / 1024} MB")
 
         # Initialize the cache.
         self.gpu_cache = self._allocate_kv_cache(
             self.num_gpu_blocks, self.device_config.device_type)
         self.cpu_cache = self._allocate_kv_cache_cpu(self.num_cpu_blocks, "cpu")
+
+        free_mem, total_mem = torch.cuda.mem_get_info()
+        print(f"Free Memory: {free_mem / 1024 / 1024} MB")
+        print(f"Total Memory: {total_mem / 1024 / 1024} MB")
+        
+    def calculate_cpu_gpu_max_ratio(self, num_blocks: int, device):
+        kv_cache_shape = self.attn_backend.get_kv_cache_shape(
+            num_blocks, self.block_size, self.num_kv_heads, self.head_size)
+
+        test_kv_cache = torch.zeros(kv_cache_shape,
+                        dtype=self.dtype,
+                        # pin_memory=pin_memory,
+                        device="cpu")
+
+        kv_size = 2 * test_kv_cache.numel()
+
+        free_mem, total_mem = torch.cuda.mem_get_info()
+        
+        (free_mem / kv_size)
+        
+        return 
+
 
     def _allocate_kv_cache_gpu(
         self,
@@ -89,7 +117,7 @@ class CacheEngine:
                             device=device)
             # new_layer_kv_cache = torch.ones(kv_cache_shape,
             #                 dtype=self.dtype,
-            #                 # pin_memory=pin_memory,
+                            # pin_memory=pin_memory,
             #                 device=device)
                         
             kv_cache.append(new_layer_kv_cache)
@@ -107,6 +135,7 @@ class CacheEngine:
         """Allocates KV cache on the specified device."""
         kv_cache_shape = self.attn_backend.get_kv_cache_shape(
             num_blocks, self.block_size, self.num_kv_heads, self.head_size)
+
         # pin_memory = is_pin_memory_available() if device == "cpu" else False
         kv_cache: List[torch.Tensor] = []
         total_cpu_bytes = 0
@@ -131,6 +160,79 @@ class CacheEngine:
         total_cpu_bytes = total_cpu_bytes / 1024 / 1024
         print(f"CPU allocated {total_cpu_bytes} MB -> per layer {byte_size/1024/1024} MB")
         return kv_cache
+    
+    def determine_cache_num_with_ratio(self, gpu_cpu_cache_ratio):
+        num_prefetch_layer = 1
+        cpu_cache_num = self.num_attention_layers #JS: assuming that cache memory is abundant
+        gpu_cache_num = self.num_attention_layers - int(self.num_attention_layers / (gpu_cpu_cache_ratio + 1))
+
+        gpu_cache_num += num_prefetch_layer
+        return cpu_cache_num, gpu_cache_num
+    
+    def resize_cache_with_next_ratio(self):
+        new_gpu_cpu_cache_ratio = self.gpu_cpu_cache_ratio + 1
+        _, new_gpu_cache_num = self.determine_cache_num_with_ratio(self.gpu_cpu_cache_ratio)
+
+        free_mem, total_mem = torch.cuda.mem_get_info()
+        print(f"Free Memory: {free_mem / 1024 / 1024} MB")
+        print(f"Total Memory: {total_mem / 1024 / 1024} MB")
+        
+        for layer_num in range(self.num_attention_layers):
+            offloaded_num = int((layer_num + 1) / (self.gpu_cpu_cache_ratio + 1))
+            is_cpu = (layer_num + 1) % (self.gpu_cpu_cache_ratio + 1) == 0
+            cur_gpu_cache_index = layer_num-offloaded_num
+            
+            if (layer_num + 1) % (new_gpu_cpu_cache_ratio + 1) == 0:
+                if not is_cpu:    
+                    self.cpu_cache[layer_num][:, :self.self.gpu_cache[cur_gpu_cache_index].shape[1],:,:,:].copy_(self.gpu_cache[cur_gpu_cache_index], non_blocking=False) #TODO: copy only filled pages
+            else:
+                next_offloaded_num = int((layer_num + 1) / (self.gpu_cpu_cache_ratio + 1))
+                next_gpu_cache_index = layer_num - next_offloaded_num
+                
+        torch.cuda.synchronize()
+        
+        gpu_cache_to_delete = []
+                
+        for layer_num in range(self.num_attention_layers):
+            offloaded_num = int((layer_num + 1) / (self.gpu_cpu_cache_ratio + 1))
+            is_cpu = (layer_num + 1) % (self.gpu_cpu_cache_ratio + 1) == 0
+            cur_gpu_cache_index = layer_num-offloaded_num
+            
+            if (layer_num + 1) % (new_gpu_cpu_cache_ratio + 1) != 0:
+                next_offloaded_num = int((layer_num + 1) / (self.gpu_cpu_cache_ratio + 1))
+                next_gpu_cache_index = layer_num - next_offloaded_num
+                
+                if is_cpu:
+                    self.gpu_cache[next_gpu_cache_index].copy_(self.cpu_cache[layer_num][:, :self.self.gpu_cache[cur_gpu_cache_index].shape[1],:,:,:], non_blocking=False)
+                else:
+                    gpu_cache_to_delete.append(self.gpu_cache[next_gpu_cache_index])
+                    self.gpu_cache[next_gpu_cache_index] = self.gpu_cache[cur_gpu_cache_index]
+        
+        for cache in gpu_cache_to_delete:
+            del cache
+        
+        gc.collect()
+
+        torch.cuda.empty_cache()
+        
+        free_mem, total_mem = torch.cuda.mem_get_info()
+        print(f"Free Memory: {free_mem / 1024 / 1024} MB")
+        print(f"Total Memory: {total_mem / 1024 / 1024} MB")
+        
+        
+        new_shape = list(self.gpu_cache[0].shape)
+        new_shape[1] = int(new_shape[1] * (new_gpu_cpu_cache_ratio + 1) / (self.gpu_cpu_cache_ratio + 1)) - new_shape[1]
+        new_rows = torch.zeros(new_shape,
+                        dtype=self.dtype,
+                        pin_memory=self.gpu_cache[0].is_pinned(),
+                        device=self.gpu_cache[0].device)
+        
+        for layer_num in range(new_gpu_cache_num):
+            self.gpu_cache[layer_num] = torch.cat([self.gpu_cache[layer_num], new_rows], dim=1)
+        
+        self.gpu_cpu_cache_ratio = new_gpu_cpu_cache_ratio
+
+        return self.gpu_cpu_cache_ratio
     
     def _allocate_kv_cache(
         self,

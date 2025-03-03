@@ -217,8 +217,10 @@ class Worker(LocalOrDistributedWorkerBase):
             num_cpu_blocks = 0
         else:
             num_gpu_blocks = int(available_kv_cache_memory // cache_block_size)
-            num_cpu_blocks = int(self.cache_config.swap_space_bytes //
-                                 cache_block_size)
+            # num_gpu_blocks = 1008136
+            num_cpu_blocks = 20000
+            # num_cpu_blocks = int(self.cache_config.swap_space_bytes //
+            #                      cache_block_size)
         num_gpu_blocks = max(num_gpu_blocks, 0)
         num_cpu_blocks = max(num_cpu_blocks, 0)
 
@@ -494,10 +496,10 @@ def raise_if_cache_size_invalid(num_gpu_blocks, block_size, is_attention_free,
                          "Try increasing `gpu_memory_utilization` when "
                          "initializing the engine.")
     max_seq_len = block_size * num_gpu_blocks
-    if not is_attention_free and max_model_len > max_seq_len:
-        raise ValueError(
-            f"The model's max seq len ({max_model_len}) "
-            "is larger than the maximum number of tokens that can be "
-            f"stored in KV cache ({max_seq_len}). Try increasing "
-            "`gpu_memory_utilization` or decreasing `max_model_len` when "
-            "initializing the engine.")
+    # if not is_attention_free and max_model_len > max_seq_len:
+    #     raise ValueError(
+    #         f"The model's max seq len ({max_model_len}) "
+    #         "is larger than the maximum number of tokens that can be "
+    #         f"stored in KV cache ({max_seq_len}). Try increasing "
+    #         "`gpu_memory_utilization` or decreasing `max_model_len` when "
+    #         "initializing the engine.")

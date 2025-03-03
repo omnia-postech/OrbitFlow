@@ -1328,7 +1328,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                 dtype=self.model_config.dtype,
                 device=self.device)
 
-        self.execute_model(model_input, kv_caches, intermediate_tensors)
+        self.execute_model(model_input, [0,], kv_caches, kv_caches, 0, intermediate_tensors)
         torch.cuda.synchronize()
         return
 
@@ -1620,6 +1620,8 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
         self,
         model_input: ModelInputForGPUWithSamplingMetadata,
         kv_caches: List[torch.Tensor],
+        kv_caches_cpu: List[torch.Tensor],        
+        gpu_cpu_cache_ratio: int,
         intermediate_tensors: Optional[IntermediateTensors] = None,
         num_steps: int = 1,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
@@ -1692,6 +1694,8 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
                     input_ids=model_input.input_tokens,
                     positions=model_input.input_positions,
                     kv_caches=kv_caches,
+                    kv_caches_cpu=kv_caches_cpu,                    
+                    gpu_cpu_cache_ratio=gpu_cpu_cache_ratio,
                     attn_metadata=model_input.attn_metadata,
                     intermediate_tensors=intermediate_tensors,
                     **MultiModalKwargs.as_kwargs(multi_modal_kwargs,
