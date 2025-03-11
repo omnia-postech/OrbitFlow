@@ -217,8 +217,8 @@ class Worker(LocalOrDistributedWorkerBase):
             num_cpu_blocks = 0
         else:
             num_gpu_blocks = int(available_kv_cache_memory // cache_block_size)
-            # num_gpu_blocks = 1008136
-            num_cpu_blocks = 20000
+            # num_gpu_blocks = 10081
+            num_cpu_blocks = 10081
             # num_cpu_blocks = int(self.cache_config.swap_space_bytes //
             #                      cache_block_size)
         num_gpu_blocks = max(num_gpu_blocks, 0)

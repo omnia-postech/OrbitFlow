@@ -88,7 +88,7 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
 
         self.enable_caching = enable_caching
 
-        self.watermark_blocks = int(watermark * num_gpu_blocks)
+        self.watermark_blocks = int(watermark * num_gpu_blocks) #JS: may have to update
 
         self.block_allocator = CpuGpuBlockAllocator.create(
             allocator_type="prefix_caching" if enable_caching else "naive",
@@ -104,6 +104,11 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
             self.block_allocator, self.block_size, self.enable_caching)
         self._last_access_blocks_tracker = LastAccessBlocksTracker(
             self.block_allocator)
+        
+    def update_num_gpu_blocks(self, num_gpu_blocks: int) -> None:
+        if self.num_total_gpu_blocks != num_gpu_blocks:
+            self.num_total_gpu_blocks = num_gpu_blocks
+            self.block_allocator.update_gpu_allocator(num_gpu_blocks)
 
     def can_allocate(self,
                      seq_group: SequenceGroup,

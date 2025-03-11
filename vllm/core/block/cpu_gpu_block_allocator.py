@@ -94,6 +94,9 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
             cpu_block_allocator=cpu_allocator,
             gpu_block_allocator=gpu_allocator,
         )
+        
+    def update_gpu_allocator(self, num_blocks) -> None:
+        self._allocators[Device.GPU].update_num_blocks(num_blocks)
 
     def __init__(self, cpu_block_allocator: BlockAllocator,
                  gpu_block_allocator: BlockAllocator):
@@ -114,6 +117,9 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
         for _, allocator in self._allocators.items():
             for block_id in allocator.all_block_ids:
                 self._block_ids_to_allocator[block_id] = allocator
+
+    def change_cache_config(self, num_gpu_blocks) -> None:
+        pass
 
     def allocate_or_get_null_block(self) -> Block:
         if self._null_block is None:

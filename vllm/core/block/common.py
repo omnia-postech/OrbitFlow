@@ -37,6 +37,12 @@ class RefCounter(RefCounterProtocol):
         self._refcounts: Dict[BlockId,
                               RefCount] = {index: 0
                                            for index in deduped}
+    
+    def new_indices(self, all_block_indices: Iterable[BlockId]):
+        deduped = set(all_block_indices)
+        self._refcounts: Dict[BlockId,
+                              RefCount] = {index: 0 if index not in self._refcounts else self._refcounts[index]
+                                           for index in deduped}
 
     def incr(self, block_id: BlockId) -> RefCount:
         assert block_id in self._refcounts
@@ -106,6 +112,9 @@ class CopyOnWriteTracker:
 
     def __init__(self, refcounter: RefCounterProtocol):
         self._copy_on_writes: List[Tuple[BlockId, BlockId]] = []
+        self._refcounter = refcounter
+        
+    def update_refcounter(self, refcounter: RefCounterProtocol):
         self._refcounter = refcounter
 
     def is_appendable(self, block: Block) -> bool:
@@ -179,6 +188,25 @@ class BlockPool:
                                    allocator=self._allocator,
                                    block_id=None,
                                    extra_hash=None))
+    
+    def increase_pool_with_size(self, pool_size: int):
+        """Increase the pool size by the given amount
+        """
+        cur_pool_size = self._pool_size
+        new_pool_size = pool_size
+        self._pool_size = new_pool_size
+
+        self._free_ids += deque(range(cur_pool_size, new_pool_size))
+
+        for i in range(cur_pool_size, new_pool_size):
+            self._pool.append(
+                self._create_block(prev_block=None,
+                                   token_ids=[],
+                                   block_size=self._block_size,
+                                   allocator=self._allocator,
+                                   block_id=None,
+                                   extra_hash=None))
+        
 
     def increase_pool(self):
         """Doubles the internal pool size

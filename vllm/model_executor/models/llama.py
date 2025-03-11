@@ -393,7 +393,7 @@ class LlamaModel(nn.Module):
         positions: torch.Tensor,
         kv_caches: List[torch.Tensor],
         kv_caches_cpu: List[torch.Tensor],
-        gpu_cpu_cache_ratio: int,
+        gpu_cpu_cache_map: List[int],
         attn_metadata: AttentionMetadata,
         intermediate_tensors: Optional[IntermediateTensors],
         inputs_embeds: Optional[torch.Tensor] = None,
@@ -436,21 +436,20 @@ class LlamaModel(nn.Module):
             kv_cache = None
             kv_cache_write = None
             layer_num = i
-            offloaded_num = int((layer_num + 1) / (gpu_cpu_cache_ratio + 1))
 
             if positions_min == 0: 
                 print(f"Prefill detected at layer{i}. Skipping prefetch.")
-                if (layer_num + 1) % (gpu_cpu_cache_ratio + 1) == 0:
+                if gpu_cpu_cache_map[layer_num] == 0:
                     kv_cache = kv_caches[-1]
                     kv_cache_write = kv_caches_cpu[i]
                 else:
-                    kv_cache = kv_caches[layer_num-offloaded_num]
+                    kv_cache = kv_caches[layer_num]
                     kv_cache_write = kv_caches_cpu[i]
             else:
                 start_page = 0
                 end_page = recomputation_vars["start_recomp_page"]
                 
-                if (layer_num + 1) % (gpu_cpu_cache_ratio + 1) == 0:
+                if gpu_cpu_cache_map[layer_num] == 0:
                     # cached_all_token_ids_tensor = torch.tensor(cached_all_token_ids, device='cuda:0')
                     # total_tokens = cached_all_token_ids_tensor.shape[0]
 
@@ -470,8 +469,12 @@ class LlamaModel(nn.Module):
                     kv_cache_write = kv_caches_cpu[i]
                     if self._prefetch_stream is not None: 
                         torch.cuda.default_stream().wait_stream(self._prefetch_stream)
-                elif (layer_num + 1) % (gpu_cpu_cache_ratio + 1) == 1:
-                    prefetch_layer = layer_num + gpu_cpu_cache_ratio
+                elif layer_num > 0 and gpu_cpu_cache_map[layer_num - 1] == 0:
+                    prefetch_layer = 12345
+                    for i in range(layer_num, self.end_layer):
+                        if gpu_cpu_cache_map[i] == 0:
+                            prefetch_layer = i
+                            break
                     if prefetch_layer <= 31:
                         with torch.cuda.stream(self._prefetch_stream):
                             # Copy only needed pages in the cache (efficient)
@@ -486,12 +489,12 @@ class LlamaModel(nn.Module):
                                     kv_caches_cpu[prefetch_layer][1][start_page:end_page, :, :, :], non_blocking=True
                                 )
                     recomp_pos = positions
-                    kv_cache = kv_caches[layer_num-offloaded_num]
+                    kv_cache = kv_caches[layer_num]
                     kv_cache_write = kv_caches_cpu[i]
 
                 else:
                     recomp_pos = positions
-                    kv_cache = kv_caches[layer_num-offloaded_num]
+                    kv_cache = kv_caches[layer_num]
                     kv_cache_write = kv_caches_cpu[i]
 
             if i == 0: # first layer
@@ -732,12 +735,12 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         positions: torch.Tensor,
         kv_caches: List[torch.Tensor],
         kv_caches_cpu: List[torch.Tensor],        
-        gpu_cpu_cache_ratio: int,
+        gpu_cpu_cache_map: List[int],
         attn_metadata: AttentionMetadata,
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, IntermediateTensors]:
-        model_output = self.model(input_ids, positions, cached_all_token_ids, kv_caches, kv_caches_cpu, gpu_cpu_cache_ratio,
+        model_output = self.model(input_ids, positions, cached_all_token_ids, kv_caches, kv_caches_cpu, gpu_cpu_cache_map,
                                   attn_metadata, intermediate_tensors,
                                   inputs_embeds)
         return model_output

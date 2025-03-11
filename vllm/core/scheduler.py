@@ -335,6 +335,7 @@ class Scheduler:
         # simple and NOT fair. It can lead to starvation of some
         # LoRAs. This should be improved in the future.
         self.lora_config = lora_config
+        self.pipeline_parallel_size = pipeline_parallel_size
 
         version = "selfattn"
         if (self.scheduler_config.runner_type == "pooling"
@@ -431,6 +432,21 @@ class Scheduler:
     def num_decoding_tokens_per_seq(self) -> int:
         """The number of new tokens."""
         return 1
+    
+    def change_cache_config(self, cache_config: CacheConfig) -> None:
+        self.cache_config = cache_config
+        
+        #JS: only implemented gpu cache update
+
+        num_gpu_blocks = cache_config.num_gpu_blocks
+        if num_gpu_blocks:
+            num_gpu_blocks //= self.pipeline_parallel_size
+
+        num_cpu_blocks = cache_config.num_cpu_blocks
+        if num_cpu_blocks:
+            num_cpu_blocks //= self.pipeline_parallel_size
+
+        self.block_manager.update_num_gpu_blocks(num_gpu_blocks)
 
     def add_seq_group(self, seq_group: SequenceGroup) -> None:
         # Add sequence groups to the waiting queue.

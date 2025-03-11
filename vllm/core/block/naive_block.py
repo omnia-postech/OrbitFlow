@@ -59,6 +59,18 @@ class NaiveBlockAllocator(BlockAllocator):
             # which means that there is most likely a need to share
             # a block pool between allocators
             self._block_pool = block_pool
+    
+    def update_num_blocks(self, num_blocks: int):
+        new_blocks = max(self._all_block_indices) + 1
+        for i in range(new_blocks, num_blocks):
+            self._free_block_indices.append(i)
+        
+        self._all_block_indices = frozenset(range(num_blocks))
+        
+        self._refcounter.new_indices(self._all_block_indices)
+        
+        extra_factor = 4
+        self._block_pool.increase_pool_with_size(num_blocks * extra_factor)
 
     def allocate_immutable_block(self,
                                  prev_block: Optional[Block],

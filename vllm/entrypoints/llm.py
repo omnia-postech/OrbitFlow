@@ -161,7 +161,7 @@ class LLM:
         revision: Optional[str] = None,
         tokenizer_revision: Optional[str] = None,
         seed: int = 0,
-        gpu_memory_utilization: float = 0.9,
+        gpu_memory_utilization: float = 0.7,
         swap_space: float = 4,
         cpu_offload_gb: float = 0,
         enforce_eager: Optional[bool] = None,
@@ -1238,7 +1238,9 @@ class LLM:
         outputs: List[Union[RequestOutput, PoolingRequestOutput]] = []
         total_in_toks = 0
         total_out_toks = 0
+        step_count = 0
         while self.llm_engine.has_unfinished_requests():
+            step_count += 1
             step_outputs = self.llm_engine.step()
             for output in step_outputs:
                 if output.finished:
