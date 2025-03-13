@@ -62,7 +62,7 @@ class CacheEngine:
                                              self.block_size,
                                              model_config.is_attention_free)
 
-        self.gpu_cpu_cache_map = [1,] * 32
+        self.gpu_cpu_cache_map = [1,] * self.num_attention_layers
         self.cpu_cache_num, self.gpu_cache_num = self.determine_cache_num_with_map(self.gpu_cpu_cache_map)
         # self.gpu_cache_num = 32
         
@@ -143,7 +143,7 @@ class CacheEngine:
         total_gpu_bytes += byte_size
 
         total_gpu_bytes = total_gpu_bytes / 1024 / 1024
-        print(f"GPU cache allocated {total_gpu_bytes} MB -> per layer {byte_size/1024/1024} MB")
+        print(f"GPU cache allocated {total_gpu_bytes} MB -> per layer {2 * new_layer_kv_cache.numel()/1024/1024} MB")
         return kv_cache
     
     def _allocate_kv_cache_cpu(
@@ -262,7 +262,7 @@ class CacheEngine:
             
             if new_gpu_cpu_cache_map[layer_num] == 0:
                 if self.gpu_cpu_cache_map[layer_num] == 1:
-                    self.cpu_cache[layer_num][:, :self.kv_cache_shape[1],:,:,:].copy_(self.gpu_cache[layer_num], non_blocking=False)
+                    self.cpu_cache[layer_num][:, :self.num_gpu_blocks,:,:,:].copy_(self.gpu_cache[layer_num], non_blocking=False)
                     gpu_cache_to_delete.append(self.gpu_cache[layer_num])
                     self.gpu_cache[layer_num] = None
 
@@ -290,7 +290,7 @@ class CacheEngine:
         #             self.gpu_cache[next_gpu_cache_index] = self.gpu_cache[cur_gpu_cache_index]
             if new_gpu_cpu_cache_map[layer_num] == 1:
                 if self.gpu_cpu_cache_map[layer_num] == 0:
-                    self.gpu_cache[layer_num] = self.cpu_cache[layer_num][:, :self.kv_cache_shape[1],:,:,:].to(self.device_config.device_type)
+                    self.gpu_cache[layer_num] = self.cpu_cache[layer_num][:, :self.num_gpu_blocks,:,:,:].to(self.device_config.device_type)
         
         
         free_mem, total_mem = torch.cuda.mem_get_info()
@@ -316,15 +316,15 @@ class CacheEngine:
             if new_gpu_cpu_cache_map[layer_num] == 1:
                 self.gpu_cache[layer_num] = torch.cat([self.gpu_cache[layer_num], new_rows], dim=1)
         
-        del new_rows
         
         if self.gpu_cache_num == self.num_attention_layers and new_gpu_cache_num < self.num_attention_layers:
-            new_kv_cache_shape = list(self.attn_backend.get_kv_cache_shape(
-                new_num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size))
-            self.gpu_cache[-1] = torch.zeros(new_kv_cache_shape,
+            self.gpu_cache[-1] = torch.zeros(kv_cache_shape,
                         dtype=self.dtype,
                         # pin_memory=pin_memory,
                         device=self.device_config.device_type)
+        if self.gpu_cache[-1] != None:
+            self.gpu_cache[-1] = torch.cat([self.gpu_cache[-1], new_rows], dim=1)
+        del new_rows
 
         self.num_gpu_blocks = new_num_gpu_blocks
         self.cache_config.num_gpu_blocks = int(self.cache_config.num_gpu_blocks * self.gpu_cache_num / new_gpu_cache_num)

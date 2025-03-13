@@ -59,10 +59,10 @@ def main(args, sample_input):
         print(f"Generated token length: {len(output.outputs[0].token_ids)}")
 
 if __name__ == "__main__":
-    parser = FlexibleArgumentParser(description="offloading test.")    
+    parser = FlexibleArgumentParser(description="offloading test.")
     parser.add_argument("--max-tokens",
                         type=int,
-                        default=20000,
+                        default=2000,
                         help="Output length for each request. Overrides the "
                         "output length from the dataset.")
     parser.add_argument('--input', default='../samples/2k.md', type=str)
@@ -88,6 +88,8 @@ if __name__ == "__main__":
     with open(args.input, 'r') as f:
             document = f.read()
 
-    sample_input = """A A A A A A A A A A A A A A A A 
-    """ * 3050 + """List 1000 interesting facts about the universe."""
+    # sample_input = """A A A A A A A A A A A A A A A A 
+    # """ * 3050 + """List 1000 interesting facts about the universe."""
+    # sample_input = """Hello World!"""
+    sample_input = """List 10 interesting facts about the universe shortly."""
     main(args, sample_input)

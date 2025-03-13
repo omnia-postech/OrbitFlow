@@ -833,7 +833,7 @@ class FlashAttentionImpl(AttentionImpl):
                         out=recomp_output.unsqueeze(0),
                     )
             
-            print(f"decoding interval: {time.time() - start}")
+            # print(f"decoding interval: {time.time() - start}")
         return output
 
 

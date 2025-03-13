@@ -161,7 +161,7 @@ class LLM:
         revision: Optional[str] = None,
         tokenizer_revision: Optional[str] = None,
         seed: int = 0,
-        gpu_memory_utilization: float = 0.7,
+        gpu_memory_utilization: float = 0.56,
         swap_space: float = 4,
         cpu_offload_gb: float = 0,
         enforce_eager: Optional[bool] = None,

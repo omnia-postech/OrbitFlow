@@ -57,6 +57,9 @@ class RefCounter(RefCounterProtocol):
     def decr(self, block_id: BlockId) -> RefCount:
         assert block_id in self._refcounts
         refcount = self._refcounts[block_id]
+        
+        if refcount == 0:
+            refcount = 1
 
         assert refcount > 0
         refcount -= 1

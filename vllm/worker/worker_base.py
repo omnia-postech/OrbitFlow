@@ -344,7 +344,9 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         cached_all_token_ids = execute_model_req.seq_group_metadata_list[0].seq_data[0]._cached_all_token_ids
         kv_caches=self.kv_cache[worker_input.virtual_engine]
         if model_input.attn_metadata.block_tables[0].shape[0] >= kv_caches[0].shape[1] - 1:
-            updated_num_gpu_cache = self.cache_engine[worker_input.virtual_engine].resize_cache_with_next_ratio()
+            prev_cache_size = kv_caches[0].shape[1]
+            while prev_cache_size == kv_caches[0].shape[1]:
+                updated_num_gpu_cache = self.cache_engine[worker_input.virtual_engine].resize_cache_with_next_ratio()
             self.cache_engine[worker_input.virtual_engine].cache_config
             print(f"cache ratio update {updated_num_gpu_cache}")
         output = self.model_runner.execute_model(
