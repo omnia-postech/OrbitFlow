@@ -77,6 +77,8 @@ class CacheEngine:
         self.gpu_cache = self._allocate_kv_cache(
             self.num_gpu_blocks, self.device_config.device_type)
         self.cpu_cache = self._allocate_kv_cache_cpu(self.num_cpu_blocks, "cpu")
+        
+        self.is_monolithic_distn = False
 
         free_mem, total_mem = torch.cuda.mem_get_info()
         print(f"Free Memory: {free_mem / 1024 / 1024} MB")
@@ -194,6 +196,38 @@ class CacheEngine:
 
         return cpu_cache_num, gpu_cache_num
     
+    def next_map_mono(self, gpu_cpu_cache_map):
+        offloaded_num = self.num_attention_layers - self.gpu_cache_num
+        new_gpu_cpu_cache_map = gpu_cpu_cache_map.copy()
+        if offloaded_num == 0:
+            new_gpu_cpu_cache_map[self.num_attention_layers-1] = 0
+            new_gpu_cpu_cache_map[int(self.num_attention_layers / 2) - 1] = 0
+        else:
+            current_ratio = 0
+            for i in range(self.num_attention_layers):
+                if new_gpu_cpu_cache_map[i] == 0:
+                    current_ratio = i
+                    break
+
+            next_ratio = current_ratio - 1
+            print("next ratio: ", next_ratio)
+
+            while next_ratio > 0:
+                if self.num_attention_layers // (current_ratio + 1) != self.num_attention_layers // (next_ratio + 1):
+                    break
+                next_ratio -= 1
+
+            target_map = [1,] * self.num_attention_layers
+            print("target map: ", target_map)
+
+            for i in range(self.num_attention_layers):
+                if (i + 1) % (next_ratio + 1) == 0:
+                    target_map[i] = 0
+            
+            print("new map: ", target_map)
+
+        return target_map
+    
     def next_map(self, gpu_cpu_cache_map):
         offloaded_num = self.num_attention_layers - self.gpu_cache_num
         new_gpu_cpu_cache_map = gpu_cpu_cache_map.copy()
@@ -240,7 +274,10 @@ class CacheEngine:
     
     def resize_cache_with_next_ratio(self):
         start = time.time()
-        new_gpu_cpu_cache_map = self.next_map(self.gpu_cpu_cache_map)
+        if self.is_monolithic_distn:
+            new_gpu_cpu_cache_map = self.next_map_mono(self.gpu_cpu_cache_map)
+        else:
+            new_gpu_cpu_cache_map = self.next_map(self.gpu_cpu_cache_map)
         _, new_gpu_cache_num = self.determine_cache_num_with_map(new_gpu_cpu_cache_map)
         
 
