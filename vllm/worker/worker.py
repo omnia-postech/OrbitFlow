@@ -29,6 +29,10 @@ from vllm.worker.pooling_model_runner import PoolingModelRunner
 from vllm.worker.worker_base import (LocalOrDistributedWorkerBase, WorkerBase,
                                      WorkerInput)
 
+import psutil
+
+import time
+
 logger = init_logger(__name__)
 
 

@@ -62,7 +62,7 @@ if __name__ == "__main__":
     parser = FlexibleArgumentParser(description="offloading test.")
     parser.add_argument("--max-tokens",
                         type=int,
-                        default=2000,
+                        default=128000,
                         help="Output length for each request. Overrides the "
                         "output length from the dataset.")
     parser.add_argument('--input', default='../samples/2k.md', type=str)

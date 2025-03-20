@@ -468,7 +468,10 @@ class LlamaModel(nn.Module):
                     kv_cache = kv_caches[-1]
                     kv_cache_write = kv_caches_cpu[i]
                     if self._prefetch_stream is not None: 
+                        start= time.perf_counter()
                         torch.cuda.default_stream().wait_stream(self._prefetch_stream)
+                        end_time = time.perf_counter()
+                        print(f"wait stream time {end_time - start} at {end_time}")
                 elif layer_num > 0 and gpu_cpu_cache_map[layer_num - 1] == 0:
                     prefetch_layer = 12345
                     for i in range(layer_num, self.end_layer):
@@ -541,6 +544,11 @@ class LlamaModel(nn.Module):
             })
 
         hidden_states, _ = self.norm(hidden_states, residual)
+        if attn_metadata.decode_metadata:
+            hidden_states = hidden_states[-1:]
+            
+        if attn_metadata.num_prefills > 0:
+            print(f"prefill ends at:{time.time()}")
         return hidden_states
 
     def load_weights(self, weights: Iterable[Tuple[str,

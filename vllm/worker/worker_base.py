@@ -348,7 +348,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             while prev_cache_size == kv_caches[0].shape[1]:
                 updated_num_gpu_cache = self.cache_engine[worker_input.virtual_engine].resize_cache_with_next_ratio()
             self.cache_engine[worker_input.virtual_engine].cache_config
-            print(f"cache ratio update {updated_num_gpu_cache}")
+            print(f"cache ratio update {updated_num_gpu_cache} at {time.time()}")
         output = self.model_runner.execute_model(
             model_input=model_input,
             kv_caches=self.kv_cache[worker_input.virtual_engine]

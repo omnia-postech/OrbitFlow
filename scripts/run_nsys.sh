@@ -3,9 +3,9 @@
 sudo /usr/local/cuda-12.1/bin/nsys profile --stats=true \
     --trace cuda,cudnn,nvtx \
     --force-overwrite=true \
-    --output nsys/test_128k \
+    --output nsys/ap_expr_0.9 \
     ./run_offline_inference_offloading.sh \
-    > output/test_128k.txt 2>&1
+    > output/ap_expr_0.9.txt 2>&1
 
 # length test
 # Define the input lengths to test
