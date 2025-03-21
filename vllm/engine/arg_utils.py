@@ -197,6 +197,10 @@ class EngineArgs:
     kv_transfer_config: Optional[KVTransferConfig] = None
 
     generation_config: Optional[str] = None
+    
+    # KV offload config
+    
+    is_monolithic_distn: bool = False
 
     def __post_init__(self):
         if not self.tokenizer:
@@ -954,6 +958,15 @@ class EngineArgs:
             "If set to 'auto', the generation config will be automatically "
             "loaded from model. If set to a folder path, the generation config "
             "will be loaded from the specified folder path.")
+        
+        
+        # SR config
+        parser.add_argument(
+            "--is-monolithic-distn",
+            type=bool,
+            default=False,
+            help="SR configuration: monolithic distn."
+        )
 
         return parser
 
@@ -1059,6 +1072,7 @@ class EngineArgs:
             sliding_window=model_config.get_sliding_window(),
             enable_prefix_caching=self.enable_prefix_caching,
             cpu_offload_gb=self.cpu_offload_gb,
+            is_monolithic_distn=self.is_monolithic_distn,
         )
         parallel_config = ParallelConfig(
             pipeline_parallel_size=self.pipeline_parallel_size,

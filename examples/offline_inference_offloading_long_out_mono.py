@@ -42,7 +42,7 @@ def main(args, sample_input):
     sampling_params = SamplingParams(temperature=0.8, top_p=0.95, max_tokens=args.max_tokens)
 
     # Create an LLM.
-    llm = LLM(model=model_id, enforce_eager=True, enable_chunked_prefill=False, max_model_len=109902+256, is_monolithic_distn=False, gpu_memory_utilization=0.7) # max_model_len = len(prompt) + len(output)
+    llm = LLM(model=model_id, enforce_eager=True, enable_chunked_prefill=False, max_model_len=109902+256, is_monolithic_distn=True, gpu_memory_utilization=0.7) # max_model_len = len(prompt) + len(output)
     # Generate texts from the prompts. The output is a list of RequestOutput objects
     # that contain the prompt, generated text, and other information.
     start_time = time.time()

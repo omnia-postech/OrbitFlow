@@ -471,7 +471,7 @@ class LlamaModel(nn.Module):
                         start= time.perf_counter()
                         torch.cuda.default_stream().wait_stream(self._prefetch_stream)
                         end_time = time.perf_counter()
-                        print(f"wait stream time {end_time - start} at {end_time}")
+                        # print(f"wait stream time {end_time - start} at {end_time}")
                 elif layer_num > 0 and gpu_cpu_cache_map[layer_num - 1] == 0:
                     prefetch_layer = 12345
                     for i in range(layer_num, self.end_layer):

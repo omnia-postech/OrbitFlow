@@ -78,29 +78,11 @@ class CacheEngine:
             self.num_gpu_blocks, self.device_config.device_type)
         self.cpu_cache = self._allocate_kv_cache_cpu(self.num_cpu_blocks, "cpu")
         
-        self.is_monolithic_distn = False
+        self.is_monolithic_distn = cache_config.is_monolithic_distn
 
         free_mem, total_mem = torch.cuda.mem_get_info()
         print(f"Free Memory: {free_mem / 1024 / 1024} MB")
         print(f"Total Memory: {total_mem / 1024 / 1024} MB")
-        
-    def calculate_cpu_gpu_max_ratio(self, num_blocks: int, device):
-        kv_cache_shape = self.attn_backend.get_kv_cache_shape(
-            num_blocks, self.block_size, self.num_kv_heads, self.head_size)
-
-        test_kv_cache = torch.zeros(kv_cache_shape,
-                        dtype=self.dtype,
-                        # pin_memory=pin_memory,
-                        device="cpu")
-
-        kv_size = 2 * test_kv_cache.numel()
-
-        free_mem, total_mem = torch.cuda.mem_get_info()
-        
-        (free_mem / kv_size)
-        
-        return 
-
 
     def _allocate_kv_cache_gpu(
         self,
@@ -225,8 +207,10 @@ class CacheEngine:
                     target_map[i] = 0
             
             print("new map: ", target_map)
+            
+            new_gpu_cpu_cache_map = target_map
 
-        return target_map
+        return new_gpu_cpu_cache_map
     
     def next_map(self, gpu_cpu_cache_map):
         offloaded_num = self.num_attention_layers - self.gpu_cache_num
