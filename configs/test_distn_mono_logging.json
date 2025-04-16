@@ -13,7 +13,7 @@
         "class": "logging.FileHandler",
         "formatter": "vllm",
         "level": "INFO",
-        "filename": "/home/xinyuema/vllm/outputs/test_distn_mono/vllm_msg.log"
+        "filename": "/home/heelim/vllm/outputs/test_distn_mono/vllm_msg.log"
       }
     },
     "loggers": {

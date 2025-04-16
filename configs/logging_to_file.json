@@ -13,7 +13,7 @@
         "class": "logging.FileHandler",
         "formatter": "vllm",
         "level": "INFO",
-        "filename": "/home/xinyuema/vllm/scripts/test.log"
+        "filename": "/home/heelim/vllm/scripts/test.log"
       }
     },
     "loggers": {
