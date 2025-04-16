@@ -228,23 +228,23 @@ class Worker(LocalOrDistributedWorkerBase):
         num_gpu_blocks = max(num_gpu_blocks, 0)
         num_cpu_blocks = max(num_cpu_blocks, 0)
 
-        msg = (f"Memory profiling takes {result.profile_time:.2f} seconds\n"
-               "the current vLLM instance can use "
-               "total_gpu_memory "
-               f"({(total_gpu_memory / GiB_bytes):.2f}GiB)"
-               " x gpu_memory_utilization "
-               f"({self.cache_config.gpu_memory_utilization:.2f})"
-               f" = {(memory_for_current_instance / GiB_bytes):.2f}GiB\n"
-               "model weights take "
-               f"{(result.weights_memory_in_bytes / GiB_bytes):.2f}GiB;"
-               " non_torch_memory takes "
-               f"{(result.non_torch_increase_in_bytes / GiB_bytes):.2f}GiB;"
-               " PyTorch activation peak memory takes "
-               f"{(result.torch_peak_increase_in_bytes / GiB_bytes):.2f}GiB;"
-               " the rest of the memory reserved for KV Cache is "
-               f"{(available_kv_cache_memory / GiB_bytes):.2f}GiB.")
+        # msg = (f"Memory profiling takes {result.profile_time:.2f} seconds\n"
+        #        "the current vLLM instance can use "
+        #        "total_gpu_memory "
+        #        f"({(total_gpu_memory / GiB_bytes):.2f}GiB)"
+        #        " x gpu_memory_utilization "
+        #        f"({self.cache_config.gpu_memory_utilization:.2f})"
+        #        f" = {(memory_for_current_instance / GiB_bytes):.2f}GiB\n"
+        #        "model weights take "
+        #        f"{(result.weights_memory_in_bytes / GiB_bytes):.2f}GiB;"
+        #        " non_torch_memory takes "
+        #        f"{(result.non_torch_increase_in_bytes / GiB_bytes):.2f}GiB;"
+        #        " PyTorch activation peak memory takes "
+        #        f"{(result.torch_peak_increase_in_bytes / GiB_bytes):.2f}GiB;"
+        #        " the rest of the memory reserved for KV Cache is "
+        #        f"{(available_kv_cache_memory / GiB_bytes):.2f}GiB.")
 
-        logger.info(msg)
+        # logger.info(msg)
 
         # Final cleanup
         if self.model_runner.lora_manager:
@@ -291,6 +291,10 @@ class Worker(LocalOrDistributedWorkerBase):
             self.cache_engine[ve].gpu_cache
             for ve in range(self.parallel_config.pipeline_parallel_size)
         ]
+        self.cpu_cache = [
+            self.cache_engine[ve].cpu_cache
+            for ve in range(self.parallel_config.pipeline_parallel_size)
+        ]
 
     def _warm_up_model(self) -> None:
         if not self.model_config.enforce_eager:
@@ -306,6 +310,11 @@ class Worker(LocalOrDistributedWorkerBase):
     @property
     def kv_cache(self) -> Optional[List[List[torch.Tensor]]]:
         return self.gpu_cache
+    
+    @property
+    def kv_cache_cpu(self) -> Optional[List[List[torch.Tensor]]]:
+        return self.cpu_cache
+    
 
     @torch.inference_mode()
     def prepare_worker_input(

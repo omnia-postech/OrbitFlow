@@ -636,6 +636,8 @@ class FlashAttentionImpl(AttentionImpl):
         key: torch.Tensor,
         value: torch.Tensor,
         kv_cache: torch.Tensor,
+        kv_cache_cpu: torch.Tensor,
+        layer: int,
         attn_metadata: FlashAttentionMetadata,
         k_scale: float = 1.0,
         v_scale: float = 1.0,
@@ -677,9 +679,11 @@ class FlashAttentionImpl(AttentionImpl):
         alibi_slopes: Optional[torch.Tensor] = self.alibi_slopes
         logits_soft_cap: Optional[float] = self.logits_soft_cap
 
+        # NOTE(HONG): updating KV cache(GPU) here -> implement copying(write) KV cache to CPU cache.
         if kv_cache.numel() > 0:
             key_cache = kv_cache[0]
             value_cache = kv_cache[1]
+
             # We skip updating the KV cache under two conditions:
             #  a. When the Attention Type is ENCODER. In this phase, we compute
             #     only the encoder attention without updating the cache.
@@ -700,6 +704,7 @@ class FlashAttentionImpl(AttentionImpl):
                 # If kv_cache is not provided, the new key and value tensors are
                 # not cached. This happens during the initial memory
                 # profiling run.
+                
                 torch.ops._C_cache_ops.reshape_and_cache_flash(
                     key,
                     value,
@@ -710,6 +715,37 @@ class FlashAttentionImpl(AttentionImpl):
                     k_scale,
                     v_scale,
                 )
+                # TODO(HONG): Copy only blocks that are updated with newly generated tokens.                
+                if layer != 0:
+                    # print(f"Writing new KV to CPU at layer{layer}")
+                    # block_mapping = torch.tensor([[i, i] for i in range(len(key_cache))],
+                    #             dtype=torch.bfloat16, device='cpu')
+                    with nvtx.annotate(f"Key Value Writing{layer}"):
+                        updated_slot_mapping_cpu = updated_slot_mapping.flatten().to('cpu')
+                        key_cpu = key.to('cpu')
+                        value_cpu = value.to('cpu')
+
+                        PAGE_SIZE = 16
+                        page_idx = updated_slot_mapping_cpu // PAGE_SIZE      # 각 토큰이 들어갈 페이지 번호
+                        offset_idx = updated_slot_mapping_cpu % PAGE_SIZE    # 해당 페이지 내부에서의 위치(0~15)
+
+                        num_tokens = updated_slot_mapping_cpu.shape[0]
+                        # num_tokens = updated_slot_mapping_cpu.size(0)
+                        
+                        for i in range(num_tokens):
+                            p = page_idx[i].item()
+                            o = offset_idx[i].item()
+                            # copy each token slice                            
+                            kv_cache_cpu[0][p, o, :, :] = key_cpu[i, :, :] # key 
+                            kv_cache_cpu[1][p, o, :, :] = value_cpu[i, :, :] # value
+                        
+                        # method 2
+                        # # (A) Expand block_idx, offset_idx to match [num_tokens, 1, 1]
+                        # page_idx_exp = page_idx[:, None, None]   # [num_tokens,1,1]
+                        # offset_idx_exp = offset_idx[:, None, None] # [num_tokens,1,1]
+                        # # (B) Expand key_states shape to [num_tokens, num_kv_heads, head_size]                                        
+                        # kv_cache_cpu[0][page_idx_exp, offset_idx_exp] = key_cpu
+                        # kv_cache_cpu[1][page_idx_exp, offset_idx_exp] = value_cpu            
 
         (num_prefill_query_tokens, num_prefill_kv_tokens,
         num_decode_query_tokens) = \
@@ -791,22 +827,23 @@ class FlashAttentionImpl(AttentionImpl):
                 assert attn_type == AttentionType.DECODER, (
                     "Only decoder-only models support max_decode_query_len > 1"
                 )
-                flash_attn_varlen_func(
-                    q=decode_query,
-                    k=key_cache,
-                    v=value_cache,
-                    cu_seqlens_q=decode_meta.query_start_loc,
-                    max_seqlen_q=decode_meta.max_decode_query_len,
-                    cu_seqlens_k=decode_meta.seq_start_loc,
-                    max_seqlen_k=decode_meta.max_decode_seq_len,
-                    softmax_scale=softmax_scale,
-                    causal=True,
-                    window_size=window_size,
-                    alibi_slopes=alibi_slopes,
-                    softcap=logits_soft_cap,
-                    block_table=decode_meta.block_tables,
-                    out=decode_output,
-                )
+                with nvtx.annotate(f"Decoding FA(1) for layer{layer}"):
+                    flash_attn_varlen_func(
+                        q=decode_query,
+                        k=key_cache,
+                        v=value_cache,
+                        cu_seqlens_q=decode_meta.query_start_loc,
+                        max_seqlen_q=decode_meta.max_decode_query_len,
+                        cu_seqlens_k=decode_meta.seq_start_loc,
+                        max_seqlen_k=decode_meta.max_decode_seq_len,
+                        softmax_scale=softmax_scale,
+                        causal=True,
+                        window_size=window_size,
+                        alibi_slopes=alibi_slopes,
+                        softcap=logits_soft_cap,
+                        block_table=decode_meta.block_tables,
+                        out=decode_output,
+                    )
             else:
                 # Use flash_attn_with_kvcache for normal decoding.
                 (

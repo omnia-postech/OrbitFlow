@@ -126,7 +126,10 @@ class Attention(nn.Module):
         key: torch.Tensor,
         value: torch.Tensor,
         kv_cache: torch.Tensor,
+        kv_cache_cpu: torch.Tensor,
+        layer: int,
         attn_metadata: AttentionMetadata,
+        is_recomp: bool = False,
         attn_type: str = AttentionType.DECODER,
     ) -> torch.Tensor:
 
@@ -155,7 +158,7 @@ class Attention(nn.Module):
             if value is not None:
                 value = value.view(-1, self.num_kv_heads, self.head_size)
             torch.ops.vllm.unified_attention_with_output(
-                query, key, value, output, kv_cache, attn_type,
+                query, key, value, output, kv_cache, kv_cache_cpu, layer, attn_type,
                 self.layer_name)
             return output.view(-1, hidden_size)
         else:
@@ -282,6 +285,8 @@ def unified_attention_with_output(
     value: torch.Tensor,
     output: torch.Tensor,
     kv_cache: torch.Tensor,
+    kv_cache_cpu: torch.Tensor,
+    layer: int,
     attn_type: str,
     layer_name: str,
 ) -> None:
@@ -292,6 +297,8 @@ def unified_attention_with_output(
                       key,
                       value,
                       kv_cache,
+                      kv_cache_cpu,
+                      layer,
                       attn_metadata,
                       self._k_scale,
                       self._v_scale,

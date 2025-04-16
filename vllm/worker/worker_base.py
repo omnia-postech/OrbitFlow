@@ -351,6 +351,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             print(f"cache ratio update {updated_num_gpu_cache} at {time.time()}")
         output = self.model_runner.execute_model(
             model_input=model_input,
+            cached_all_token_ids=cached_all_token_ids,
             kv_caches=self.kv_cache[worker_input.virtual_engine]
             if self.kv_cache is not None else None,
             kv_caches_cpu=self.kv_cache_cpu[worker_input.virtual_engine]

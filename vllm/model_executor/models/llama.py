@@ -200,13 +200,20 @@ class LlamaAttention(nn.Module):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
         kv_cache: torch.Tensor,
+        kv_cache_cpu: torch.Tensor,
+        layer: int,
         attn_metadata: AttentionMetadata,
+        is_recomp: Optional[bool] = False,
     ) -> torch.Tensor:
-        qkv, _ = self.qkv_proj(hidden_states)
+        with nvtx.annotate(f"qkv_proj[{layer}]"):
+            qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
-        q, k = self.rotary_emb(positions, q, k)
-        attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
-        output, _ = self.o_proj(attn_output)
+        with nvtx.annotate(f"rotary_emb[{layer}]"):
+            q, k = self.rotary_emb(positions, q, k)
+        with nvtx.annotate(f"attn[{layer}]"):
+            attn_output = self.attn(q, k, v, kv_cache, kv_cache_cpu, layer, attn_metadata, is_recomp)
+        with nvtx.annotate(f"o_proj[{layer}]"):
+            output, _ = self.o_proj(attn_output)
         return output
 
 
@@ -265,8 +272,11 @@ class LlamaDecoderLayer(nn.Module):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
         kv_cache: torch.Tensor,
+        kv_cache_cpu: torch.Tensor,
+        layer: int, 
         attn_metadata: AttentionMetadata,
         residual: Optional[torch.Tensor],
+        is_recomp: Optional[bool] = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # Self Attention
         if residual is None:
@@ -391,6 +401,7 @@ class LlamaModel(nn.Module):
         self,
         input_ids: Optional[torch.Tensor],
         positions: torch.Tensor,
+        cached_all_token_ids: List[int],
         kv_caches: List[torch.Tensor],
         kv_caches_cpu: List[torch.Tensor],
         gpu_cpu_cache_map: List[int],
@@ -741,6 +752,7 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
+        cached_all_token_ids: List[int],
         kv_caches: List[torch.Tensor],
         kv_caches_cpu: List[torch.Tensor],        
         gpu_cpu_cache_map: List[int],

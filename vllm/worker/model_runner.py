@@ -1619,6 +1619,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
     def execute_model(
         self,
         model_input: ModelInputForGPUWithSamplingMetadata,
+        cached_all_token_ids: List[int],
         kv_caches: List[torch.Tensor],
         kv_caches_cpu: List[torch.Tensor],        
         gpu_cpu_cache_map: List[int],
@@ -1693,6 +1694,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
                 hidden_or_intermediate_states = model_executable(
                     input_ids=model_input.input_tokens,
                     positions=model_input.input_positions,
+                    cached_all_token_ids = cached_all_token_ids,
                     kv_caches=kv_caches,
                     kv_caches_cpu=kv_caches_cpu,                    
                     gpu_cpu_cache_map=gpu_cpu_cache_map,
