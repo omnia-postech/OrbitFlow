@@ -10,6 +10,8 @@ from vllm.multimodal import MultiModalKwargs
 from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.v1.sample.metadata import SamplingMetadata
 
+from vllm.logger import init_logger
+logger = init_logger(__name__)
 if TYPE_CHECKING:
     from vllm.multimodal.inputs import PlaceholderRange
 

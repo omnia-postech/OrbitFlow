@@ -1615,7 +1615,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
                                    virtual_engine=virtual_engine)
 
     @torch.inference_mode()
-    @dump_input_when_exception(exclude_args=[0], exclude_kwargs=["self"])
+    # @dump_input_when_exception(exclude_args=[0], exclude_kwargs=["self"]) # Xinyue temporarily disabled input dump 
     def execute_model(
         self,
         model_input: ModelInputForGPUWithSamplingMetadata,
@@ -1648,6 +1648,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
         assert model_input.attn_metadata is not None
         prefill_meta = model_input.attn_metadata.prefill_metadata
         decode_meta = model_input.attn_metadata.decode_metadata
+        
         # TODO(andoorve): We can remove this once all
         # virtual engines share the same kv cache.
         virtual_engine = model_input.virtual_engine
@@ -1704,6 +1705,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
                                                  device=self.device),
                     **seqlen_agnostic_kwargs)
 
+        # DEBUG XINYUE MA 
         if (self.observability_config is not None
                 and self.observability_config.collect_model_forward_time):
             model_forward_end.record()

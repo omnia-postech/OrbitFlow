@@ -199,7 +199,8 @@ class EngineArgs:
     generation_config: Optional[str] = None
     
     # KV offload config
-    
+    prefetch_mode: Optional[str] = None
+    prefetch_distance: Optional[int] = None
     is_monolithic_distn: bool = False
 
     def __post_init__(self):
@@ -1073,6 +1074,8 @@ class EngineArgs:
             enable_prefix_caching=self.enable_prefix_caching,
             cpu_offload_gb=self.cpu_offload_gb,
             is_monolithic_distn=self.is_monolithic_distn,
+            prefetch_mode=self.prefetch_mode,
+            prefetch_distance=self.prefetch_distance,
         )
         parallel_config = ParallelConfig(
             pipeline_parallel_size=self.pipeline_parallel_size,

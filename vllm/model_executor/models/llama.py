@@ -360,42 +360,124 @@ class LlamaModel(nn.Module):
     
     def _initialize_recomputation(
         self,
-        cached_all_token_ids: List[int],
+        cached_all_token_ids: Dict[str, Any],
         attn_metadata: AttentionMetadata,
-        recomp_ratio: int
-    ):        
-
-        cached_all_token_ids_tensor = torch.tensor(cached_all_token_ids, device='cuda:0')
-        total_tokens = cached_all_token_ids_tensor.shape[0]
-
-        num_pages = len(attn_metadata.block_tables[0])
-        num_recomp_pages = int(num_pages * recomp_ratio)
-        # num_recomp_pages = 60
-        # print(f"total pages = {num_pages} num_recomp_pages = {num_recomp_pages}")
-
-        start_recomp_page = num_pages - num_recomp_pages
-        start_recomp_token = start_recomp_page * self.PAGE_SIZE if start_recomp_page *self.PAGE_SIZE < total_tokens - 1 else total_tokens - 1
-        end_recomp_position = total_tokens - 1
-
-        recomp_input_ids = cached_all_token_ids_tensor[start_recomp_token:].contiguous()
-        recomp_position = torch.arange(start_recomp_token, end_recomp_position + 1, device='cuda:0').contiguous()
-        recomp_hidden_states = self.get_input_embeddings(recomp_input_ids)
-
-        attn_metadata.slot_mapping = recomp_position
-        recomp_size = end_recomp_position - start_recomp_token + 1
-        # attn_metadata.decode_metadata.block_tables = attn_metadata.decode_metadata.block_tables[:, :start_recomp_page].contiguous()
-        # attn_metadata.decode_metadata.query_start_loc[1] = recomp_size
-        # attn_metadata.decode_metadata.max_decode_query_len = recomp_size
-        # attn_metadata.decode_metadata.seq_start_loc[1] -= recomp_size
-        # attn_metadata.decode_metadata.max_decode_seq_len -= recomp_size
-        # attn_metadata.decode_metadata.seq_lens_tensor[0] = start_recomp_token - 1
+        recomp_ratio: int, 
+        policy: str = "fair",
+    ): 
+        """ 
+            Prepare recomputation data for *all* (request_id, seq_id) pairs, 
+            Args:
+                cached_all_token_ids: {
+                'token_ids': List[int],                 # The flat list of all token IDs
+                'positions': Tensor of shape [N],       # The stored position IDs for each token. If pruning is used,
+                                                        # position ids could be any subset of the original token ids [0, ..., N]
+                'mappings': Dict[(req, seq), (st, en)]  # Where in the list each pair's tokens live
+            }
+                attn_metadata: AttentionMetadata object for the batch 
+                recomp_ratio: Fraction of total tokens to recompute overall.
+            Returns a dictionary:
+                {
+                    "recomp_positions": Tensor of shape [N],  # concatenation of recomputed tokens plus the last-token fallback
+                    "recomp_hidden_states": Tensor of shape [N, hidden_dim],
+                    "recomp_pages": List[(start_page_idx, end_page_idx)]  # For each sequence where we actually recomputed pages
+                }
+        """       
+        if policy != "fair": 
+            raise ValueError(f'Unsupported policy: {policy}. Only "fair" is supported for now.')
         
-        return {
-            "recomp_position": recomp_position,
-            "recomp_hidden_states": recomp_hidden_states,
-            "start_recomp_page": start_recomp_page,
-            "end_recomp_page": start_recomp_page
-        }
+        if policy == "fair":
+            """
+                For batched request. Fair policy ensures minimal padding for requests with varying length 
+                # recompute tokens = all tokens * recomp_ratio 
+                # recompute tokens per request = # recompute tokens / batch size 
+                
+            """
+            token_ids = cached_all_token_ids["token_ids"]
+            mappings  = cached_all_token_ids["mappings"]
+            positions = cached_all_token_ids["positions"] 
+
+            cached_all_token_ids_tensor = torch.tensor(token_ids, device='cuda:0') # FIXME works only for single GPU inference 
+            block_tables = attn_metadata.block_tables
+            # Sanity check: block_tables should match the number of (req, seq) pairs
+            if len(mappings) != len(block_tables):
+                raise ValueError(
+                    f"Mismatch: got {len(mappings)} sequences in 'mapping' but "
+                    f"{len(block_tables)} in attn_metadata.block_tables."
+                )
+                
+            total_pages = sum(len(bt) for bt in block_tables)
+            num_recompute_pages = int(total_pages * recomp_ratio) if total_pages > 0 else 0
+            
+            # print(f"total pages = {total_pages} num_recomp_pages = {num_recompute_pages}")
+            
+            seq_count = len(block_tables)
+            pages_per_seq = 0
+            if seq_count > 0 and num_recompute_pages > 0:
+                pages_per_seq = num_recompute_pages // seq_count
+
+            # We'll accumulate the final results here
+            all_positions_list = []  
+            all_hidden_states = []   
+            recomp_pages = []         # list of (start_page_idx, end_page_idx) for  re-compute pages
+            PAGE_SIZE = self.PAGE_SIZE
+            all_pairs = list(mappings.keys())  # We'll assume it matches block_tables by index
+
+            for i, (req_id, seq_id) in enumerate(all_pairs):
+                # block_tables[i] is the list of block ids for the i-th sequence
+                seq_block_ids = block_tables[i]
+                seq_pages = len(seq_block_ids)
+
+                st, en = mappings[(req_id, seq_id)]
+                seq_len = en - st
+                if seq_len <= 0:
+                    # If no tokens in this sequence, skip everything
+                    continue
+                
+                portion_pages = min(seq_pages, pages_per_seq)
+                portion_tokens = portion_pages * PAGE_SIZE  # candidate number of tokens to recompute
+                # If the sequence is smaller than that portion, clamp
+                portion_tokens = min(portion_tokens, seq_len)
+                do_recompute = (portion_tokens > 0) 
+                
+                if do_recompute:
+                    start_idx = en - portion_tokens
+                    # local page indices
+                    end_page_idx = seq_pages - 1
+                    start_page_idx = end_page_idx - portion_pages + 1
+                    
+                    # Slice out the relevant token IDs
+                    recomp_input_ids = cached_all_token_ids_tensor[start_idx:en]
+                    recomp_positions = positions[start_idx:en].to(cached_all_token_ids_tensor.device)
+
+
+                    hidden_states = self.get_input_embeddings(recomp_input_ids)
+
+                    # Accumulate
+                    all_positions_list.append(recomp_positions)
+                    all_hidden_states.append(hidden_states)
+                    recomp_pages.append((start_page_idx, end_page_idx))
+                else: 
+                    #No pages to recompute, decode token only 
+                    last_token_idx = en - 1
+                    # Slice out just that last token
+                    recomp_input_ids = cached_all_token_ids_tensor[last_token_idx : last_token_idx + 1]
+                    recomp_positions = positions[last_token_idx : last_token_idx + 1].to(cached_all_token_ids_tensor.device)
+
+                    hidden_states = self.get_input_embeddings(recomp_input_ids)
+
+                    # Accumulate
+                    all_positions_list.append(recomp_positions)
+                    all_hidden_states.append(hidden_states)
+                    
+            # Concatenate all positions and hidden states
+            final_positions = torch.cat(all_positions_list, dim=0)               # shape: [N]
+            final_hidden_states = torch.cat(all_hidden_states, dim=0)            # shape: [N, hidden_dim]
+            return {
+                "recomp_positions": final_positions,         # 1D tensor
+                "recomp_hidden_states": final_hidden_states,  # 2D tensor
+                "recomp_pages": recomp_pages,                # list of (start_page_idx, end_page_idx) for the ones that recomputed
+            }
 
     def forward(
         self,
@@ -422,10 +504,9 @@ class LlamaModel(nn.Module):
         
         is_recomp = True
         recomputation_vars = None
-
+        
         if is_recomp and attn_metadata.num_prefills == 0:
-            recomputation_vars = self._initialize_recomputation(cached_all_token_ids, attn_metadata, self.recomp_ratio)
-            
+            recomputation_vars = self._initialize_recomputation(cached_all_token_ids, attn_metadata, self.recomp_ratio) 
         start = time.time()
 
         for i in range(self.start_layer, self.end_layer):
@@ -448,8 +529,8 @@ class LlamaModel(nn.Module):
             kv_cache_write = None
             layer_num = i
 
-            if positions_min == 0: 
-                print(f"Prefill detected at layer{i}. Skipping prefetch.")
+            if attn_metadata.prefill_metadata: # prefill
+                # print(f"Prefill detected at layer{i}. Skipping prefetch.")
                 if gpu_cpu_cache_map[layer_num] == 0:
                     kv_cache = kv_caches[-1]
                     kv_cache_write = kv_caches_cpu[i]
@@ -457,34 +538,21 @@ class LlamaModel(nn.Module):
                     kv_cache = kv_caches[layer_num]
                     kv_cache_write = kv_caches_cpu[i]
             else:
-                start_page = 0
-                end_page = recomputation_vars["start_recomp_page"]
-                
+                if recomputation_vars['recomp_pages']: 
+                    print(f"recomputation_vars['recomp_pages'] = {recomputation_vars['recomp_pages']}")
+                    start_page, end_page = recomputation_vars["recomp_pages"][0] # FIXME 
+                else: 
+                     start_page, end_page = 0, 0
                 if gpu_cpu_cache_map[layer_num] == 0:
-                    # cached_all_token_ids_tensor = torch.tensor(cached_all_token_ids, device='cuda:0')
-                    # total_tokens = cached_all_token_ids_tensor.shape[0]
-
-                    # num_pages = len(attn_metadata.block_tables[0])
-                    # num_recomp_pages = int(num_pages * recomp_ratio)
-                    # # print(f"total pages = {num_pages} num_recomp_pages = {num_recomp_pages}")
-
-                    # start_recomp_page = num_pages - num_recomp_pages
-                    # start_recomp_token = start_recomp_page * self.PAGE_SIZE if start_recomp_page * self.PAGE_SIZE < total_tokens - 1 else total_tokens - 1
-                    # end_recomp_position = total_tokens - 1
-                    # recomp_input_ids = cached_all_token_ids_tensor[start_recomp_token:].contiguous()
-                    # recomp_position = torch.arange(start_recomp_token, end_recomp_position + 1, device='cuda:0').contiguous()
-                    # recomp_hidden_states = self.get_input_embeddings(recomp_input_ids)
-                    
-                    recomp_pos = recomputation_vars["recomp_position"]
                     kv_cache = kv_caches[-1]
                     kv_cache_write = kv_caches_cpu[i]
                     if self._prefetch_stream is not None: 
                         start= time.perf_counter()
                         torch.cuda.default_stream().wait_stream(self._prefetch_stream)
                         end_time = time.perf_counter()
-                        # print(f"wait stream time {end_time - start} at {end_time}")
+                        # print(f"wait stream time {end_time - start} at {end_time}")/
                 elif layer_num > 0 and gpu_cpu_cache_map[layer_num - 1] == 0:
-                    prefetch_layer = 12345
+                    prefetch_layer = 12345 # FIXME 
                     for i in range(layer_num, self.end_layer):
                         if gpu_cpu_cache_map[i] == 0:
                             prefetch_layer = i
@@ -493,7 +561,7 @@ class LlamaModel(nn.Module):
                         with torch.cuda.stream(self._prefetch_stream):
                             # Copy only needed pages in the cache (efficient)
                             # shape = [num_blocks, block_size, num_kv_heads, head_size]
-                            with nvtx.annotate(f"Key Prefetching{next_layer}"):
+                            with nvtx.annotate(f"Key Prefetching{next_layer}"): # FIXME Xinyue 
                                 kv_caches[-1][0][start_page:end_page, :, :, :].copy_(
                                     kv_caches_cpu[prefetch_layer][0][start_page:end_page, :, :, :], non_blocking=True
                                 )
@@ -505,7 +573,6 @@ class LlamaModel(nn.Module):
                     recomp_pos = positions
                     kv_cache = kv_caches[layer_num]
                     kv_cache_write = kv_caches_cpu[i]
-
                 else:
                     recomp_pos = positions
                     kv_cache = kv_caches[layer_num]
@@ -513,7 +580,7 @@ class LlamaModel(nn.Module):
 
             if i == 0: # first layer
                 if recomputation_vars is not None and attn_metadata.num_prefills == 0:
-                    hidden_states, residual = layer(recomputation_vars["recomp_position"], recomputation_vars["recomp_hidden_states"],
+                    hidden_states, residual = layer(recomputation_vars["recomp_positions"], recomputation_vars["recomp_hidden_states"],
                                                         kv_caches_cpu[i],
                                                         kv_caches_cpu[i],
                                                         i,
@@ -527,12 +594,12 @@ class LlamaModel(nn.Module):
                                                         attn_metadata, residual)
             else:
                 if recomputation_vars is not None and attn_metadata.num_prefills == 0:
-                    hidden_states, residual = layer(recomputation_vars["recomp_position"], recomputation_vars["recomp_hidden_states"],
+                    hidden_states, residual = layer(recomputation_vars["recomp_positions"], recomputation_vars["recomp_hidden_states"],
                                                         kv_cache,
                                                         kv_cache_write,
                                                         i,
                                                         attn_metadata, residual, is_recomp)
-                    recomputation_vars["recomp_hidden_states"] = hidden_states
+                    recomputation_vars["recomp_hidden_states"] = hidden_states # Passed on to the next layer
                 else:    
                     hidden_states, residual = layer(positions, hidden_states,
                                                         kv_cache,
@@ -545,9 +612,6 @@ class LlamaModel(nn.Module):
             
         elased_time = time.time() - start
         
-        # print("32 layer time", elased_time)
-        # print(f"total gpu mem {len(kv_cache) * kv_cache[0].numel() * kv_cache.element_size()} bytes")
-
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({
                 "hidden_states": hidden_states,
@@ -555,11 +619,13 @@ class LlamaModel(nn.Module):
             })
 
         hidden_states, _ = self.norm(hidden_states, residual)
-        if attn_metadata.decode_metadata:
-            hidden_states = hidden_states[-1:]
+        # Xinyue Why??? 
+        # if attn_metadata.decode_metadata:
+        #     hidden_states = hidden_states[-1:]
             
-        if attn_metadata.num_prefills > 0:
-            print(f"prefill ends at:{time.time()}")
+        # if attn_metadata.num_prefills > 0:
+        #     msg = f"prefill ends"
+        #     logger.info(msg)
         return hidden_states
 
     def load_weights(self, weights: Iterable[Tuple[str,
@@ -652,6 +718,7 @@ class LlamaModel(nn.Module):
 
 
 class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
+    
     packed_modules_mapping = {
         "qkv_proj": ["q_proj", "k_proj", "v_proj"],
         "gate_up_proj": ["gate_proj", "up_proj"]

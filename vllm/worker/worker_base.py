@@ -340,15 +340,43 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                     and self.observability_config.collect_model_execute_time):
                 orig_model_execute_time = intermediate_tensors.tensors.get(
                     "model_execute_time", torch.tensor(0)).item()
-
-        cached_all_token_ids = execute_model_req.seq_group_metadata_list[0].seq_data[0]._cached_all_token_ids
-        kv_caches=self.kv_cache[worker_input.virtual_engine]
-        if model_input.attn_metadata.block_tables[0].shape[0] >= kv_caches[0].shape[1] - 1:
-            prev_cache_size = kv_caches[0].shape[1]
-            while prev_cache_size == kv_caches[0].shape[1]:
-                updated_num_gpu_cache = self.cache_engine[worker_input.virtual_engine].resize_cache_with_next_ratio()
-            self.cache_engine[worker_input.virtual_engine].cache_config
-            print(f"cache ratio update {updated_num_gpu_cache} at {time.time()}")
+        attn_meta = model_input.attn_metadata
+        num_prefills = attn_meta.num_prefills 
+        
+        req_ids = [seq_group_metadata.request_id for seq_group_metadata in execute_model_req.seq_group_metadata_list]
+        req_to_seq_ids = model_input.request_ids_to_seq_ids
+        
+        # Xinyue log prefills 
+        if num_prefills > 0:
+            msg = (f"Prefill for request: {req_ids}")
+            logger.info(msg)
+        cached_all_token_ids = []
+        cached_all_position_ids = []
+        req_to_seq_mapping = {}
+        for i, request_id in enumerate(req_ids):
+            seq_ids = req_to_seq_ids[request_id]
+            for seq_id in seq_ids:
+                st = len(cached_all_token_ids)
+                token_ids = execute_model_req.seq_group_metadata_list[i].seq_data[seq_id]._cached_all_token_ids
+                cached_all_token_ids.extend(token_ids)
+                cached_all_position_ids.extend(range(len(token_ids)))
+                en = len(cached_all_token_ids)
+                req_to_seq_mapping[(request_id, seq_id)] = (st, en)
+        cached_all_token_ids = {'token_ids': cached_all_token_ids,'positions':torch.tensor(cached_all_position_ids), 'mappings': req_to_seq_mapping}
+        
+        step = 500
+        if cached_all_token_ids is not None and len(cached_all_token_ids['token_ids']) % step == 0:
+            msg = (f"cached_all_token_ids: {len(cached_all_token_ids['token_ids'])}")
+            logger.info(msg)
+            
+        """ 
+            kv_caches layout: [|<-        32 GPU layers        ->|<-next offloaded layer->|]
+            For each offloaded layer i, kv_caches[i] is assigned to None. 
+            The next offloaded layer is always stored at kv_caches[-1], if prefetch is not done yet, it is None. 
+        """
+        self.cache_engine[worker_input.virtual_engine].may_resize_gpu_cache(cached_tokens=cached_all_token_ids, attn_meta=model_input.attn_metadata)
+        attn_meta = model_input.attn_metadata 
+        
         output = self.model_runner.execute_model(
             model_input=model_input,
             cached_all_token_ids=cached_all_token_ids,
@@ -420,6 +448,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
 
 
 class WorkerWrapperBase:
+    
     """
     The whole point of this class is to lazily initialize the worker.
     We first instantiate the WorkerWrapper, which remembers the worker module

@@ -352,7 +352,7 @@ class Scheduler:
         num_cpu_blocks = cache_config.num_cpu_blocks
         if num_cpu_blocks:
             num_cpu_blocks //= pipeline_parallel_size
-
+        # Xinyue 
         # Create the block space manager.
         self.block_manager = BlockSpaceManagerImpl(
             block_size=self.cache_config.block_size,
@@ -611,7 +611,7 @@ class Scheduler:
 
             # NOTE(woosuk): Preemption happens only when there is no available
             # slot to keep all the sequence groups in the RUNNING state.
-            while not self._can_append_slots(seq_group, enable_chunking):
+            while not self._can_append_slots(seq_group, enable_chunking): # FIXME
                 budget.subtract_num_batched_tokens(seq_group.request_id,
                                                    num_running_tokens)
                 num_running_seqs = seq_group.get_max_num_running_seqs()

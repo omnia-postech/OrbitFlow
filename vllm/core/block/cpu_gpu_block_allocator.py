@@ -3,6 +3,7 @@ from typing import Dict, FrozenSet, List, Optional, Tuple
 from vllm.core.block.interfaces import (Block, BlockAllocator, BlockId,
                                         DeviceAwareBlockAllocator)
 from vllm.core.block.naive_block import NaiveBlock, NaiveBlockAllocator
+from vllm.core.block.distn_block import DistNBlockAllocator
 from vllm.core.block.prefix_caching_block import PrefixCachingBlockAllocator
 from vllm.platforms import current_platform
 from vllm.utils import Device
@@ -63,6 +64,20 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
 
         if allocator_type == "naive":
             gpu_allocator: BlockAllocator = NaiveBlockAllocator(
+                create_block=NaiveBlock,  # type: ignore
+                num_blocks=num_gpu_blocks,
+                block_size=block_size,
+                block_ids=gpu_block_ids,
+            )
+
+            cpu_allocator: BlockAllocator = NaiveBlockAllocator(
+                create_block=NaiveBlock,  # type: ignore
+                num_blocks=num_cpu_blocks,
+                block_size=block_size,
+                block_ids=cpu_block_ids,
+            )
+        elif allocator_type == "distn":
+            gpu_allocator: BlockAllocator = DistNBlockAllocator(
                 create_block=NaiveBlock,  # type: ignore
                 num_blocks=num_gpu_blocks,
                 block_size=block_size,
@@ -146,7 +161,17 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
         """
         return self._allocators[device].allocate_mutable_block(
             prev_block, extra_hash=extra_hash)
-
+    def update_num_blocks(self, num_blocks: int):
+        new_blocks = max(self._all_block_indices) + 1
+        for i in range(new_blocks, num_blocks):
+            self._free_block_indices.append(i)
+        
+        self._all_block_indices = frozenset(range(num_blocks))
+        
+        self._refcounter.new_indices(self._all_block_indices)
+        
+        extra_factor = 4
+        self._block_pool.increase_pool_with_size(num_blocks * extra_factor)
     def allocate_immutable_blocks(
             self,
             prev_block: Optional[Block],

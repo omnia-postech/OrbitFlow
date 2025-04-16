@@ -25,6 +25,9 @@ if TYPE_CHECKING:
 
 from vllm.vllm_flash_attn import (flash_attn_varlen_func,
                                   flash_attn_with_kvcache)
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
 
 import nvtx 
 import time
@@ -725,7 +728,7 @@ class FlashAttentionImpl(AttentionImpl):
                         key_cpu = key.to('cpu')
                         value_cpu = value.to('cpu')
 
-                        PAGE_SIZE = 16
+                        PAGE_SIZE = 16 # Is this a parameter or set to match with BLOCK SIZE of paged kv cache? 
                         page_idx = updated_slot_mapping_cpu // PAGE_SIZE      # 각 토큰이 들어갈 페이지 번호
                         offset_idx = updated_slot_mapping_cpu % PAGE_SIZE    # 해당 페이지 내부에서의 위치(0~15)
 
@@ -747,6 +750,7 @@ class FlashAttentionImpl(AttentionImpl):
                         # kv_cache_cpu[0][page_idx_exp, offset_idx_exp] = key_cpu
                         # kv_cache_cpu[1][page_idx_exp, offset_idx_exp] = value_cpu            
 
+        # FIXME Xinyue 
         (num_prefill_query_tokens, num_prefill_kv_tokens,
         num_decode_query_tokens) = \
             get_num_prefill_decode_query_kv_tokens(attn_metadata, attn_type)
@@ -755,7 +759,7 @@ class FlashAttentionImpl(AttentionImpl):
         # QKV for prefill.
         query = query[:num_prefill_query_tokens]
         prefill_output = output[:num_prefill_query_tokens]
-        assert query.shape[0] == num_prefill_query_tokens
+        assert query.shape[0] == num_prefill_query_tokens # should be batch size? 
         # assert decode_query.shape[0] == num_decode_query_tokens
         recomp_query = decode_query[-1:, :, :]
         recomp_output = decode_output[-1:, :, :]
@@ -851,13 +855,10 @@ class FlashAttentionImpl(AttentionImpl):
                     _,
                     block_tables_arg,
                 ) = get_seq_len_block_table_args(decode_meta, False, attn_type)
-                # if decode_query.shape[0] > 1:
-                #     print("query is bigger than 1")
-                #     seq_lens_arg = seq_lens_arg - decode_query.shape[0] + 1
-
+                
                 with nvtx.annotate(f"Decoding FA(2) for layer{layer}"):
                     flash_attn_with_kvcache(
-                        q=recomp_query.unsqueeze(0),
+                        q=recomp_query.unsqueeze(1), # batch size is always 1 then XINYUE FIXME
                         k_cache=key_cache,
                         v_cache=value_cache,
                         block_table=block_tables_arg,
@@ -867,9 +868,9 @@ class FlashAttentionImpl(AttentionImpl):
                         window_size=window_size,
                         alibi_slopes=alibi_slopes,
                         softcap=logits_soft_cap,
-                        out=recomp_output.unsqueeze(0),
+                        out=recomp_output.unsqueeze(1),
                     )
-            
+
             # print(f"decoding interval: {time.time() - start}")
         return output
 

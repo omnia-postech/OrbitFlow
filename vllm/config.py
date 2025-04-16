@@ -987,6 +987,8 @@ class CacheConfig:
         enable_prefix_caching: bool = False,
         cpu_offload_gb: float = 0,
         is_monolithic_distn: bool = False,
+        prefetch_mode: Optional[str] = None,
+        prefetch_distance: Optional[int] = None,
     ) -> None:
         self.block_size = block_size
         self.gpu_memory_utilization = gpu_memory_utilization
@@ -998,7 +1000,9 @@ class CacheConfig:
         self.enable_prefix_caching = enable_prefix_caching
         self.cpu_offload_gb = cpu_offload_gb
         self.is_monolithic_distn = is_monolithic_distn
-
+        self.prefetch_mode = prefetch_mode
+        self.prefetch_distance = prefetch_distance
+        
         self._verify_args()
         self._verify_cache_dtype()
         self._verify_prefix_caching()

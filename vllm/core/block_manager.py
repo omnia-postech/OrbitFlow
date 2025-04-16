@@ -12,6 +12,8 @@ from vllm.core.block.utils import check_no_caching_or_swa_for_blockmgr_encdec
 from vllm.core.interfaces import AllocStatus, BlockSpaceManager
 from vllm.sequence import Sequence, SequenceGroup, SequenceStatus
 from vllm.utils import Device
+from vllm.logger import init_logger
+logger = init_logger(__name__)
 
 SeqId = int
 EncoderSeqId = str
@@ -143,18 +145,21 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
         # Use watermark to avoid frequent cache eviction.
         if (self.num_total_gpu_blocks - num_required_blocks <
                 self.watermark_blocks):
+            msg = f"self.num_total_gpu_blocks: {self.num_total_gpu_blocks}, num_required_blocks: {num_required_blocks}, watermark_blocks: {self.watermark_blocks}"
+            print(msg)
             return AllocStatus.NEVER
         if num_free_gpu_blocks - num_required_blocks >= self.watermark_blocks:
             return AllocStatus.OK
         else:
             return AllocStatus.LATER
 
-    def _allocate_sequence(self, seq: Sequence) -> BlockTable:
+    def _allocate_sequence(self, seq: Sequence) -> BlockTable: # Xinyue
         block_table = BlockTable(
             block_size=self.block_size,
             block_allocator=self.block_allocator,
             max_block_sliding_window=self.max_block_sliding_window,
         )
+        # Xinyue 
         if seq.get_token_ids():
             # NOTE: If there are any factors affecting the block besides
             # token_ids, they should be added as input to extra_hash.
@@ -163,7 +168,8 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
             # Add blocks to the block table only if the sequence is non empty.
             block_table.allocate(token_ids=seq.get_token_ids(),
                                  extra_hash=extra_hash)
-
+            msg = f"block_table allocated for seq {seq.seq_id}, {len(block_table._blocks)} blocks"
+            logger.info(msg)
         return block_table
 
     def allocate(self, seq_group: SequenceGroup) -> None:
@@ -234,6 +240,11 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
 
         num_free_gpu_blocks = self.block_allocator.get_num_free_blocks(
             Device.GPU)
+
+        if num_touched_blocks > num_free_gpu_blocks:
+            msg = f"can_append_slots failed: {num_touched_blocks} > {num_free_gpu_blocks}"\
+                f"total_gpu_blocks: {self.block_allocator.get_num_total_blocks(Device.GPU)}, " 
+            logger.info(msg)
         return num_touched_blocks <= num_free_gpu_blocks
 
     def append_slots(
