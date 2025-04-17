@@ -348,7 +348,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         
         # Xinyue log prefills 
         if num_prefills > 0:
-            msg = (f"Prefill for request: {req_ids}")
+            msg = (f"{num_prefills} prefills for request: {req_ids}")
             logger.info(msg)
         cached_all_token_ids = []
         cached_all_position_ids = []

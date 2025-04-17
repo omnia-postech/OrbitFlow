@@ -22,6 +22,7 @@ PROMPT_DIR = "./prompts"
 USE_DEFAULT_SAMPLES = True
 BATCH_SIZE = 4  # Serving batch size set to 4
 MAX_MODEL_LEN = 13000
+BLOCK_SIZE  = 16
 SLO_THRESHOLD = 0.5      
 CSV_OUTPUT_FILE = "metrics.csv"
 test_trace = {
@@ -330,6 +331,9 @@ def main(configs):
         gpu_memory_utilization = trace.gpu_memory_utilization if trace.gpu_memory_utilization else 0.01 # dummy to work around with vllm's _verify_args()
     if gpu_memory_utilization == 0.01:
         num_gpu_blocks_override = trace.num_gpu_blocks_override
+        max_model_len = min(num_gpu_blocks_override * BLOCK_SIZE, 128000  )
+    else: 
+        max_model_len = trace.max_model_len if hasattr(trace, "max_model_len") else MAX_MODEL_LEN
     assert gpu_memory_utilization != 0.01 or num_gpu_blocks_override is not None, "No gpu_memory_utilization or num_gpu_blocks_override found in prompt_dict"
 
     prefetch_mode = "none"
@@ -348,9 +352,17 @@ def main(configs):
             prefetch_distance = configs.prefetch_distance 
         else: 
             prefetch_distance = 0 
-    max_model_len = trace.max_model_len if hasattr(trace, "max_model_len") else MAX_MODEL_LEN 
+
     batch_size = trace.batch_size if hasattr(trace, "batch_size") else BATCH_SIZE
     prompts = trace.requests if hasattr(trace, "requests") else trace.samples 
+    
+    print(f"max_model_len: {max_model_len}")
+    print(f"batch_size: {batch_size}")
+    print(f"prefetch_mode: {prefetch_mode}")
+    print(f"prefetch_distance: {prefetch_distance}")
+    print(f"gpu_memory_utilization: {gpu_memory_utilization}")
+    print(f"num_gpu_blocks_override: {num_gpu_blocks_override}")
+    
     args = EngineArgs(
         model=MODEL,
         max_model_len=max_model_len,
@@ -364,6 +376,7 @@ def main(configs):
         is_monolithic_distn=is_monolithic_distn, 
         prefetch_mode = prefetch_mode,
         prefetch_distance = prefetch_distance,
+        enable_chunked_prefill=False,
         # No prefetch, (N=1,static), (N=dynamic,mono), (N=dynamic,dyn), the last two version, N only decreases 
         # multi-request version (might decrease, or increase)
         # num_gpu_blocks_override: Optional[int] = None

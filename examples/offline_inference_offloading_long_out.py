@@ -28,7 +28,7 @@ def main(args, sample_input):
     # model_id = args.model
     # model_id = "meta-llama/Meta-Llama-3.1-8B-Instruct"
     
-    model_id = "/home/heelim/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659" # absolute path
+    model_id = "/home/jongseop/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659" # absolute path
     
     # tokenizer_id = args.tokenizer if args.tokenizer is not None else args.model
     # tokenizer_mode = args.tokenizer_mode
