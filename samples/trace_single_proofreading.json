@@ -1,0 +1,28 @@
+{
+  "arrival_pattern":{"type":"DiscretePoissonArrival","params":{"lambda_per_step":0.01,"max_steps":4000}},
+  "batch_size":4,
+  "request_type_probs":[["Proofreading",1.0]],
+  "vocab":[200,30000],
+  "requests":{
+    "request_0":{"category":"Proofreading","input_length":2494,"output_length":150,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_1":{"category":"Proofreading","input_length":3316,"output_length":137,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_2":{"category":"Proofreading","input_length":3851,"output_length":123,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_3":{"category":"Proofreading","input_length":4524,"output_length":132,"arrival_time":0,"sched_time":138,"wait_time":138},
+    "request_4":{"category":"Proofreading","input_length":4994,"output_length":149,"arrival_time":152,"sched_time":152,"wait_time":0},
+    "request_5":{"category":"Proofreading","input_length":2034,"output_length":88,"arrival_time":303,"sched_time":303,"wait_time":0},
+    "request_6":{"category":"Proofreading","input_length":2267,"output_length":104,"arrival_time":393,"sched_time":393,"wait_time":0},
+    "request_7":{"category":"Proofreading","input_length":3544,"output_length":111,"arrival_time":499,"sched_time":499,"wait_time":0},
+    "request_8":{"category":"Proofreading","input_length":2808,"output_length":145,"arrival_time":612,"sched_time":612,"wait_time":0},
+    "request_9":{"category":"Proofreading","input_length":2668,"output_length":56,"arrival_time":759,"sched_time":759,"wait_time":0},
+    "request_10":{"category":"Proofreading","input_length":3983,"output_length":170,"arrival_time":817,"sched_time":817,"wait_time":0},
+    "request_11":{"category":"Proofreading","input_length":3411,"output_length":157,"arrival_time":989,"sched_time":989,"wait_time":0},
+    "request_12":{"category":"Proofreading","input_length":4464,"output_length":163,"arrival_time":1148,"sched_time":1148,"wait_time":0},
+    "request_13":{"category":"Proofreading","input_length":4657,"output_length":112,"arrival_time":1313,"sched_time":1313,"wait_time":0},
+    "request_14":{"category":"Proofreading","input_length":3807,"output_length":77,"arrival_time":1427,"sched_time":1427,"wait_time":0},
+    "request_15":{"category":"Proofreading","input_length":2800,"output_length":141,"arrival_time":1506,"sched_time":1506,"wait_time":0},
+    "request_16":{"category":"Proofreading","input_length":2593,"output_length":82,"arrival_time":1649,"sched_time":1649,"wait_time":0},
+    "request_17":{"category":"Proofreading","input_length":2073,"output_length":88,"arrival_time":1733,"sched_time":1733,"wait_time":0},
+    "request_18":{"category":"Proofreading","input_length":3112,"output_length":146,"arrival_time":1823,"sched_time":1823,"wait_time":0},
+    "request_19":{"category":"Proofreading","input_length":2310,"output_length":165,"arrival_time":1971,"sched_time":1971,"wait_time":0}
+  }
+}

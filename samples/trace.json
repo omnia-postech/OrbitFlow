@@ -1,0 +1,18 @@
+{
+  "arrival_pattern": {"type":"DiscretePoissonArrival","params":{"lambda_per_step":0.01,"max_steps":4000}},
+  "batch_size": 4,
+  "request_type_probs": [["Short Q&A",0.7],["Summarization",0.3]],
+  "vocab": [200,30000],
+  "requests": [
+    {"category":"Short Q&A","input_length":133,"output_length":11,"arrival_time":0,"sched_time":0,"wait_time":0},
+    {"category":"Short Q&A","input_length":35,"output_length":73,"arrival_time":0,"sched_time":0,"wait_time":0},
+    {"category":"Summarization","input_length":8935,"output_length":963,"arrival_time":0,"sched_time":0,"wait_time":0},
+    {"category":"Short Q&A","input_length":51,"output_length":189,"arrival_time":0,"sched_time":0,"wait_time":0},
+    {"category":"Summarization","input_length":4803,"output_length":598,"arrival_time":488,"sched_time":964,"wait_time":476},
+    {"category":"Short Q&A","input_length":154,"output_length":63,"arrival_time":631,"sched_time":964,"wait_time":333},
+    {"category":"Short Q&A","input_length":126,"output_length":17,"arrival_time":696,"sched_time":964,"wait_time":268},
+    {"category":"Short Q&A","input_length":197,"output_length":29,"arrival_time":715,"sched_time":964,"wait_time":249},
+    {"category":"Short Q&A","input_length":70,"output_length":57,"arrival_time":746,"sched_time":982,"wait_time":236},
+    {"category":"Short Q&A","input_length":35,"output_length":151,"arrival_time":805,"sched_time":994,"wait_time":189}
+  ]
+}

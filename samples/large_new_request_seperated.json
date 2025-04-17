@@ -1,0 +1,14 @@
+{
+    "description": "Continuous batching; BS = 4; A6000 with 48GB memory; Continuous batched request too large to fit in available memory.", 
+    "batch_size": 4, 
+    "max_model_len": 10000,
+    "num_gpu_blocks_override": 400,
+    "samples": {
+        "sample1":  {"prompt": 250, "max_tokens": 1500, "arrive_at_step": 0, "schedule_at_step": 0, "wait_time": 0},
+        "sample2":  {"prompt": 500, "max_tokens": 2000, "arrive_at_step": 0, "schedule_at_step": 0, "wait_time": 0},
+        "sample3":  {"prompt": 250, "max_tokens": 2000, "arrive_at_step": 0, "schedule_at_step": 0, "wait_time": 0},
+        "sample4":  {"prompt": 500, "max_tokens": 2000, "arrive_at_step": 0, "schedule_at_step": 0, "wait_time": 0},
+        "sample5":  {"prompt": 5000, "max_tokens": 2000, "arrive_at_step": 1450, "schedule_at_step": 1500, "wait_time": 50},
+        "sample6":  {"prompt": 1000, "max_tokens": 1500, "arrive_at_step": 1475, "schedule_at_step": 2000, "wait_time": 525}
+    }
+}

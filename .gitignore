@@ -207,7 +207,6 @@ actionlint
 shellcheck*/
 scripts/nsys/
 scripts/output/
-samples
 
 # Ignore any directory whose name ends with .ipynb and all its contents
 **/*.ipynb/
