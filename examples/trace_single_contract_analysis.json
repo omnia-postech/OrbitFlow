@@ -1,0 +1,28 @@
+{
+  "arrival_pattern":{"type":"DiscretePoissonArrival","params":{"lambda_per_step":0.01,"max_steps":4000}},
+  "batch_size":4,
+  "request_type_probs":[["Legal Contract Analysis",1.0]],
+  "vocab":[200,30000],
+  "requests":{
+    "request_0":{"category":"Legal Contract Analysis","input_length":5012,"output_length":4657,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_1":{"category":"Legal Contract Analysis","input_length":4211,"output_length":3788,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_2":{"category":"Legal Contract Analysis","input_length":2782,"output_length":6520,"arrival_time":0,"sched_time":3789,"wait_time":3789},
+    "request_3":{"category":"Legal Contract Analysis","input_length":4865,"output_length":7824,"arrival_time":0,"sched_time":4658,"wait_time":4658},
+    "request_4":{"category":"Legal Contract Analysis","input_length":3744,"output_length":6285,"arrival_time":1165,"sched_time":10310,"wait_time":9145},
+    "request_5":{"category":"Legal Contract Analysis","input_length":6455,"output_length":4413,"arrival_time":1266,"sched_time":16596,"wait_time":15330},
+    "request_6":{"category":"Legal Contract Analysis","input_length":5901,"output_length":6650,"arrival_time":1349,"sched_time":21010,"wait_time":19661},
+    "request_7":{"category":"Legal Contract Analysis","input_length":4341,"output_length":4898,"arrival_time":1542,"sched_time":27661,"wait_time":26119},
+    "request_8":{"category":"Legal Contract Analysis","input_length":7812,"output_length":3586,"arrival_time":1636,"sched_time":32560,"wait_time":30924},
+    "request_9":{"category":"Legal Contract Analysis","input_length":3159,"output_length":7145,"arrival_time":1801,"sched_time":36147,"wait_time":34346},
+    "request_10":{"category":"Legal Contract Analysis","input_length":3541,"output_length":8895,"arrival_time":2159,"sched_time":36147,"wait_time":33988},
+    "request_11":{"category":"Legal Contract Analysis","input_length":4353,"output_length":2370,"arrival_time":2399,"sched_time":43293,"wait_time":40894},
+    "request_12":{"category":"Legal Contract Analysis","input_length":2376,"output_length":4204,"arrival_time":2430,"sched_time":45043,"wait_time":42613},
+    "request_13":{"category":"Legal Contract Analysis","input_length":2077,"output_length":5250,"arrival_time":2490,"sched_time":45043,"wait_time":42553},
+    "request_14":{"category":"Legal Contract Analysis","input_length":4873,"output_length":2142,"arrival_time":2523,"sched_time":45664,"wait_time":43141},
+    "request_15":{"category":"Legal Contract Analysis","input_length":7968,"output_length":8908,"arrival_time":2649,"sched_time":50294,"wait_time":47645},
+    "request_16":{"category":"Legal Contract Analysis","input_length":7062,"output_length":3700,"arrival_time":2731,"sched_time":59203,"wait_time":56472},
+    "request_17":{"category":"Legal Contract Analysis","input_length":2513,"output_length":5113,"arrival_time":2751,"sched_time":59203,"wait_time":56452},
+    "request_18":{"category":"Legal Contract Analysis","input_length":3696,"output_length":7277,"arrival_time":2802,"sched_time":62904,"wait_time":60102},
+    "request_19":{"category":"Legal Contract Analysis","input_length":3969,"output_length":7074,"arrival_time":2882,"sched_time":64317,"wait_time":61435}
+  }
+}

@@ -347,9 +347,9 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         req_to_seq_ids = model_input.request_ids_to_seq_ids
         
         # Xinyue log prefills 
-        if num_prefills > 0:
-            msg = (f"{num_prefills} prefills for request: {req_ids}")
-            logger.info(msg)
+        # if num_prefills > 0:
+        #     msg = (f"{num_prefills} prefills for request: {req_ids}")
+        #     logger.info(msg)
         cached_all_token_ids = []
         cached_all_position_ids = []
         req_to_seq_mapping = {}
@@ -364,10 +364,10 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                 req_to_seq_mapping[(request_id, seq_id)] = (st, en)
         cached_all_token_ids = {'token_ids': cached_all_token_ids,'positions':torch.tensor(cached_all_position_ids), 'mappings': req_to_seq_mapping}
         
-        step = 500
-        if cached_all_token_ids is not None and len(cached_all_token_ids['token_ids']) % step == 0:
-            msg = (f"cached_all_token_ids: {len(cached_all_token_ids['token_ids'])}")
-            logger.info(msg)
+        # step = 500
+        # if cached_all_token_ids is not None and len(cached_all_token_ids['token_ids']) % step == 0:
+        #     msg = (f"cached_all_token_ids: {len(cached_all_token_ids['token_ids'])}")
+        #     logger.info(msg)
             
         """ 
             kv_caches layout: [|<-        32 GPU layers        ->|<-next offloaded layer->|]

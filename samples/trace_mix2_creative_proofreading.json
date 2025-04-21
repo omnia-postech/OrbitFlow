@@ -1,7 +1,7 @@
 {
   "arrival_pattern":{"type":"DiscretePoissonArrival","params":{"lambda_per_step":0.01,"max_steps":4000}},
   "batch_size":4,
-  "num_gpu_blocks_override": 3759,
+  "num_gpu_blocks_override": 400,
   "request_type_probs":[["Creative Generation",0.4],["Proofreading",0.6]],
   "vocab":[200,30000],
   "requests":{

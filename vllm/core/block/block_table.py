@@ -4,7 +4,8 @@ from typing import List, Optional
 from vllm.core.block.common import BlockList
 from vllm.core.block.interfaces import Block, DeviceAwareBlockAllocator
 from vllm.utils import Device, cdiv, chunk_list
-
+from vllm.logger import init_logger
+logger = init_logger(__name__)
 
 class BlockTable:
     """A class to manage blocks for a specific sequence.
@@ -162,9 +163,8 @@ class BlockTable:
                                     extra_hash=extra_hash)
 
         # Update the blocks with the new tokens
-        first_block_idx = self._num_full_slots // self._block_size
+        first_block_idx = self._num_full_slots // self._block_size # Xinyue these are not physical block ids! 
         token_blocks = self._chunk_token_blocks_for_append(token_ids)
-
         for i, token_block in enumerate(token_blocks):
             self._blocks.append_token_ids(first_block_idx + i, token_block)
 

@@ -43,6 +43,7 @@ class RefCounter(RefCounterProtocol):
         self._refcounts: Dict[BlockId,
                               RefCount] = {index: 0 if index not in self._refcounts else self._refcounts[index]
                                            for index in deduped}
+                              
 
     def incr(self, block_id: BlockId) -> RefCount:
         assert block_id in self._refcounts
@@ -75,7 +76,10 @@ class RefCounter(RefCounterProtocol):
     def as_readonly(self) -> "ReadOnlyRefCounter":
         return ReadOnlyRefCounter(self)
 
-
+    def get_refcounts(self) -> Dict[BlockId, RefCount]:
+        """Returns a copy of the reference counts dictionary."""
+        return self._refcounts.copy()
+    
 class ReadOnlyRefCounter(RefCounterProtocol):
     """A read-only view of the RefCounter class.
 
@@ -192,11 +196,10 @@ class BlockPool:
                                    block_id=None,
                                    extra_hash=None))
     
-    def increase_pool_with_size(self, pool_size: int):
-        """Increase the pool size by the given amount
-        """
+    def increase_pool_to_size(self, new_pool_size: int) -> None:
+        """Resize the pool to at least the given size (if larger than current)."""
+        assert new_pool_size > self._pool_size 
         cur_pool_size = self._pool_size
-        new_pool_size = pool_size
         self._pool_size = new_pool_size
 
         self._free_ids += deque(range(cur_pool_size, new_pool_size))
@@ -210,6 +213,25 @@ class BlockPool:
                                    block_id=None,
                                    extra_hash=None))
         
+    def update_block_pool(self, action: str, new_size: Optional[int] = None, 
+                         offset: Optional[int] = None) -> None:
+        """Update the block pool based on the specified action.
+        
+        Args:
+            action: 'expand' (GPU) or 'shift' (CPU)
+            new_size: For 'expand' - target total pool size
+            offset: For 'shift' - value to add to block IDs
+        """
+        if action == 'expand':
+            if new_size is None:
+                raise ValueError("new_size required for expand action")
+            self.increase_pool_to_size(new_size)
+        elif action == 'shift':
+            if offset is None:
+                raise ValueError("offset required for shift action")
+            self.shift_block_ids(offset)
+        else:
+            raise NotImplementedError(f"Unsupported mode: {action}")
 
     def increase_pool(self):
         """Doubles the internal pool size
@@ -255,6 +277,13 @@ class BlockPool:
     def free_block(self, block: Block) -> None:
         self._free_ids.appendleft(block.pool_id)  # type: ignore[attr-defined]
 
+    def shift_block_ids(self, offset: int) -> None:
+        """Shift all in-use block IDs by a fixed offset."""
+        for block in self._pool:
+            # Skip free blocks and blocks without a physical ID
+            if (block.block_id not in self._free_ids # pool_id is only added in init_block, it may not exist 
+                    and block.block_id is not None):
+                block.block_id += offset
 
 class BlockList:
     """This class is an optimization to allow fast-access to physical 

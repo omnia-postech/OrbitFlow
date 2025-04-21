@@ -1,0 +1,28 @@
+{
+  "arrival_pattern":{"type":"DiscretePoissonArrival","params":{"lambda_per_step":0.01,"max_steps":4000}},
+  "batch_size":4,
+  "request_type_probs":[["Creative Generation",1.0]],
+  "vocab":[200,30000],
+  "requests":{
+    "request_0":{"category":"Creative Generation","input_length":80,"output_length":886,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_1":{"category":"Creative Generation","input_length":65,"output_length":1403,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_2":{"category":"Creative Generation","input_length":99,"output_length":1882,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_3":{"category":"Creative Generation","input_length":15,"output_length":1469,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_4":{"category":"Creative Generation","input_length":78,"output_length":1757,"arrival_time":430,"sched_time":887,"wait_time":457},
+    "request_5":{"category":"Creative Generation","input_length":89,"output_length":1585,"arrival_time":502,"sched_time":1404,"wait_time":902},
+    "request_6":{"category":"Creative Generation","input_length":55,"output_length":1288,"arrival_time":698,"sched_time":1470,"wait_time":772},
+    "request_7":{"category":"Creative Generation","input_length":62,"output_length":1075,"arrival_time":771,"sched_time":1883,"wait_time":1112},
+    "request_8":{"category":"Creative Generation","input_length":24,"output_length":1560,"arrival_time":1103,"sched_time":2645,"wait_time":1542},
+    "request_9":{"category":"Creative Generation","input_length":42,"output_length":1765,"arrival_time":1190,"sched_time":2759,"wait_time":1569},
+    "request_10":{"category":"Creative Generation","input_length":35,"output_length":786,"arrival_time":1272,"sched_time":2959,"wait_time":1687},
+    "request_11":{"category":"Creative Generation","input_length":53,"output_length":1552,"arrival_time":1445,"sched_time":2990,"wait_time":1545},
+    "request_12":{"category":"Creative Generation","input_length":31,"output_length":1170,"arrival_time":1685,"sched_time":3746,"wait_time":2061},
+    "request_13":{"category":"Creative Generation","input_length":30,"output_length":1952,"arrival_time":1748,"sched_time":4206,"wait_time":2458},
+    "request_14":{"category":"Creative Generation","input_length":83,"output_length":1190,"arrival_time":1798,"sched_time":4525,"wait_time":2727},
+    "request_15":{"category":"Creative Generation","input_length":61,"output_length":839,"arrival_time":1801,"sched_time":4543,"wait_time":2742},
+    "request_16":{"category":"Creative Generation","input_length":29,"output_length":1728,"arrival_time":1831,"sched_time":4917,"wait_time":3086},
+    "request_17":{"category":"Creative Generation","input_length":71,"output_length":1840,"arrival_time":1988,"sched_time":5383,"wait_time":3395},
+    "request_18":{"category":"Creative Generation","input_length":32,"output_length":873,"arrival_time":2046,"sched_time":5716,"wait_time":3670},
+    "request_19":{"category":"Creative Generation","input_length":48,"output_length":1223,"arrival_time":2102,"sched_time":6159,"wait_time":4057}
+  }
+}

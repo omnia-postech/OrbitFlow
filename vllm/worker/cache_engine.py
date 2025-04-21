@@ -216,8 +216,8 @@ class CacheEngine:
             logger.info(msg)
 
             target_map = [1,] * self.num_attention_layers
-            msg = (f"target map: {target_map}\n"
-                    f"current mapping: {self.gpu_cpu_cache_map}")
+            # msg = (f"target map: {target_map}\n"
+            msg = (f"current mapping: {self.gpu_cpu_cache_map}")
             logger.info(msg)
 
             for i in range(self.num_attention_layers):
@@ -315,7 +315,7 @@ class CacheEngine:
                 return self.cache_config.num_gpu_blocks
             updated_num_gpu_cache = self.resize_cache_with_next_ratio()
             msg = (f"cache ratio update at {len(cached_tokens['token_ids'])+1}th token; num_gpu_cache: {total_blocks} -> {updated_num_gpu_cache}")
-            logger.info(f"allocated_blocks, num_required_blocks, total_blocks:{allocated_blocks,num_required_blocks,total_blocks}\n{mappings}")
+            # logger.info(f"allocated_blocks, num_required_blocks, total_blocks:{allocated_blocks,num_required_blocks,total_blocks}\n")
             logger.info(msg)
             return updated_num_gpu_cache 
         else:
@@ -325,7 +325,7 @@ class CacheEngine:
         start = time.time()
         # count number of 0s in gpu_cpu_cache_map
         offloaded_num = self.num_attention_layers - self.gpu_cache_num
-        if self.num_attention_layers // offloaded_num == (prefetch_distance + 1):
+        if offloaded_num != 0 and self.num_attention_layers // offloaded_num == (prefetch_distance + 1): 
             return self.cache_config.num_gpu_blocks
         
         msg = "Setting static prefetch distance, this should happen only once."
@@ -437,11 +437,11 @@ class CacheEngine:
         _, new_gpu_cache_num = self.determine_cache_num_with_map(new_gpu_cpu_cache_map)
         
         
-        free_mem, total_mem = torch.cuda.mem_get_info()
-        msg = f"Total Memory: {total_mem / 1024 / 1024} MB"
-        logger.info(msg)
-        msg = f"Free Memory before rearr: {free_mem / 1024 / 1024} MB"
-        logger.info(msg)
+        # free_mem, total_mem = torch.cuda.mem_get_info()
+        # msg = f"Total Memory: {total_mem / 1024 / 1024} MB"
+        # logger.info(msg)
+        # msg = f"Free Memory before rearr: {free_mem / 1024 / 1024} MB"
+        # logger.info(msg)
 
         gpu_cache_to_delete = []
 
@@ -471,9 +471,9 @@ class CacheEngine:
                     self.gpu_cache[layer_num] = self.cpu_cache[layer_num][:, :self.num_gpu_blocks,:,:,:].to(self.device_config.device_type)
         
         
-        free_mem, total_mem = torch.cuda.mem_get_info()
-        msg = f"Free Memory after rearr: {free_mem / 1024 / 1024} MB"
-        logger.info(msg)
+        # free_mem, total_mem = torch.cuda.mem_get_info()
+        # msg = f"Free Memory after rearr: {free_mem / 1024 / 1024} MB"
+        # logger.info(msg)
         
         kv_cache_shape = list(self.attn_backend.get_kv_cache_shape(
             self.num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size))
@@ -513,9 +513,9 @@ class CacheEngine:
         self.gpu_cpu_cache_map = new_gpu_cpu_cache_map
         self.gpu_cache_num = new_gpu_cache_num
 
-        free_mem, total_mem = torch.cuda.mem_get_info()
-        msg = f"Free Memory final: {free_mem / 1024 / 1024} MB"
-        logger.info(msg)
+        # free_mem, total_mem = torch.cuda.mem_get_info()
+        # msg = f"Free Memory final: {free_mem / 1024 / 1024} MB"
+        # logger.info(msg)
 
         torch.cuda.synchronize()
 

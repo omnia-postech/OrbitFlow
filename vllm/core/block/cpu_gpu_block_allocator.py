@@ -7,7 +7,8 @@ from vllm.core.block.distn_block import DistNBlockAllocator
 from vllm.core.block.prefix_caching_block import PrefixCachingBlockAllocator
 from vllm.platforms import current_platform
 from vllm.utils import Device
-
+from vllm.logger import init_logger
+logger = init_logger(__name__)
 
 class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
     """A block allocator that can allocate blocks on both CPU and GPU memory.
@@ -76,20 +77,20 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
                 block_size=block_size,
                 block_ids=cpu_block_ids,
             )
-        elif allocator_type == "distn":
-            gpu_allocator: BlockAllocator = DistNBlockAllocator(
-                create_block=NaiveBlock,  # type: ignore
-                num_blocks=num_gpu_blocks,
-                block_size=block_size,
-                block_ids=gpu_block_ids,
-            )
+        # elif allocator_type == "distn":
+        #     gpu_allocator: BlockAllocator = DistNBlockAllocator(
+        #         create_block=NaiveBlock,  # type: ignore
+        #         num_blocks=num_gpu_blocks,
+        #         block_size=block_size,
+        #         block_ids=gpu_block_ids,
+        #     )
 
-            cpu_allocator: BlockAllocator = NaiveBlockAllocator(
-                create_block=NaiveBlock,  # type: ignore
-                num_blocks=num_cpu_blocks,
-                block_size=block_size,
-                block_ids=cpu_block_ids,
-            )
+        #     cpu_allocator: BlockAllocator = NaiveBlockAllocator(
+        #         create_block=NaiveBlock,  # type: ignore
+        #         num_blocks=num_cpu_blocks,
+        #         block_size=block_size,
+        #         block_ids=cpu_block_ids,
+        #     )
         elif allocator_type == "prefix_caching":
             gpu_allocator = PrefixCachingBlockAllocator(
                 num_blocks=num_gpu_blocks,
@@ -111,7 +112,14 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
         )
         
     def update_gpu_allocator(self, num_blocks) -> None:
+        
         self._allocators[Device.GPU].update_num_blocks(num_blocks)
+        self._allocators[Device.CPU].update_num_blocks(num_blocks)
+        
+        self._block_ids_to_allocator: Dict[int, BlockAllocator] = {}
+        for _, allocator in self._allocators.items():
+            for block_id in allocator.all_block_ids:
+                self._block_ids_to_allocator[block_id] = allocator
 
     def __init__(self, cpu_block_allocator: BlockAllocator,
                  gpu_block_allocator: BlockAllocator):
@@ -161,17 +169,22 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
         """
         return self._allocators[device].allocate_mutable_block(
             prev_block, extra_hash=extra_hash)
-    def update_num_blocks(self, num_blocks: int):
-        new_blocks = max(self._all_block_indices) + 1
-        for i in range(new_blocks, num_blocks):
-            self._free_block_indices.append(i)
         
-        self._all_block_indices = frozenset(range(num_blocks))
+    # def update_num_blocks(self, num_blocks: int):
+    #     new_blocks = max(self._all_block_indices) 
+    #     msg= f"free blocks before update: {self._free_block_indices}, " \
+    #         f"new_blocks: {new_blocks}, num_blocks: {num_blocks}"
         
-        self._refcounter.new_indices(self._all_block_indices)
+    #     for i in range(new_blocks, num_blocks):
+    #         self._free_block_indices.append(i)
+    #     msg += f", free blocks after update: {self._free_block_indices}"
+    #     logger.info(msg)
         
-        extra_factor = 4
-        self._block_pool.increase_pool_with_size(num_blocks * extra_factor)
+    #     self._all_block_indices = frozenset(range(num_blocks))
+        
+    #     self._refcounter.new_indices(self._all_block_indices)
+    #     extra_factor = 4
+    #     self._block_pool.increase_pool_with_size(num_blocks * extra_factor)
     def allocate_immutable_blocks(
             self,
             prev_block: Optional[Block],
@@ -234,7 +247,7 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
             return
         block_id = block.block_id
         assert block_id is not None
-        allocator = self._block_ids_to_allocator[block_id]
+        allocator = self._block_ids_to_allocator[block_id] 
         allocator.free(block)
 
     def fork(self, last_block: Block) -> List[Block]:

@@ -109,6 +109,7 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
         
     def update_num_gpu_blocks(self, num_gpu_blocks: int) -> None:
         if self.num_total_gpu_blocks != num_gpu_blocks:
+            # logger.info(f"BlockManager.update_num_gpu_blocks: {self.num_total_gpu_blocks} -> {num_gpu_blocks}")
             self.num_total_gpu_blocks = num_gpu_blocks
             self.block_allocator.update_gpu_allocator(num_gpu_blocks)
 
@@ -242,9 +243,16 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
             Device.GPU)
 
         if num_touched_blocks > num_free_gpu_blocks:
-            msg = f"can_append_slots failed: {num_touched_blocks} > {num_free_gpu_blocks}"\
-                f"total_gpu_blocks: {self.block_allocator.get_num_total_blocks(Device.GPU)}, " 
+            msg = f"can_append_slots failed: {num_touched_blocks} > {num_free_gpu_blocks}; "\
+                f"total_gpu_blocks: {self.block_allocator.get_num_total_blocks(Device.GPU)},  " \
+                    f"{self.block_allocator._allocators[Device.GPU]._all_block_indices}"
             logger.info(msg)
+            # for req_id, block_table in self.block_tables.items():
+            #     msg = f"req_id: {req_id}, " \
+            #         f"block_table.physical_block_ids: {len(block_table.physical_block_ids)} {block_table.physical_block_ids}, " 
+            #     logger.info(msg)
+            # msg = f"num_lookahead_slots: {num_lookahead_slots}, " 
+            # logger.info(msg) 
         return num_touched_blocks <= num_free_gpu_blocks
 
     def append_slots(
@@ -267,10 +275,10 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
 
     def free(self, seq: Sequence) -> None:
         seq_id = seq.seq_id
-
         if seq_id not in self.block_tables:
             # Already freed or haven't been scheduled yet.
             return
+        # logger.info(f"Freeing block table for seq {seq_id}, block table: {self.block_tables[seq_id].physical_block_ids}")
 
         # Update seq block ids with the latest access time
         self._last_access_blocks_tracker.update_seq_blocks_last_access(

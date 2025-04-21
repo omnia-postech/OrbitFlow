@@ -882,6 +882,7 @@ class Trace:
         data = {
             "arrival_pattern": _arrival_pattern_to_dict(self.arrival_pattern_name),
             "batch_size": self.batch_size,
+            "num_gpu_blocks_override": self.num_gpu_blocks_override,
             "request_type_probs": request_type_probs_data,
             "vocab": self.vocab
         }
@@ -1105,8 +1106,9 @@ class TraceType:
 # -------------------------------------------------------
 if __name__ == "__main__":
     
+    max_model_len = 10000
     block_size = 16
-    num_gpu_blocks = 10000/block_size
+    num_gpu_blocks = max_model_len//block_size
     max_parallel = 4 # batch size 
     
     arrival_pattern  = DiscretePoissonArrival(lambda_per_step=0.01, max_steps=4000)

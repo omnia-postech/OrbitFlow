@@ -1394,8 +1394,8 @@ class LLMEngine:
             outputs = self.model_executor.execute_model(
                 execute_model_req=execute_model_req)
             
-            self.cache_config = self.model_executor.driver_worker.cache_engine[0].cache_config # Hard code again Xinyue
-            self.scheduler[0].change_cache_config(self.cache_config)
+            cache_config = self.model_executor.driver_worker.cache_engine[0].cache_config # FIXME Hard code again, although when is multiple virtual engine used?
+            self.scheduler[0].change_cache_config(cache_config)
 
             # We need to do this here so that last step's sampled_token_ids can
             # be passed to the next iteration for PP.

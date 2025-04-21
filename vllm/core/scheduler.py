@@ -352,7 +352,6 @@ class Scheduler:
         num_cpu_blocks = cache_config.num_cpu_blocks
         if num_cpu_blocks:
             num_cpu_blocks //= pipeline_parallel_size
-        # Xinyue 
         # Create the block space manager.
         self.block_manager = BlockSpaceManagerImpl(
             block_size=self.cache_config.block_size,
@@ -433,16 +432,20 @@ class Scheduler:
         """The number of new tokens."""
         return 1
     
+    # Reconfiguration of the KV cache depending on prefetching policies 
     def change_cache_config(self, cache_config: CacheConfig) -> None:
-        self.cache_config = cache_config
-        
+        # cache_config = None 
+        # Check if the cache config has changed
+        cur_num_gpu_blocks = self.block_manager.num_total_gpu_blocks 
+        if cur_num_gpu_blocks == self.cache_config.num_gpu_blocks:
+            return
         #JS: only implemented gpu cache update
 
-        num_gpu_blocks = cache_config.num_gpu_blocks
+        num_gpu_blocks = self.cache_config.num_gpu_blocks
         if num_gpu_blocks:
             num_gpu_blocks //= self.pipeline_parallel_size
 
-        num_cpu_blocks = cache_config.num_cpu_blocks
+        num_cpu_blocks = self.cache_config.num_cpu_blocks
         if num_cpu_blocks:
             num_cpu_blocks //= self.pipeline_parallel_size
 
@@ -588,7 +591,7 @@ class Scheduler:
             #   2. If a sequence is running with non-chunked prefill, then
             #      there it's a decoding sequence, and the cached tokens info is
             #      irrelevant.
-            num_uncached_new_tokens, _ = (
+            num_uncached_new_tokens, num_cached_tokens = ( # Xinyue for debugging
                 self._get_num_new_uncached_and_cached_tokens(
                     seq_group, SequenceStatus.RUNNING, enable_chunking,
                     budget))
@@ -612,8 +615,10 @@ class Scheduler:
             # NOTE(woosuk): Preemption happens only when there is no available
             # slot to keep all the sequence groups in the RUNNING state.
             while not self._can_append_slots(seq_group, enable_chunking): # FIXME
+                logger.info(f"num_running_tokens: {num_running_tokens}, num_cached_tokens: {num_cached_tokens}")
                 budget.subtract_num_batched_tokens(seq_group.request_id,
                                                    num_running_tokens)
+                
                 num_running_seqs = seq_group.get_max_num_running_seqs()
                 budget.subtract_num_seqs(seq_group.request_id,
                                          num_running_seqs)
