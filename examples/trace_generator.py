@@ -704,6 +704,8 @@ class Trace:
         return (f"Trace(\n"
                 f"  arrival_pattern={self.arrival_pattern_name},\n"
                 f"  batch_size={self.batch_size},\n"
+                f"  max_model_len={self.max_model_len},\n"
+                f"  num_gpu_blocks_override={self.num_gpu_blocks_override},\n"
                 f"  request_type_probs={info},\n"
                 f"  vocab={self.vocab},\n"
                 f"  requests=[{len(self.requests)} dictionary entries]\n"
@@ -763,6 +765,7 @@ class Trace:
             requests=requests_dict,
             arrival_pattern_name=arrival_pattern_str,
             batch_size=data["batch_size"],
+            max_model_len=data["max_model_len"],
             request_type_probs=request_type_probs_data,  # we keep it as-is
             vocab=tuple(data["vocab"]),
             num_gpu_blocks_override=num_gpu_blocks_override,
@@ -882,6 +885,7 @@ class Trace:
         data = {
             "arrival_pattern": _arrival_pattern_to_dict(self.arrival_pattern_name),
             "batch_size": self.batch_size,
+            "max_model_len": self.max_model_len,
             "num_gpu_blocks_override": self.num_gpu_blocks_override,
             "request_type_probs": request_type_probs_data,
             "vocab": self.vocab
@@ -909,6 +913,10 @@ class Trace:
 
             # b) batch_size
             f.write(f'  "batch_size":{data["batch_size"]},\n')
+
+            f.write(f'  "max_model_len":{data["max_model_len"]},\n')
+
+            f.write(f'  "num_gpu_blocks_override":{data["num_gpu_blocks_override"]},\n')
 
             # c) request_type_probs (one-liner)
             rtp_json = json.dumps(data["request_type_probs"], separators=(',', ':'))
@@ -1111,7 +1119,10 @@ if __name__ == "__main__":
     num_gpu_blocks = max_model_len//block_size
     max_parallel = 4 # batch size 
     
-    arrival_pattern  = DiscretePoissonArrival(lambda_per_step=0.01, max_steps=4000)
+    uniform_pattern  = DiscreteUniformArrival(max_step=4000)
+    periodic_pattern  = DiscretePeriodicArrival(interval=2)
+    bimodal_pattern  = DiscreteBimodalArrival(lambda1=0.1, lambda2=0.01, p=0.7, max_steps=4000)
+    possion_pattern  = DiscretePoissonArrival(lambda_per_step=0.01, max_steps=4000)
 
     chatbot_qa = RequestType(
         category_name="ChatBot Q&A",
@@ -1182,6 +1193,15 @@ if __name__ == "__main__":
         # Save trace
         trace_obj.save_to_json(filename, skip_token_ids=True)
         
+    # build short only traces
+    def build_short_only():
+        build_sched_save(
+            filename="short_only_uniform.json",
+            request_type_dict={chatbot_qa: 1.0},
+            arrival=arrival_pattern,
+            num_requests=20
+        )
+
         
     # Single Type: ChatBot Q&A only
     build_sched_save(
