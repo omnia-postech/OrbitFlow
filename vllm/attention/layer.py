@@ -14,7 +14,8 @@ from vllm.model_executor.layers.quantization.base_config import (
 from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 from vllm.platforms import _Backend, current_platform
 from vllm.utils import direct_register_custom_op
-
+from vllm.logger import init_logger
+logger = init_logger(__name__)
 
 class Attention(nn.Module):
     """Attention layer.
@@ -132,6 +133,7 @@ class Attention(nn.Module):
         is_recomp: bool = False,
         attn_type: str = AttentionType.DECODER,
     ) -> torch.Tensor:
+        logger.debug(f"Attention received {attn_metadata.block_tables.shape} ")
 
         if self.use_direct_call:
             return self.impl.forward(query,
@@ -292,14 +294,25 @@ def unified_attention_with_output(
 ) -> None:
     forward_context: ForwardContext = get_forward_context()
     attn_metadata = forward_context.dynamic_forward_context
+    # (xinyue) modiying in llama.py does not propagate to here 
+    logger.debug(f"attn_metadata.block_tables.shape: {attn_metadata.block_tables.shape}")
+    cloned_attn_metadata = attn_metadata
+    if len(attn_metadata.block_tables.shape) == 3:
+        block_tables = attn_metadata.block_tables[:,layer,:]
+        cloned_attn_metadata.block_tables = block_tables
+        logger.debug(f"3 cloned_attn_metadata.block_tables.shape: {cloned_attn_metadata.block_tables.shape}")   
+    else:
+        logger.debug(f"2 cloned_attn_metadata.block_tables.shape: {cloned_attn_metadata.block_tables.shape}")    
+    
     self = forward_context.static_forward_context[layer_name]
-    self.impl.forward(query,
+    self.impl.forward(query, 
                       key,
                       value,
                       kv_cache,
                       kv_cache_cpu,
                       layer,
-                      attn_metadata,
+                      #   attn_metadata,
+                      cloned_attn_metadata,
                       self._k_scale,
                       self._v_scale,
                       attn_type=attn_type,

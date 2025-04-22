@@ -341,6 +341,8 @@ class Scheduler:
         if (self.scheduler_config.runner_type == "pooling"
                 or self.cache_config.is_attention_free):
             version = "placeholder"
+        elif cache_config.flattened_cache:
+            version = "selfattn_flatten"
 
         BlockSpaceManagerImpl = BlockSpaceManager.get_block_space_manager_class(
             version)

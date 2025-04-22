@@ -735,7 +735,57 @@ class DeviceMemoryProfiler:
         # Force garbage collection
         gc.collect()
 
+def make_ndarray_with_pad_3d(
+    x: List[List[List[T]]],
+    pad: T,
+    dtype: np.dtype,
+    *,
+    num_layers: int,  # Fixed second dimension (required)
+    max_len: int,
+) -> np.ndarray:
+    """Convert 3D block tables to padded array with:
+    - First dim: sequences
+    - Second dim: fixed layers (pad if needed)
+    - Third dim: padded blocks per layer
+    """
+    num_seqs = len(x)
+    # Create padded array: (num_sequences, num_layers, max_blocks)
+    padded_x = np.full((num_seqs, num_layers, max_len), pad, dtype=dtype)
+    
+    # Inside make_ndarray_with_pad_3d
+    for i, seq in enumerate(x):
+        assert len(seq) <= num_layers  # Checks middle dimension
+        for j, layer in enumerate(seq):
+            assert len(layer) <= max_len  # Checks inner-most dimension
+            padded_x[i, j, :len(layer)] = layer
+    return padded_x
 
+def make_tensor_with_pad_3d(
+    x: List[List[List[T]]],
+    pad: T,
+    dtype: npt.DTypeLike,
+    *,
+    max_len: Optional[int] = None,
+    device: Optional[Union[str, torch.device]] = None,
+    pin_memory: bool = False,
+    num_layers: Optional[int] = None,
+) -> torch.Tensor:
+    
+    np_dtype = TORCH_DTYPE_TO_NUMPY_DTYPE[dtype]
+    
+    if num_layers is None:
+        num_layers = max(map(len, x), default=0)
+    if max_len is None: 
+        max_len = max(map(len, (layer for seq in x for layer in seq)), default=0) if x else 0
+    padded_x = make_ndarray_with_pad_3d(x, pad, dtype=np_dtype, num_layers=num_layers, max_len=max_len)
+
+    tensor = torch.from_numpy(padded_x).to(device)
+    if pin_memory:
+        tensor = tensor.pin_memory()
+
+    return tensor
+
+    return padded_x
 def make_ndarray_with_pad(
     x: List[List[T]],
     pad: T,
@@ -759,7 +809,6 @@ def make_ndarray_with_pad(
         padded_x[ind, :len(blocktb)] = blocktb
 
     return padded_x
-
 
 def make_tensor_with_pad(
     x: List[List[T]],

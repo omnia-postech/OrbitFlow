@@ -224,6 +224,9 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
 
             # If the request is finished:
             if output.finished:
+                logger.info(f"Finished request {rid} at step {cumulative_steps}")
+                logger.info(f"{rid} prompt: {output.prompt_token_ids}")
+                logger.info(f"{rid} output: {output.outputs[0].token_ids}")
                 running_requests.remove(rid)
                 m = output.metrics
 
@@ -363,6 +366,7 @@ def main(configs):
     print(f"gpu_memory_utilization: {gpu_memory_utilization}")
     print(f"num_gpu_blocks_override: {num_gpu_blocks_override}")
     
+    flattened_cache = False
     args = EngineArgs(
         model=MODEL,
         max_model_len=max_model_len,
@@ -372,11 +376,12 @@ def main(configs):
         disable_log_stats=True,
         gpu_memory_utilization=gpu_memory_utilization,
         enforce_eager=True,
-        num_gpu_blocks_override=num_gpu_blocks_override,
+        num_gpu_blocks_override=num_gpu_blocks_override*32 if flattened_cache else num_gpu_blocks_override,
         is_monolithic_distn=is_monolithic_distn, 
         prefetch_mode = prefetch_mode,
         prefetch_distance = prefetch_distance,
         enable_chunked_prefill=False,
+        flattened_cache=flattened_cache,
         # No prefetch, (N=1,static), (N=dynamic,mono), (N=dynamic,dyn), the last two version, N only decreases 
         # multi-request version (might decrease, or increase)
         # num_gpu_blocks_override: Optional[int] = None

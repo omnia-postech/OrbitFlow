@@ -202,7 +202,8 @@ class EngineArgs:
     prefetch_mode: Optional[str] = None
     prefetch_distance: Optional[int] = None
     is_monolithic_distn: bool = False
-
+    flattened_cache: bool = False
+    
     def __post_init__(self):
         if not self.tokenizer:
             self.tokenizer = self.model
@@ -1076,6 +1077,7 @@ class EngineArgs:
             is_monolithic_distn=self.is_monolithic_distn,
             prefetch_mode=self.prefetch_mode,
             prefetch_distance=self.prefetch_distance,
+            flattened_cache=self.flattened_cache,   
         )
         parallel_config = ParallelConfig(
             pipeline_parallel_size=self.pipeline_parallel_size,

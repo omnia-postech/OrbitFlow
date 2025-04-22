@@ -22,7 +22,8 @@ from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sequence import (ExecuteModelRequest, IntermediateTensors,
                            SequenceGroupMetadata, SequenceGroupMetadataDelta)
 from vllm.utils import GiB_bytes, memory_profiling
-from vllm.worker.cache_engine import CacheEngine
+from vllm.worker.cache_engine import CacheEngine, FlattenedCacheEngine
+from vllm.worker.cache_engine_base import CacheEngineBase
 from vllm.worker.enc_dec_model_runner import EncoderDecoderModelRunner
 from vllm.worker.model_runner import GPUModelRunnerBase, ModelRunner
 from vllm.worker.pooling_model_runner import PoolingModelRunner
@@ -94,7 +95,7 @@ class Worker(LocalOrDistributedWorkerBase):
 
         # Uninitialized cache engine. Will be initialized by
         # initialize_cache.
-        self.cache_engine: List[CacheEngine]
+        self.cache_engine: List[CacheEngineBase]
         # Initialize gpu_cache as pooling models don't initialize kv_caches
         self.gpu_cache: Optional[List[List[torch.Tensor]]] = None
         self._seq_group_metadata_cache: Dict[str, SequenceGroupMetadata] = {}
@@ -269,6 +270,7 @@ class Worker(LocalOrDistributedWorkerBase):
 
         This also warms up the model, which may record CUDA graphs.
         """
+        # Xinyue, modify cache size verification to be aware of num layers 
         raise_if_cache_size_invalid(num_gpu_blocks,
                                     self.cache_config.block_size,
                                     self.cache_config.is_attention_free,
@@ -280,13 +282,20 @@ class Worker(LocalOrDistributedWorkerBase):
         self._init_cache_engine()
         self._warm_up_model()
 
-    def _init_cache_engine(self):
+    def _init_cache_engine(self): # FIXME target to fix Xinyue 
         assert self.cache_config.num_gpu_blocks is not None
-        self.cache_engine = [
-            CacheEngine(self.cache_config, self.model_config,
-                        self.parallel_config, self.device_config)
-            for _ in range(self.parallel_config.pipeline_parallel_size)
-        ]
+        if self.cache_config.flattened_cache:
+            self.cache_engine = [
+                FlattenedCacheEngine(
+                self.cache_config, self.model_config, self.parallel_config,
+                self.device_config)
+            ]
+        else:
+            self.cache_engine = [
+                CacheEngine(self.cache_config, self.model_config,
+                            self.parallel_config, self.device_config)
+                for _ in range(self.parallel_config.pipeline_parallel_size)
+            ]
         self.gpu_cache = [
             self.cache_engine[ve].gpu_cache
             for ve in range(self.parallel_config.pipeline_parallel_size)

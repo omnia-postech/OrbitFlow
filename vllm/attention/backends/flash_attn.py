@@ -2,7 +2,7 @@
 from collections import defaultdict
 from dataclasses import dataclass
 from itertools import accumulate
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type, Union
 
 import torch
 
@@ -15,9 +15,9 @@ from vllm.attention.backends.utils import (
     PAD_SLOT_ID, CommonAttentionState, compute_slot_mapping,
     compute_slot_mapping_start_idx, get_num_prefill_decode_query_kv_tokens,
     get_seq_len_block_table_args, is_all_cross_attn_metadata_set,
-    is_all_encoder_attn_metadata_set, is_block_tables_empty)
+    is_all_encoder_attn_metadata_set, is_block_tables_empty, get_bt_dimension)
 from vllm.multimodal import MultiModalPlaceholderMap
-from vllm.utils import async_tensor_h2d, make_tensor_with_pad
+from vllm.utils import async_tensor_h2d, make_tensor_with_pad, make_tensor_with_pad_3d
 
 if TYPE_CHECKING:
     from vllm.worker.model_runner import (ModelInputForGPUBuilder,
@@ -219,7 +219,12 @@ class FlashAttentionMetadata(AttentionMetadata):
                          self.seq_start_loc[:self.num_prefills + 1])
         context_lens_tensor = (None if self.context_lens_tensor is None else
                                self.context_lens_tensor[:self.num_prefills])
-        block_tables = (None if self.block_tables is None else
+        if self.block_tables is None: 
+            block_tables = None
+        elif isinstance(self.block_tables,list):
+            block_tables = [self.block_tables[i][:self.num_prefills] for i in range(len(self.block_tables))]
+        else:
+            block_tables = (None if self.block_tables is None else
                         self.block_tables[:self.num_prefills])
 
         self._cached_prefill_metadata = FlashAttentionMetadata(
@@ -251,10 +256,14 @@ class FlashAttentionMetadata(AttentionMetadata):
 
     @property
     def decode_metadata(self) -> Optional["FlashAttentionMetadata"]:
+        logger.debug(f"decode_metadata called, block_tables {self.block_tables.shape if self.block_tables is not None else None}")
         if self.num_decode_tokens == 0:
             return None
 
+
         if self._cached_decode_metadata is not None:
+            logger.debug(f"return cached decode meta")
+            self._cached_decode_metadata.block_tables = self.block_tables
             return self._cached_decode_metadata
         assert ((self.seq_lens_tensor is not None)
                 or (self.encoder_seq_lens_tensor is not None))
@@ -266,6 +275,7 @@ class FlashAttentionMetadata(AttentionMetadata):
                            self.seq_lens_tensor[self.num_prefills:])
         block_tables = (None if self.block_tables is None else
                         self.block_tables[self.num_prefills:])
+        logger.debug(f"decode_metadata called, block_tables 2 {self.block_tables.shape if self.block_tables is not None else None}")
 
         self._cached_decode_metadata = FlashAttentionMetadata(
             num_prefills=0,
@@ -297,6 +307,7 @@ class FlashAttentionMetadata(AttentionMetadata):
             max_encoder_seq_len=self.max_encoder_seq_len,
             cross_slot_mapping=self.cross_slot_mapping,
             cross_block_tables=self.cross_block_tables)
+        logger.debug(f"decode_metadata called, block_tables 3 {self._cached_decode_metadata.block_tables.shape if self._cached_decode_metadata.block_tables is not None else None}")
         return self._cached_decode_metadata
 
     def advance_step(self,
@@ -380,7 +391,7 @@ class FlashAttentionMetadataBuilder(
         self.slot_mapping: List[int] = []
         self.prefill_seq_lens: List[int] = []
         self.context_lens: List[int] = []
-        self.block_tables: List[List[int]] = []
+        self.block_tables: Union[List[List[int]], List[List[List[int]]]] = []
         self.curr_seq_lens: List[int] = []
         self.multimodal_placeholder_maps: Dict[
             str,
@@ -481,6 +492,8 @@ class FlashAttentionMetadataBuilder(
 
     def build(self, seq_lens: List[int], query_lens: List[int],
               cuda_graph_pad_size: int, batch_size: int):
+        logger.debug(f"build_received : {self.block_tables}")
+        
         """Build attention metadata with on-device tensors.
 
         Args:
@@ -513,21 +526,31 @@ class FlashAttentionMetadataBuilder(
         num_decode_tokens = self.num_decode_tokens
         query_start_loc = list(accumulate(query_lens, initial=0))
         seq_start_loc = list(accumulate(seq_lens, initial=0))
-
         num_seqs = len(seq_lens)
-        if use_captured_graph:
+        if use_captured_graph: # FIXME (xinyue) does not work with 2d block table 
             self.slot_mapping.extend([PAD_SLOT_ID] * cuda_graph_pad_size)
             self.block_tables.extend([] * cuda_graph_pad_size)
             num_decode_tokens = batch_size - self.num_prefill_tokens
             block_tables = self._get_graph_runner_block_tables(
                 num_seqs, self.block_tables)
         else:
-            block_tables = make_tensor_with_pad(
-                self.block_tables,
-                pad=0,
-                dtype=torch.int,
-                device=device,
-            )
+            bt_dim = get_bt_dimension(self.block_tables)
+            # logger.debug(f"bt_dim: {bt_dim}")
+            if bt_dim == 2:            
+                block_tables = make_tensor_with_pad(
+                    self.block_tables,
+                    pad=0,
+                    dtype=torch.int,
+                    device=device,
+                )
+            elif bt_dim == 3: 
+                block_tables = make_tensor_with_pad_3d(
+                    self.block_tables,
+                    pad=0,
+                    dtype=torch.int,
+                    device=device,
+                )
+        # logger.debug(f"build returns block_tables: {block_tables}")
         assert max_query_len > 0, ("query_lens: {}".format(query_lens))
 
         assert device is not None
@@ -723,33 +746,35 @@ class FlashAttentionImpl(AttentionImpl):
                     # print(f"Writing new KV to CPU at layer{layer}")
                     # block_mapping = torch.tensor([[i, i] for i in range(len(key_cache))],
                     #             dtype=torch.bfloat16, device='cpu')
-                    with nvtx.annotate(f"Key Value Writing{layer}"):
-                        updated_slot_mapping_cpu = updated_slot_mapping.flatten().to('cpu')
-                        key_cpu = key.to('cpu')
-                        value_cpu = value.to('cpu')
+                    if kv_cache_cpu is not None:
+                        with nvtx.annotate(f"Key Value Writing{layer}"):
+                            updated_slot_mapping_cpu = updated_slot_mapping.flatten().to('cpu')
+                            key_cpu = key.to('cpu')
+                            value_cpu = value.to('cpu')
 
-                        PAGE_SIZE = 16 # Is this a parameter or set to match with BLOCK SIZE of paged kv cache? 
-                        page_idx = updated_slot_mapping_cpu // PAGE_SIZE      # 각 토큰이 들어갈 페이지 번호
-                        offset_idx = updated_slot_mapping_cpu % PAGE_SIZE    # 해당 페이지 내부에서의 위치(0~15)
+                            PAGE_SIZE = 16 # Is this a parameter or set to match with BLOCK SIZE of paged kv cache? 
+                            page_idx = updated_slot_mapping_cpu // PAGE_SIZE      # 각 토큰이 들어갈 페이지 번호
+                            offset_idx = updated_slot_mapping_cpu % PAGE_SIZE    # 해당 페이지 내부에서의 위치(0~15)
 
-                        num_tokens = updated_slot_mapping_cpu.shape[0]
-                        # num_tokens = updated_slot_mapping_cpu.size(0)
-                        
-                        for i in range(num_tokens):
-                            p = page_idx[i].item()
-                            o = offset_idx[i].item()
-                            # copy each token slice                            
-                            kv_cache_cpu[0][p, o, :, :] = key_cpu[i, :, :] # key 
-                            kv_cache_cpu[1][p, o, :, :] = value_cpu[i, :, :] # value
-                        
-                        # method 2
-                        # # (A) Expand block_idx, offset_idx to match [num_tokens, 1, 1]
-                        # page_idx_exp = page_idx[:, None, None]   # [num_tokens,1,1]
-                        # offset_idx_exp = offset_idx[:, None, None] # [num_tokens,1,1]
-                        # # (B) Expand key_states shape to [num_tokens, num_kv_heads, head_size]                                        
-                        # kv_cache_cpu[0][page_idx_exp, offset_idx_exp] = key_cpu
-                        # kv_cache_cpu[1][page_idx_exp, offset_idx_exp] = value_cpu            
+                            num_tokens = updated_slot_mapping_cpu.shape[0]
+                            # num_tokens = updated_slot_mapping_cpu.size(0)
+                            
+                            for i in range(num_tokens):
+                                p = page_idx[i].item()
+                                o = offset_idx[i].item()
+                                # copy each token slice                            
+                                kv_cache_cpu[0][p, o, :, :] = key_cpu[i, :, :] # key 
+                                kv_cache_cpu[1][p, o, :, :] = value_cpu[i, :, :] # value
+                            
+                            # method 2
+                            # # (A) Expand block_idx, offset_idx to match [num_tokens, 1, 1]
+                            # page_idx_exp = page_idx[:, None, None]   # [num_tokens,1,1]
+                            # offset_idx_exp = offset_idx[:, None, None] # [num_tokens,1,1]
+                            # # (B) Expand key_states shape to [num_tokens, num_kv_heads, head_size]                                        
+                            # kv_cache_cpu[0][page_idx_exp, offset_idx_exp] = key_cpu
+                            # kv_cache_cpu[1][page_idx_exp, offset_idx_exp] = value_cpu            
 
+        logger.debug(f"flash_attn forward received {attn_metadata.block_tables.shape if attn_metadata.block_tables is not None else None}")
         # FIXME Xinyue 
         (num_prefill_query_tokens, num_prefill_kv_tokens,
         num_decode_query_tokens) = \
@@ -849,13 +874,14 @@ class FlashAttentionImpl(AttentionImpl):
                         out=decode_output,
                     )
             else:
+                logger.debug(f"decode meta  {decode_meta.block_tables.shape if decode_meta.block_tables is not None else None}")
                 # Use flash_attn_with_kvcache for normal decoding.
                 (
                     seq_lens_arg,
                     _,
                     block_tables_arg,
                 ) = get_seq_len_block_table_args(decode_meta, False, attn_type)
-                
+                logger.debug(f"flash_attn_with_kvcache: {block_tables_arg.shape}")
                 with nvtx.annotate(f"Decoding FA(2) for layer{layer}"):
                     flash_attn_with_kvcache(
                         q=recomp_query.unsqueeze(1), # batch size is always 1 then XINYUE FIXME

@@ -31,7 +31,9 @@ class BlockSpaceManager(ABC):
         if version == "selfattn":
             from vllm.core.block_manager import SelfAttnBlockSpaceManager
             return SelfAttnBlockSpaceManager
-
+        if version == "selfattn_flatten":
+            from vllm.core.block_manager import SelfAttnBlockSpaceManagerFlattened
+            return SelfAttnBlockSpaceManagerFlattened
         if version == "placeholder":
             from vllm.core.placeholder_block_space_manager import (
                 PlaceholderBlockSpaceManager)

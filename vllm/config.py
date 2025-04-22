@@ -986,9 +986,12 @@ class CacheConfig:
         sliding_window: Optional[int] = None,
         enable_prefix_caching: bool = False,
         cpu_offload_gb: float = 0,
+        
+        # dist-n configs
         is_monolithic_distn: bool = False,
         prefetch_mode: Optional[str] = None,
         prefetch_distance: Optional[int] = None,
+        flattened_cache: bool = False, 
     ) -> None:
         self.block_size = block_size
         self.gpu_memory_utilization = gpu_memory_utilization
@@ -999,9 +1002,11 @@ class CacheConfig:
         self.sliding_window = sliding_window
         self.enable_prefix_caching = enable_prefix_caching
         self.cpu_offload_gb = cpu_offload_gb
+        # dist-n configs 
         self.is_monolithic_distn = is_monolithic_distn
         self.prefetch_mode = prefetch_mode
         self.prefetch_distance = prefetch_distance
+        self.flattened_cache = flattened_cache 
         
         self._verify_args()
         self._verify_cache_dtype()

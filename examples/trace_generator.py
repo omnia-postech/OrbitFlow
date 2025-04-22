@@ -1161,7 +1161,8 @@ if __name__ == "__main__":
         filename: str,
         request_type_dict: dict,
         arrival,
-        num_requests: int
+        num_requests: int,
+        skip_token_ids=True,
     ):
         """
         1) Make a TraceType
@@ -1180,15 +1181,17 @@ if __name__ == "__main__":
         )
 
         # Save trace
-        trace_obj.save_to_json(filename, skip_token_ids=True)
+        trace_obj.save_to_json(filename, skip_token_ids=skip_token_ids)
         
-        
+    
+    skip_token_ids = False
     # Single Type: ChatBot Q&A only
     build_sched_save(
         filename="trace_single_chatbot_qa.json",
         request_type_dict={chatbot_qa: 1.0},
         arrival=arrival_pattern,
-        num_requests=20
+        num_requests=20,
+        skip_token_ids=skip_token_ids,
     )
 
     # Single Type: Creative Generation only
@@ -1196,7 +1199,8 @@ if __name__ == "__main__":
         filename="trace_single_creative_gen.json",
         request_type_dict={creative_gen: 1.0},
         arrival=arrival_pattern,
-        num_requests=20
+        num_requests=20,
+        skip_token_ids=skip_token_ids,
     )
 
     # Single Type: Legal Contract Analysis only
@@ -1204,7 +1208,8 @@ if __name__ == "__main__":
         filename="trace_single_contract_analysis.json",
         request_type_dict={contract_analysis: 1.0},
         arrival=arrival_pattern,
-        num_requests=20
+        num_requests=20,
+        skip_token_ids=skip_token_ids,
     )
 
     # Single Type: Proofreading only
@@ -1212,7 +1217,8 @@ if __name__ == "__main__":
         filename="trace_single_proofreading.json",
         request_type_dict={proofreading: 1.0},
         arrival=arrival_pattern,
-        num_requests=20
+        num_requests=20,
+        skip_token_ids=skip_token_ids,
     )
 
     # 4) Generate traces that mix any two of the above.
@@ -1225,7 +1231,8 @@ if __name__ == "__main__":
         filename="trace_mix2_chatbot_creative.json",
         request_type_dict={chatbot_qa: 0.7, creative_gen: 0.3},  # 70/30
         arrival=arrival_pattern,
-        num_requests=30
+        num_requests=30,
+        skip_token_ids=skip_token_ids,
     )
 
     # B) Creative Generation + Proofreading
@@ -1235,7 +1242,8 @@ if __name__ == "__main__":
         filename="trace_mix2_creative_proofreading.json",
         request_type_dict={creative_gen: 0.4, proofreading: 0.6},  # 40/60
         arrival=arrival_pattern,
-        num_requests=30
+        num_requests=30,
+        skip_token_ids=skip_token_ids,
     )
 
     # C) ChatBot Q&A + Contract Analysis
@@ -1245,7 +1253,8 @@ if __name__ == "__main__":
         filename="trace_mix2_chatbot_contract.json",
         request_type_dict={chatbot_qa: 0.8, contract_analysis: 0.2},
         arrival=arrival_pattern,
-        num_requests=30
+        num_requests=30,
+        skip_token_ids=skip_token_ids,
     )
 
     # ... (Similarly, you could define other pairs if you want) ...
@@ -1260,10 +1269,11 @@ if __name__ == "__main__":
         request_type_dict={
             chatbot_qa: 0.5,
             creative_gen: 0.3,
-            proofreading: 0.2
+            proofreading: 0.2,
         },
         arrival=arrival_pattern,
-        num_requests=40
+        num_requests=40,
+        skip_token_ids=skip_token_ids,
     )
 
     # Another 3-type scenario: ChatBot Q&A + Contract Analysis + Proofreading
@@ -1276,7 +1286,8 @@ if __name__ == "__main__":
             proofreading: 0.2
         },
         arrival=arrival_pattern,
-        num_requests=40
+        num_requests=40,
+        skip_token_ids=skip_token_ids,
     )
 
     # 6) Mix of all four
@@ -1292,5 +1303,6 @@ if __name__ == "__main__":
             proofreading: 0.25
         },
         arrival=arrival_pattern,
-        num_requests=50
+        num_requests=50,
+        skip_token_ids=skip_token_ids,
     )
