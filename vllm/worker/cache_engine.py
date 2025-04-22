@@ -383,8 +383,7 @@ class CacheEngine:
         
         # FIXME new_gpu_cache_num maybe 0 => divide by zero 
         new_num_gpu_blocks = int(self.num_gpu_blocks * self.gpu_cache_num / new_gpu_cache_num) if new_gpu_cache_num != 0 else 0 
-        new_kv_cache_shape = list(self.attn_backend.get_kv_cache_shape(
-            new_num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size))
+
         # what should new shape be? skip? 
         new_shape = list(self.attn_backend.get_kv_cache_shape(
             new_num_gpu_blocks - self.num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size))
@@ -403,7 +402,7 @@ class CacheEngine:
         
         # No offload -> some offload 
         if self.gpu_cache_num == self.num_attention_layers and new_gpu_cache_num < self.num_attention_layers:
-            self.gpu_cache[-1] = torch.zeros(new_kv_cache_shape,
+            self.gpu_cache[-1] = torch.zeros(kv_cache_shape,
                         dtype=self.dtype,
                         # pin_memory=pin_memory,
                         device=self.device_config.device_type)
@@ -475,15 +474,13 @@ class CacheEngine:
         # free_mem, total_mem = torch.cuda.mem_get_info()
         # msg = f"Free Memory after rearr: {free_mem / 1024 / 1024} MB"
         # logger.info(msg)
-    
+        
         kv_cache_shape = list(self.attn_backend.get_kv_cache_shape(
             self.num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size))
         
-
         # FIXME new_gpu_cache_num maybe 0 => divide by zero 
         new_num_gpu_blocks = int(self.num_gpu_blocks * self.gpu_cache_num / new_gpu_cache_num) if new_gpu_cache_num != 0 else 0 
-        new_kv_cache_shape = list(self.attn_backend.get_kv_cache_shape(
-            self.num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size))
+
         # what should new shape be? skip? 
         new_shape = list(self.attn_backend.get_kv_cache_shape(
             new_num_gpu_blocks - self.num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size))
@@ -502,7 +499,7 @@ class CacheEngine:
         
         # No offload -> some offload 
         if self.gpu_cache_num == self.num_attention_layers and new_gpu_cache_num < self.num_attention_layers:
-            self.gpu_cache[-1] = torch.zeros(new_kv_cache_shape,
+            self.gpu_cache[-1] = torch.zeros(kv_cache_shape,
                         dtype=self.dtype,
                         # pin_memory=pin_memory,
                         device=self.device_config.device_type)
