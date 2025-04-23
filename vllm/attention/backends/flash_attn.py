@@ -730,7 +730,7 @@ class FlashAttentionImpl(AttentionImpl):
                 # If kv_cache is not provided, the new key and value tensors are
                 # not cached. This happens during the initial memory
                 # profiling run.
-                
+                logger.info(f"reshape_and_flash layer {layer} updated_slot_mapping {updated_slot_mapping}")
                 torch.ops._C_cache_ops.reshape_and_cache_flash(
                     key,
                     value,
@@ -884,7 +884,7 @@ class FlashAttentionImpl(AttentionImpl):
                 logger.debug(f"flash_attn_with_kvcache: {block_tables_arg.shape}")
                 with nvtx.annotate(f"Decoding FA(2) for layer{layer}"):
                     flash_attn_with_kvcache(
-                        q=recomp_query.unsqueeze(1), # batch size is always 1 then XINYUE FIXME
+                        q=recomp_query.unsqueeze(1), 
                         k_cache=key_cache,
                         v_cache=value_cache,
                         block_table=block_tables_arg,

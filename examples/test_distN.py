@@ -355,9 +355,11 @@ def main(configs):
             prefetch_distance = configs.prefetch_distance 
         else: 
             prefetch_distance = 0 
+    
+    flattened_cache = configs.flattened_cache if hasattr(configs, "flattened_cache") else False
 
     batch_size = trace.batch_size if hasattr(trace, "batch_size") else BATCH_SIZE
-    prompts = trace.requests if hasattr(trace, "requests") else trace.samples 
+    # prompts = trace.requests if hasattr(trace, "requests") else trace.samples
     
     print(f"max_model_len: {max_model_len}")
     print(f"batch_size: {batch_size}")
@@ -366,7 +368,6 @@ def main(configs):
     print(f"gpu_memory_utilization: {gpu_memory_utilization}")
     print(f"num_gpu_blocks_override: {num_gpu_blocks_override}")
     
-    flattened_cache = False
     args = EngineArgs(
         model=MODEL,
         max_model_len=max_model_len,
@@ -416,6 +417,10 @@ if __name__ == "__main__":
                         type=str,
                         default="/home/xinyuema/vllm/outputs/default.log",
                         help="output log file")
+    parser.add_argument("--flattened-cache",
+                        type=bool,
+                        default=False,
+                        help="whether the kv cache is flattened")
     args = parser.parse_args()    
     # --- Setup Logging ---
     logging.basicConfig(filename=args.output_log, level=logging.INFO, format="%(message)s")
