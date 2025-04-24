@@ -12,7 +12,8 @@ from vllm.attention import (AttentionMetadata, AttentionMetadataBuilder,
 from vllm.attention.backends.abstract import AttentionType
 from vllm.multimodal import MultiModalPlaceholderMap
 from vllm.utils import async_tensor_h2d, make_tensor_with_pad
-
+from vllm.logger import init_logger
+logger = init_logger(__name__)
 if TYPE_CHECKING:
     from vllm.worker.model_runner_base import ModelRunnerBase
 
@@ -74,22 +75,48 @@ def _compute_slot_mapping_numpy(slot_mapping: List[int],
     seq_slot_mapping_array += block_offset
     slot_mapping.extend(seq_slot_mapping_array)
 
-def get_bt_dimension(arr):
-    if not arr:
-        return 0  # Handle empty case
-    if isinstance(arr[0], list):
-        if arr and arr[0] and isinstance(arr[0][0], list):
-            return 3
-        return 2
-    return 1
+def _bt_dim(bt) -> int:
+    """
+    Generic dimension detector for vLLM block-table containers.
+
+    Returns
+    -------
+    0  –  empty (`None`, `{}`, `[]`)
+    1  –  flat list  (rare, e.g. profiling stubs `[]` or `[int,…]`)
+    2  –  list-of-list      *or*  dict → list
+    3  –  list-of-list-of-list  *or*  dict → list-of-list
+    """
+    # --------- Handle trivially empty objects -----------------------
+    if bt is None:
+        return 0
+    if isinstance(bt, (list, dict)) and len(bt) == 0:
+        return 0
+
+    dim = 0
+    cur = bt
+
+    # --------- Dict layer counts as one dimension -------------------
+    if isinstance(cur, dict):
+        dim += 1
+        cur = next(iter(cur.values()))    # take any sequence’s entry
+
+    # --------- Count nested list levels -----------------------------
+    while isinstance(cur, list):
+        dim += 1
+        if not cur:                       # empty inner list
+            break
+        cur = cur[0]
+
+    return dim
 # TODO(xinyue) now block tables for each sequence could be a list of int (mapping for each layer )
 def compute_slot_mapping(is_profile_run: bool, slot_mapping: List[int],
                          seq_id: int, seq_len: int, context_len: int,
                          start_idx: int, block_size: int,
-                         block_tables: Union[Dict[int, List[int]], Dict[int, List[List[int]]]]):
+                         block_tables: Dict[int, List[int]]):
     """
     Compute slot mapping.
     """
+    logger.debug(f"compute_slot_mapping received seq_id: {seq_id}, block_tables: {block_tables}")
     if is_profile_run:
         # During memory profiling, the block tables are not
         # initialized yet. In this case, we just use a dummy
@@ -112,26 +139,14 @@ def compute_slot_mapping(is_profile_run: bool, slot_mapping: List[int],
     numel = range_end - range_start
     block_table = block_tables[seq_id]
 
-    if isinstance(block_table[0], list):
-        # block_table is a list of lists, which means that
-        # each layer has its own block table.
-        flatten = [bid for layer_block_table in block_table for bid in layer_block_table] # type: ignore
-        if numel < _COMPUTE_SLOT_MAPPING_NUMPY_NUMEL:
-            _compute_slot_mapping_python(slot_mapping, flatten, range_start,
-                                        range_end, block_size)
-        else:
-            _compute_slot_mapping_numpy(slot_mapping, flatten, range_start,
-                                        range_end, block_size)
-    else:     # numpy implementation will be faster than python if we have
-        # many elements, otherwise it will be slower.
-        if numel < _COMPUTE_SLOT_MAPPING_NUMPY_NUMEL:
-            _compute_slot_mapping_python(slot_mapping, block_table, range_start,
-                                        range_end, block_size)
-        else:
-            _compute_slot_mapping_numpy(slot_mapping, block_table, range_start,
-                                        range_end, block_size)
-
-
+    # numpy implementation will be faster than python if we have
+    # many elements, otherwise it will be slower.
+    if numel < _COMPUTE_SLOT_MAPPING_NUMPY_NUMEL:
+        _compute_slot_mapping_python(slot_mapping, block_table, range_start,
+                                     range_end, block_size)
+    else:
+        _compute_slot_mapping_numpy(slot_mapping, block_table, range_start,
+                                    range_end, block_size)
 TAttentionMetadata = TypeVar("TAttentionMetadata", bound='AttentionMetadata')
 
 

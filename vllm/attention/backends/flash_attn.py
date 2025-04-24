@@ -15,7 +15,7 @@ from vllm.attention.backends.utils import (
     PAD_SLOT_ID, CommonAttentionState, compute_slot_mapping,
     compute_slot_mapping_start_idx, get_num_prefill_decode_query_kv_tokens,
     get_seq_len_block_table_args, is_all_cross_attn_metadata_set,
-    is_all_encoder_attn_metadata_set, is_block_tables_empty, get_bt_dimension)
+    is_all_encoder_attn_metadata_set, is_block_tables_empty, _bt_dim)
 from vllm.multimodal import MultiModalPlaceholderMap
 from vllm.utils import async_tensor_h2d, make_tensor_with_pad, make_tensor_with_pad_3d
 
@@ -310,6 +310,16 @@ class FlashAttentionMetadata(AttentionMetadata):
         logger.debug(f"decode_metadata called, block_tables 3 {self._cached_decode_metadata.block_tables.shape if self._cached_decode_metadata.block_tables is not None else None}")
         return self._cached_decode_metadata
 
+    def select_block_table(self, layer:int) -> "FlashAttentionMetadata":
+        """Select the block table for the given layer.
+
+        Args:
+            layer: The layer number.
+        """
+        if self.cross_block_tables is not None:
+            return self.cross_block_tables[layer]
+        else:
+            return self.block_tables
     def advance_step(self,
                      model_input: "ModelInputForGPUWithSamplingMetadata",
                      sampled_token_ids: Optional[torch.Tensor],
@@ -388,7 +398,7 @@ class FlashAttentionMetadataBuilder(
         AttentionMetadataBuilder[FlashAttentionMetadata]):
 
     def __init__(self, input_builder: "ModelInputForGPUBuilder"):
-        self.slot_mapping: List[int] = []
+        self.slot_mapping:  Union[List[int], List[List[int]]] = []
         self.prefill_seq_lens: List[int] = []
         self.context_lens: List[int] = []
         self.block_tables: Union[List[List[int]], List[List[List[int]]]] = []
@@ -406,6 +416,78 @@ class FlashAttentionMetadataBuilder(
         self.sliding_window = input_builder.sliding_window
         self.block_size = input_builder.block_size
 
+    def _add_seq_group_3d(self,
+                        inter_data,
+                        chunked_prefill_enabled: bool,
+                        prefix_cache_hit: bool):
+        logger.debug(f"_add_seq_group_3d received {inter_data.block_tables  }")
+        is_prompt     = inter_data.is_prompt
+        block_tables  = inter_data.block_tables             # 3-D
+        seq_ids       = inter_data.seq_ids
+
+        for (seq_id, token_len, seq_len, curr_seq_len,
+            query_len, context_len, curr_sliding_window_block) in zip(
+                seq_ids, [len(t) for t in inter_data.input_tokens],
+                inter_data.orig_seq_lens, inter_data.seq_lens,
+                inter_data.query_lens, inter_data.context_lens,
+                inter_data.curr_sliding_window_blocks):
+
+            # ---------- context / accounting (identical to 2-D) ----------
+            self.context_lens.append(context_len)
+            if is_prompt:
+                mm_maps = inter_data.multi_modal_placeholder_maps
+                if mm_maps:
+                    for modality, placeholders in mm_maps.items():
+                        self.multimodal_placeholder_maps[modality].extend(
+                            placeholders)
+                self.num_prefills      += 1
+                self.num_prefill_tokens += token_len
+                self.prefill_seq_lens.append(seq_len)
+            else:
+                self.num_decode_tokens += query_len
+                self.curr_seq_lens.append(curr_seq_len)
+
+            # ---------- block-table selection (identical to 2-D) ----------
+            bt_seq = []
+            if prefix_cache_hit:
+                bt_seq = block_tables[seq_id]
+            elif ((chunked_prefill_enabled or not is_prompt)
+                and block_tables is not None):
+                
+                if curr_sliding_window_block == 0:
+                    bt_seq = block_tables[seq_id]
+                else:
+                    bt_seq = block_tables[seq_id][-curr_sliding_window_block:]
+                    
+            self.block_tables.append(bt_seq)
+
+            # ---------- slot-mapping  (layer-major) ----------------------
+            is_profile_run = is_block_tables_empty(block_tables)
+            num_layers = len(next(iter(inter_data.block_tables.values())))
+            # first 3-D call → allocate layer rows
+            if not self.slot_mapping or isinstance(self.slot_mapping[0], int):
+                self.slot_mapping = [[] for _ in range(num_layers)]
+
+            start_idx = compute_slot_mapping_start_idx(
+                is_prompt, query_len, context_len, self.sliding_window)
+
+            for layer_idx in range(num_layers):
+                layer_block_tables = {
+                    seq_id: bt_seq[layer_idx]          # bt_seq = [[...], [...], ...]
+                    for seq_id, bt_seq in inter_data.block_tables.items()
+                }
+                layer_map = []
+                compute_slot_mapping(
+                    is_profile_run,
+                    layer_map,
+                    seq_id,
+                    seq_len,
+                    context_len,
+                    start_idx,
+                    self.block_size,
+                    layer_block_tables,        # wrap for signature
+                )
+                self.slot_mapping[layer_idx].extend(layer_map)    
     def _add_seq_group(
             self, inter_data: "ModelInputForGPUBuilder.InterDataForSeqGroup",
             chunked_prefill_enabled: bool, prefix_cache_hit: bool):
@@ -465,7 +547,6 @@ class FlashAttentionMetadataBuilder(
             compute_slot_mapping(is_profile_run, self.slot_mapping, seq_id,
                                  seq_len, context_len, start_idx,
                                  self.block_size, inter_data.block_tables)
-
     def _get_graph_runner_block_tables(
             self, num_seqs: int,
             block_tables: List[List[int]]) -> torch.Tensor:
@@ -492,7 +573,7 @@ class FlashAttentionMetadataBuilder(
 
     def build(self, seq_lens: List[int], query_lens: List[int],
               cuda_graph_pad_size: int, batch_size: int):
-        logger.debug(f"build_received : {self.block_tables}")
+        logger.debug(f"build_received : {self.input_builder.inter_data_list[0].block_tables}")
         
         """Build attention metadata with on-device tensors.
 
@@ -503,15 +584,19 @@ class FlashAttentionMetadataBuilder(
                                  -1 if cuda graph is not used.
             batch_size: The maybe padded batch size.
         """
+        # ── decide once per batch which add-function to use ──────────────
+        first_bt = self.input_builder.inter_data_list[0].block_tables
+        adder = (self._add_seq_group_3d
+                if _bt_dim(first_bt) == 3
+                else self._add_seq_group)
         prefix_cache_hit = any([
             inter_data.prefix_cache_hit
             for inter_data in self.input_builder.inter_data_list
         ])
         for inter_data in self.input_builder.inter_data_list:
-            self._add_seq_group(inter_data,
-                                self.input_builder.chunked_prefill_enabled,
-                                prefix_cache_hit)
-
+            adder(inter_data,
+                self.input_builder.chunked_prefill_enabled,
+                prefix_cache_hit)
         device = self.runner.device
         use_captured_graph = cuda_graph_pad_size != -1
 
@@ -534,8 +619,7 @@ class FlashAttentionMetadataBuilder(
             block_tables = self._get_graph_runner_block_tables(
                 num_seqs, self.block_tables)
         else:
-            bt_dim = get_bt_dimension(self.block_tables)
-            # logger.debug(f"bt_dim: {bt_dim}")
+            bt_dim = _bt_dim(self.block_tables)
             if bt_dim == 2:            
                 block_tables = make_tensor_with_pad(
                     self.block_tables,
@@ -550,6 +634,24 @@ class FlashAttentionMetadataBuilder(
                     dtype=torch.int,
                     device=device,
                 )
+        sm_dim = _bt_dim(self.slot_mapping)  # 1 or 2
+        if cuda_graph_pad_size != -1:
+            # ---------------- graph-capture padding -----------------
+            if sm_dim == 1:            # flat list of ints
+                self.slot_mapping.extend([PAD_SLOT_ID] * cuda_graph_pad_size)
+            else:                      # 2-D list, outer = seq
+                for seq_map in self.slot_mapping:            # type: ignore[index]
+                    seq_map.extend([PAD_SLOT_ID] * cuda_graph_pad_size)
+
+        if sm_dim == 1:
+            slot_mapping_tensor = async_tensor_h2d(
+                self.slot_mapping, torch.long, device, self.runner.pin_memory)
+        else:  # sm_dim == 2
+            slot_mapping_tensor = make_tensor_with_pad(
+                self.slot_mapping,                    # List[List[int]]
+                pad=PAD_SLOT_ID,
+                dtype=torch.long,
+                device=device)
         # logger.debug(f"build returns block_tables: {block_tables}")
         assert max_query_len > 0, ("query_lens: {}".format(query_lens))
 
@@ -558,8 +660,7 @@ class FlashAttentionMetadataBuilder(
                                                device, self.runner.pin_memory)
         seq_lens_tensor = async_tensor_h2d(seq_lens, torch.int, device,
                                            self.runner.pin_memory)
-        slot_mapping_tensor = async_tensor_h2d(self.slot_mapping, torch.long,
-                                               device, self.runner.pin_memory)
+
         query_start_loc_tensor = async_tensor_h2d(query_start_loc, torch.int32,
                                                   device,
                                                   self.runner.pin_memory)
@@ -571,6 +672,10 @@ class FlashAttentionMetadataBuilder(
             self.multimodal_placeholder_maps.items()
         }
 
+        # patch continuity
+        block_tables = block_tables.contiguous()
+        slot_mapping_tensor = slot_mapping_tensor.contiguous()
+        logger.debug(f"build returns block table {block_tables.shape}, slot mapping {slot_mapping_tensor.shape}")
         return FlashAttentionMetadata(
             num_prefills=self.num_prefills,
             slot_mapping=slot_mapping_tensor,
@@ -730,7 +835,10 @@ class FlashAttentionImpl(AttentionImpl):
                 # If kv_cache is not provided, the new key and value tensors are
                 # not cached. This happens during the initial memory
                 # profiling run.
-                logger.info(f"reshape_and_flash layer {layer} updated_slot_mapping {updated_slot_mapping}")
+                logger.debug(f"reshape_and_flash layer {layer} updated_slot_mapping {updated_slot_mapping}")
+                logger.debug(f"k, v shape {key if key is None else key.shape}, {value if value is None else value.shape}")
+                logger.debug(f"k cache, v cache shape {key_cache.shape}, {value_cache.shape}")
+                
                 torch.ops._C_cache_ops.reshape_and_cache_flash(
                     key,
                     value,
@@ -741,11 +849,27 @@ class FlashAttentionImpl(AttentionImpl):
                     k_scale,
                     v_scale,
                 )
+                
+                # verify writes 
+                num_tokens = key.shape[0]
+                for tid, slot in enumerate(updated_slot_mapping):
+                    block_idx = slot // 16 
+                    block_offset = slot % 16
+                    
+                    original_key = key[tid, :, 0] # first element of every head (8 heads)
+                    
+                    cached_key = key_cache[block_idx, block_offset, :, 0] 
+                    logger.debug(f"token {tid} -> slot {slot} = Block[{block_idx}][{block_offset}]")
+                    logger.debug(f"original key {original_key}")
+                    logger.debug(f"cached key {cached_key}")
+                    
                 # TODO(HONG): Copy only blocks that are updated with newly generated tokens.                
                 if layer != 0:
                     # print(f"Writing new KV to CPU at layer{layer}")
                     # block_mapping = torch.tensor([[i, i] for i in range(len(key_cache))],
                     #             dtype=torch.bfloat16, device='cpu')
+                    # Temp (xinyue)
+                    assert(kv_cache_cpu is None, "turned off kv cahce cpu for debugging")
                     if kv_cache_cpu is not None:
                         with nvtx.annotate(f"Key Value Writing{layer}"):
                             updated_slot_mapping_cpu = updated_slot_mapping.flatten().to('cpu')
@@ -785,12 +909,7 @@ class FlashAttentionImpl(AttentionImpl):
         query = query[:num_prefill_query_tokens]
         prefill_output = output[:num_prefill_query_tokens]
         assert query.shape[0] == num_prefill_query_tokens # should be batch size? 
-        # assert decode_query.shape[0] == num_decode_query_tokens
-        recomp_query = decode_query[-1:, :, :]
-        recomp_output = decode_output[-1:, :, :]
-        recomp_query = decode_query
-        recomp_output = decode_output
-        assert recomp_query.shape[0] == num_decode_query_tokens
+        assert decode_query.shape[0] == num_decode_query_tokens
 
         if prefill_meta := attn_metadata.prefill_metadata:
             # Prompt run.
@@ -881,10 +1000,10 @@ class FlashAttentionImpl(AttentionImpl):
                     _,
                     block_tables_arg,
                 ) = get_seq_len_block_table_args(decode_meta, False, attn_type)
-                logger.debug(f"flash_attn_with_kvcache: {block_tables_arg.shape}")
+                logger.debug(f"flash_attn_with_kvcache: {block_tables_arg.shape}, {seq_lens_arg}")
                 with nvtx.annotate(f"Decoding FA(2) for layer{layer}"):
                     flash_attn_with_kvcache(
-                        q=recomp_query.unsqueeze(1), 
+                        q=decode_query.unsqueeze(1), 
                         k_cache=key_cache,
                         v_cache=value_cache,
                         block_table=block_tables_arg,
@@ -894,7 +1013,7 @@ class FlashAttentionImpl(AttentionImpl):
                         window_size=window_size,
                         alibi_slopes=alibi_slopes,
                         softcap=logits_soft_cap,
-                        out=recomp_output.unsqueeze(1),
+                        out=decode_output.unsqueeze(1),
                     )
 
             # print(f"decoding interval: {time.time() - start}")

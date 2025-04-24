@@ -225,8 +225,9 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
             # If the request is finished:
             if output.finished:
                 logger.info(f"Finished request {rid} at step {cumulative_steps}")
-                logger.info(f"{rid} prompt: {output.prompt_token_ids}")
-                logger.info(f"{rid} output: {output.outputs[0].token_ids}")
+                logger.info(f"{rid} prompt: {output.prompt_token_ids[:5]}")
+                logger.info(f"{rid} output: {output.outputs[0].token_ids[:5]}")
+                logger.info(f"{rid} output: {output.outputs[0].text[:5]}")
                 running_requests.remove(rid)
                 m = output.metrics
 

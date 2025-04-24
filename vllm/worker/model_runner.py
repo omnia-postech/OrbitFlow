@@ -57,7 +57,7 @@ from vllm.worker.model_runner_base import (
     _add_sampling_metadata_broadcastable_dict,
     _init_attn_metadata_from_tensor_dict,
     _init_sampling_metadata_from_tensor_dict, dump_input_when_exception)
-
+from copy import copy
 if TYPE_CHECKING:
     from vllm.attention.backends.abstract import AttentionBackend
 
@@ -72,6 +72,33 @@ TModelInputForGPU = TypeVar('TModelInputForGPU', bound="ModelInputForGPU")
 # For now, bump up cache limits for recompilations during CUDA graph warmups.
 torch._dynamo.config.cache_size_limit = 128
 torch._dynamo.config.accumulated_cache_size_limit = 128
+
+
+def build_layer_metadata(attn_meta):
+    """Return List[FlashAttentionMetadata], one object per layer.
+
+    All fields are *shared* except .block_tables and .slot_mapping,
+    which become layer-specific *views* (no data copy)."""
+    bt  = attn_meta.block_tables          # (S, L, B) or (S, 0) 
+    sm  = attn_meta.slot_mapping          # (L, B)
+    L   = sm.size(0)
+    bt_ndim = bt.ndim
+    layer_metas = []
+    if bt_ndim == 2:
+        for l in range(L):
+            meta_l = copy(attn_meta)     # shallow copy, O(1)
+            meta_l.block_tables = bt  # view: (S, 0)
+            meta_l.slot_mapping = sm.select(0, l)   # view: (B,)
+            layer_metas.append(meta_l)
+    elif bt_ndim == 3:
+        for l in range(L):
+            meta_l = copy(attn_meta)     # shallow copy, O(1)
+            meta_l.block_tables = bt.select(1, l)   # view: (S, B)
+            meta_l.slot_mapping = sm.select(0, l)   # view: (B,)
+            layer_metas.append(meta_l)
+    else: 
+        return attn_meta # fall back 
+    return layer_metas
 
 
 @dataclass(frozen=True)
@@ -1690,8 +1717,12 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
             model_forward_start.record()
 
         if not bypass_model_exec:
-            with set_forward_context(model_input.attn_metadata,
-                                     self.vllm_config):
+            if not model_input.attn_metadata.slot_mapping.ndim == 1: 
+                layer_metas = build_layer_metadata(model_input.attn_metadata)
+            else:
+                layer_metas = model_input.attn_metadata # profile run
+            # with set_forward_context(model_input.attn_metadata, self.vllm_config):
+            with set_forward_context(layer_metas, self.vllm_config):
                 hidden_or_intermediate_states = model_executable(
                     input_ids=model_input.input_tokens,
                     positions=model_input.input_positions,

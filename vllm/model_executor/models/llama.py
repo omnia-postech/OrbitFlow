@@ -213,8 +213,13 @@ class LlamaAttention(nn.Module):
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         with nvtx.annotate(f"rotary_emb[{layer}]"):
             q, k = self.rotary_emb(positions, q, k)
+        # logger.info(f"Layer {layer} v[-1,:,0]: {v[-1,:5]}")
+        # logger.info(f"Layer {layer} q[-1,:5]: {q[-1,:5]}")
+        # logger.info(f"Layer {layer} k[-1,:5]: {k[-1,:5]}")
+        # logger.info(f"Layer {layer} v[-1,:5]: {v[-1,:5]}")
         with nvtx.annotate(f"attn[{layer}]"):
             attn_output = self.attn(q, k, v, kv_cache, kv_cache_cpu, layer, attn_metadata, is_recomp)
+            # logger.info(f"Layer {layer} attn_output[:5]: {attn_output[0,:5]}")
         with nvtx.annotate(f"o_proj[{layer}]"):
             output, _ = self.o_proj(attn_output)
         return output
@@ -575,7 +580,7 @@ class LlamaModel(nn.Module):
                 if recomputation_vars['recomp_pages']: 
                     start_page, end_page = recomputation_vars["recomp_pages"][0] # FIXME 
                 else: 
-                     start_page, end_page = 0, 0
+                     start_page, end_page = 0, -1
                 logger.debug(f"KV_CACHES: {len(kv_caches)}, {len(kv_caches[0])}")
                 if len(kv_caches) == len(self.layers) + 1 and kv_caches[-1] is not None: # default cache, with offload
                     if gpu_cpu_cache_map[layer_num] == 0:
