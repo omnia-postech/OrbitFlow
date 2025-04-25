@@ -220,6 +220,8 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
                 now = time.time()
                 request_metadata[rid]["token_timestamps"].append(now)
                 request_metadata[rid]["decode_length"] += 1
+                finished_tokens += 1
+                finished_decode_tokens += 1
                 request_output[rid].append(output)
 
             # If the request is finished:
@@ -246,8 +248,8 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
                     avg_token_latency = sum(per_token_latencies) / len(per_token_latencies)
 
                 decode_length = request_metadata[rid]["decode_length"]
-                finished_tokens += decode_length
-                finished_decode_tokens += decode_length
+                # finished_tokens += decode_length
+                # finished_decode_tokens += decode_length
 
                 # Track global start/end times
                 if start_time is None or (m.arrival_time and m.arrival_time < start_time):
