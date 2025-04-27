@@ -16,6 +16,8 @@ import logging
 
 import pandas as pd 
 import torch 
+import bisect
+
 # --- Config ---
 MODEL = "/home/jongseop/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"
 PROMPT_DIR = "./prompts"
@@ -40,6 +42,83 @@ test_trace = {
     }
 }
 DEFAULT_PROMPTS = test_trace
+
+class DelaySimulator:
+    def __init__(self, v_tps: float):        
+        # v_tps: tokens per second
+        self.v = v_tps
+        self.last_time = {}
+        # self.interval = 1.0 / v_tps       # 토큰 하나가 배출되어야 하는 간격(초)
+        # self.next_deadline = self.interval
+        self.deposit = defaultdict(int)   # request_id → 누적된 토큰 수
+
+        logger.info(f"[Simulator __init__] v_tps={self.v:.3f} tokens/sec")
+
+    def on_token(self, rid: str):
+        before = self.deposit[rid]
+        self.deposit[rid] += 1
+        after = self.deposit[rid]
+        now = time.time()
+        
+        if rid not in self.last_time: 
+            self.last_time[rid] = now
+            logger.info(f"[on_token] first token for {rid}, setting last_time[{rid}] = {now:.6f}")
+
+        logger.info(f"[on_token] rid={rid} @ {now:.6f}: deposit {before} -> {after}")
+
+
+    def pop(self):
+        now= time.time()
+        logger.info(f"[pop] called @ {now:.6f}; current deposits: {dict(self.deposit)}")
+        pops = []
+
+        for rid, dep in list(self.deposit.items()):
+            last = self.last_time.get(rid, now)
+            # dt: time since last pop
+            dt = now - last
+            # n: number of tokens to release
+            n = int(dt * self.v)
+
+            logger.info(f"[pop] rid={rid}: time since last pop dt={dt:.6f}s, "
+                        f"raw_to_release={n}, deposit={dep}")
+
+            if n <= 0:
+                continue
+
+            # release n tokens, but not more than deposit
+            if dep < n:
+                logger.info(f"SLO violation for request {rid} at {now}, have {dep}, need {n}")
+            to_rel = min(n, dep)
+            # deposit 차감
+            self.deposit[rid] -= to_rel
+            pops.append((rid, to_rel))
+            
+            # last_time[rid] 을 방출된 토큰 시간만큼 앞으로 이동
+            # 즉, to_rel tokens / v_tps 만큼 경과시킨 것처럼
+            advance = to_rel / self.v
+            self.last_time[rid] = last + advance
+
+            logger.info(f"[pop] rid={rid}: releasing {to_rel} tokens, "
+                        f"new deposit={self.deposit[rid]}, "
+                        f"advancing last_time by {advance:.6f}s -> {self.last_time[rid]:.6f}")
+
+        return pops
+    
+    def finish(self, rid: str):
+        """요청 완료 시 호출: 남은 deposit 제거, tracking 변수 cleanup"""
+        if rid in self.deposit:
+            logger.info(f"[finish] clearing deposit for {rid}: was {self.deposit[rid]}")
+            del self.deposit[rid]
+        if rid in self.last_time:
+            logger.info(f"[finish] removing last_time entry for {rid}")
+            del self.last_time[rid]
+
+    def stats(self) -> dict:
+        """현재 deposit 맵(rid→남은 토큰 수) 반환."""
+        stats = dict(self.deposit)
+        logger.info(f"[stats] deposit map: {stats}")
+        return dict(stats)
+
 def load_prompts(path=None):
     use_default = path is None 
     if use_default:
@@ -185,6 +264,9 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
             # Enqueue with the engine
             engine.add_request(req_id, prompt_obj, sampling_params)
 
+    SLO_THRESHOLD = 0.2
+    sim = DelaySimulator(v_tps=1/SLO_THRESHOLD)
+
     # The main simulation loop
     while queue or request_metadata:
         # 4) Find all requests that have arrival_time <= cumulative_steps
@@ -198,14 +280,23 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
             queue = [(req_id, req_obj) for (req_id, req_obj) in queue
                      if req_obj.arrival_time > cumulative_steps]
 
+        # TODO(Heelim): need to send metadata to scheduler to make decision of which request and when to pause and resume
+        deposit_map = sim.stats()        
+        # engine.schedule[0].deposit_map = deposit_map
+        # engine.schedule[0].slo = SLO_THRESHOLD
+
         # 5) Perform one engine step
         step_outputs = engine.step()
         # If no outputs come back, we still increment steps
         cumulative_steps += 1
+        
+        tokens_to_release = sim.pop()
 
         # 6) Process each output
         for output in step_outputs:
             rid = output.request_id
+            logger.info(f"Processing request {rid} at step {cumulative_steps}")
+            # Prefill
             if rid not in received_requests:
                 # This is the first token for that request
                 received_requests.append(rid)
@@ -215,9 +306,15 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
                 finished_tokens += len(output.prompt_token_ids)
                 finished_prefill_tokens += len(output.prompt_token_ids)
                 running_requests.add(rid)
+            # Decoding
             else:
                 # Another token
+                logger.info(f"Decoding for request {rid} at step {cumulative_steps}")
                 now = time.time()
+
+                sim.on_token(rid)
+
+                # FIXME(HONG): no need to use token_timestamps, rather use output.metrics.last_token_time
                 request_metadata[rid]["token_timestamps"].append(now)
                 request_metadata[rid]["decode_length"] += 1
                 finished_tokens += 1
@@ -283,6 +380,8 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
                 # done with this request
                 request_metadata.pop(rid)
                 logger.info(f"Finished request {rid} with {decode_length} decode tokens")
+
+                sim.finish(rid)
 
         # We'll sleep a bit
         time.sleep(0.01)
