@@ -201,8 +201,10 @@ class BlockAllocator(ABC):
         block_hashes: List[int],
     ) -> List[int]:
         pass
-
-
+    
+    @abstractmethod
+    def update_by_cache_config(self, cache_config) -> None:
+        pass
 class DeviceAwareBlockAllocator(ABC):
 
     @abstractmethod
@@ -304,3 +306,7 @@ class DeviceAwareBlockAllocator(ABC):
         device: Device = Device.GPU,
     ) -> List[int]:
         pass
+
+    @abstractmethod
+    def update_by_cache_config(self, num_blocks) -> None:
+        pass 

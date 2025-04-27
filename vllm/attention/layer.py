@@ -19,23 +19,6 @@ logger = init_logger(__name__)
 from copy import copy
 
 
-def build_layer_metadata(attn_meta):
-    """Return List[FlashAttentionMetadata], one object per layer.
-
-    All fields are *shared* except .block_tables and .slot_mapping,
-    which become layer-specific *views* (no data copy)."""
-    bt  = attn_meta.block_tables          # (S, L, B)
-    sm  = attn_meta.slot_mapping          # (L, B)
-    L   = bt.size(1)
-
-    layer_metas = []
-    for l in range(L):
-        meta_l = copy(attn_meta)     # shallow copy, O(1)
-        meta_l.block_tables = bt.select(1, l)   # view: (S, B)
-        meta_l.slot_mapping = sm.select(0, l)   # view: (B,)
-        layer_metas.append(meta_l)
-    return layer_metas
-
 class Attention(nn.Module):
     """Attention layer.
 
@@ -373,9 +356,8 @@ def unified_attention_with_output(
     logger.debug(f"Layer {layer} attn_metadata.block_tables: {attn_metadata.block_tables}")
     # logger.debug(f"Layer {layer} attn_metadata: {repr(attn_metadata)}")
     
-    if layer == 0: 
-        logger.debug(f"full block_tables: {attn_metadata.block_tables}")
-        logger.debug(f"full_slot_mapping {attn_metadata.slot_mapping.shape} {attn_metadata.slot_mapping}")
+    logger.debug(f"full block_tables: {attn_metadata.block_tables}")
+    logger.debug(f"full_slot_mapping {attn_metadata.slot_mapping.shape} {attn_metadata.slot_mapping}")
     # if attn_metadata.slot_mapping.ndim == 2:  
     #     if attn_metadata.block_tables.ndim == 2: # prefill 
     #         block_tables = attn_metadata.block_tables
@@ -390,6 +372,7 @@ def unified_attention_with_output(
     #     logger.debug(f"2d attn_metadata.block_tables: {attn_metadata.block_tables.shape} {attn_metadata.block_tables}")    
     #     logger.debug(f"1d attn_metadata.slot_mapping: {attn_metadata.slot_mapping.shape} {attn_metadata.slot_mapping}")    
     
+    logger.debug(f"layer {layer} kv_cache {kv_cache.shape} kv_cache_cpu {kv_cache_cpu.shape if kv_cache_cpu is not None else None}")
     self = forward_context.static_forward_context[layer_name]
     self.impl.forward(query, 
                       key,

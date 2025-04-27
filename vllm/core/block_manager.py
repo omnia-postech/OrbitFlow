@@ -69,6 +69,7 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
         watermark: float = 0.01,
         sliding_window: Optional[int] = None,
         enable_caching: bool = False,
+        cache_config = None,
     ) -> None:
         self.block_size = block_size
         self.num_total_gpu_blocks = num_gpu_blocks
@@ -109,12 +110,17 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
         self._last_access_blocks_tracker = LastAccessBlocksTracker(
             self.block_allocator)
         
-    def update_num_gpu_blocks(self, num_gpu_blocks: int) -> None:
+        self.cache_config = cache_config 
+        if self.cache_config and hasattr(cache_config, "enable_prefetch"): 
+            self.enable_prefetch = self.cache_config.enable_prefetch 
+        else: 
+            self.enable_prefetch = False
+    def update_by_cache_config(self, cache_config) -> None:
+        num_gpu_blocks = cache_config.num_gpu_blocks
         if self.num_total_gpu_blocks != num_gpu_blocks:
-            # logger.info(f"BlockManager.update_num_gpu_blocks: {self.num_total_gpu_blocks} -> {num_gpu_blocks}")
             self.num_total_gpu_blocks = num_gpu_blocks
-            self.block_allocator.update_gpu_allocator(num_gpu_blocks)
-
+            self.block_allocator.update_by_cache_config(cache_config)
+        self.cache_config = cache_config 
     def can_allocate(self,
                      seq_group: SequenceGroup,
                      num_lookahead_slots: int = 0) -> AllocStatus:
@@ -249,12 +255,6 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
                 f"total_gpu_blocks: {self.block_allocator.get_num_total_blocks(Device.GPU)},  " \
                     f"{self.block_allocator._allocators[Device.GPU]._all_block_indices}"
             logger.info(msg)
-            # for req_id, block_table in self.block_tables.items():
-            #     msg = f"req_id: {req_id}, " \
-            #         f"block_table.physical_block_ids: {len(block_table.physical_block_ids)} {block_table.physical_block_ids}, " 
-            #     logger.info(msg)
-            # msg = f"num_lookahead_slots: {num_lookahead_slots}, " 
-            # logger.info(msg) 
         return num_touched_blocks <= num_free_gpu_blocks
 
     def append_slots(
@@ -280,7 +280,6 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
         if seq_id not in self.block_tables:
             # Already freed or haven't been scheduled yet.
             return
-        # logger.info(f"Freeing block table for seq {seq_id}, block table: {self.block_tables[seq_id].physical_block_ids}")
 
         # Update seq block ids with the latest access time
         self._last_access_blocks_tracker.update_seq_blocks_last_access(
@@ -305,7 +304,10 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
     def get_block_table(self, seq: Sequence) -> List[int]:
         block_ids = self.block_tables[seq.seq_id].physical_block_ids
         return block_ids  # type: ignore
-
+    def get_block_table_cpu(self, seq: Sequence) -> List[List[int]]:
+        return []
+    def get_cpu_offset(self) -> int: 
+        return 0 
     def get_cross_block_table(self, seq_group: SequenceGroup) -> List[int]:
         request_id = seq_group.request_id
         assert request_id in self.cross_block_tables
@@ -579,6 +581,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
             window. Defaults to None.
         enable_caching (bool, optional): Flag indicating whether caching is
             enabled. Defaults to False.
+        enable_prefetch (bool, optional): whether we store KV on CPU, to support prefetching. 
     """
     # Does it work with sliding window? # Xinyue 
     def __init__(
@@ -589,11 +592,13 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         watermark: float = 0.01,
         sliding_window: Optional[int] = None,
         enable_caching: bool = False,
+        enable_prefetch: bool = True,
+        cache_config = None
     ) -> None:
         self.block_size = block_size
         self.num_total_gpu_blocks = num_gpu_blocks
         self.num_total_cpu_blocks = num_cpu_blocks
-
+        self.cpu_offset = self.num_total_gpu_blocks
         self.sliding_window = sliding_window
         # max_block_sliding_window is the max number of blocks that need to be
         # allocated
@@ -611,17 +616,26 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         assert watermark >= 0.0
 
         self.enable_caching = enable_caching
-
+        self.enable_prefetch = enable_prefetch 
+        
         self.watermark_blocks = int(watermark * num_gpu_blocks) #JS: may have to update
 
+        if self.enable_caching: 
+            allocator_type = "prefix_caching"
+        elif self.enable_prefetch: 
+            allocator_type = "prefetch" 
+        else: 
+            allocator_type = "naive"
         self.block_allocator = CpuGpuBlockAllocator.create(
-            allocator_type="prefix_caching" if enable_caching else "naive",
+            allocator_type=allocator_type,
             num_gpu_blocks=num_gpu_blocks,
             num_cpu_blocks=num_cpu_blocks,
             block_size=block_size,
         )
 
         self.block_tables: Dict[SeqId, List[BlockTable]] = {}
+        self.cpu_block_tables: Dict[SeqId, List[BlockTable]] = {} 
+
         self.cross_block_tables: Dict[EncoderSeqId, List[BlockTable]] = {} 
 
         self._computed_blocks_tracker = ComputedBlocksTracker(
@@ -630,14 +644,14 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
             self.block_allocator)
         
         self.num_attention_layers = 32 # FIXME HARDCODE Xinyue; propagate num model layers until here
+        self.cache_config = cache_config
         
         
-        
-    def update_num_gpu_blocks(self, num_gpu_blocks: int) -> None:
-        if self.num_total_gpu_blocks != num_gpu_blocks:
-            # logger.info(f"BlockManager.update_num_gpu_blocks: {self.num_total_gpu_blocks} -> {num_gpu_blocks}")
-            self.num_total_gpu_blocks = num_gpu_blocks
-            self.block_allocator.update_gpu_allocator(num_gpu_blocks)
+    def update_by_cache_config(self, cache_config):
+        if cache_config == self.cache_config: 
+            return 
+        self.cache_config = cache_config 
+        self.block_allocator.update_by_cache_config(cache_config)
 
     def can_allocate(self,
                      seq_group: SequenceGroup,
@@ -683,22 +697,6 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         else:
             return AllocStatus.LATER
 
-    def _allocate_sequence(self, seq: Sequence) -> BlockTable: # Xinyue
-        block_table = BlockTable(
-            block_size=self.block_size,
-            block_allocator=self.block_allocator,
-            max_block_sliding_window=self.max_block_sliding_window,
-        )
-        # Xinyue 
-        if seq.get_token_ids():
-            # NOTE: If there are any factors affecting the block besides
-            # token_ids, they should be added as input to extra_hash.
-            extra_hash = seq.extra_hash()
-
-            # Add blocks to the block table only if the sequence is non empty.
-            block_table.allocate(token_ids=seq.get_token_ids(),
-                                 extra_hash=extra_hash)
-        return block_table
 
     def allocate(self, seq_group: SequenceGroup) -> None:
 
@@ -711,11 +709,17 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         # prompt.
         seq = waiting_seqs[0]
         
+        # (xinyue) let block tables for a sequence holds to  BlockTable, one for GPU and one for CPU
         self.block_tables[seq.seq_id] = []
+        self.cpu_block_tables[seq.seq_id] = []
         for i in range(self.num_attention_layers):
-            block_table: BlockTable = self._allocate_sequence(seq)
-            self.block_tables[seq.seq_id].append(block_table)
-        msg = f"block_table allocated for seq {seq.seq_id}, {len(self.block_tables[seq.seq_id][0]._blocks)} blocks for {i+1} layers"
+            block_table_gpu: BlockTable = self._allocate_sequence(seq, Device.GPU)
+            block_table_cpu: BlockTable = self._allocate_sequence(seq, Device.CPU)
+            self.block_tables[seq.seq_id].append(block_table_gpu)
+            self.cpu_block_tables[seq.seq_id].append(block_table_cpu)
+        msg = f"gpu block_table allocated for seq {seq.seq_id}, {len(self.block_tables[seq.seq_id][0]._blocks)} blocks for {i+1} layers"
+        logger.info(msg)
+        msg = f"cpu block_table allocated for seq {seq.seq_id}, {len(self.cpu_block_tables[seq.seq_id][0]._blocks)} blocks for {i+1} layers"
         logger.info(msg)
         # Track seq
         self._last_access_blocks_tracker.add_seq(seq.seq_id) # Xinyue for prefix caching, relevant? 
@@ -723,8 +727,11 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         # Assign the block table for each sequence.
         for seq in waiting_seqs[1:]:
             self.block_tables[seq.seq_id] = []
+            self.cpu_block_tables[seq.seq_id] = []
             for i in range(32):
                 self.block_tables[seq.seq_id].append(self.block_tables[seq.seq_id][i].fork())
+                self.cpu_block_tables[seq.seq_id].append(self.cpu_block_tables[seq.seq_id][i].fork())
+                
             # Track seq
             self._last_access_blocks_tracker.add_seq(seq.seq_id)
 
@@ -744,14 +751,8 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
             encoder_seq = seq_group.get_encoder_seq()
             assert encoder_seq is not None
             block_table = self._allocate_sequence(encoder_seq)
-            self.cross_block_tables[request_id] = block_table
-        # REMOVE (xinyue)
-        # logger.info(f"allocate() returns")
-        # for seq_id, seq_block_tables in self.block_tables.items():
-        #     logger.info(f"seq_id {seq_id}")
-        #     for i, block_table in enumerate(seq_block_tables):
-        #         logger.info(f"layer i: {block_table._blocks._block_ids}")
-
+            self.cross_block_tables[request_id] = block_table # ignore
+            
 
     def can_append_slots(self, seq_group: SequenceGroup,
                          num_lookahead_slots: int) -> bool:
@@ -786,12 +787,6 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
                 f"total_gpu_blocks: {self.block_allocator.get_num_total_blocks(Device.GPU)},  " \
                     f"{self.block_allocator._allocators[Device.GPU]._all_block_indices}"
             logger.info(msg)
-            # for req_id, block_table in self.block_tables.items():
-            #     msg = f"req_id: {req_id}, " \
-            #         f"block_table.physical_block_ids: {len(block_table.physical_block_ids)} {block_table.physical_block_ids}, " 
-            #     logger.info(msg)
-            # msg = f"num_lookahead_slots: {num_lookahead_slots}, " 
-            # logger.info(msg) 
         return num_touched_blocks <= num_free_gpu_blocks
 
     def append_slots(
@@ -800,15 +795,27 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         num_lookahead_slots: int,
     ) -> List[Tuple[int, int]]:
 
+        gpu_cpu_cache_map = self.cache_config.gpu_cpu_cache_map
         seq_block_tables = self.block_tables[seq.seq_id]
-        for block_table in seq_block_tables:
+        for i, block_table in enumerate(seq_block_tables):
+            if gpu_cpu_cache_map[i]:
+                block_table.append_token_ids(
+                    token_ids=block_table.get_unseen_token_ids(seq.get_token_ids()),
+                    num_lookahead_slots=num_lookahead_slots,
+                    num_computed_slots=seq.data.get_num_computed_tokens(),
+                    extra_hash=seq.extra_hash(),
+                )
+            else: 
+                assert(not block_table._is_allocated)
+        
+        seq_cpu_block_tables = self.cpu_block_tables[seq.seq_id] 
+        for i, block_table in enumerate(seq_cpu_block_tables):
             block_table.append_token_ids(
                 token_ids=block_table.get_unseen_token_ids(seq.get_token_ids()),
                 num_lookahead_slots=num_lookahead_slots,
                 num_computed_slots=seq.data.get_num_computed_tokens(),
                 extra_hash=seq.extra_hash(),
             )
-
         # Return any new copy-on-writes.
         new_cows = self.block_allocator.clear_copy_on_writes()
         return new_cows
@@ -816,11 +823,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
     def free(self, seq: Sequence) -> None:
         seq_id = seq.seq_id
         if seq_id not in self.block_tables:
-            # Already freed or haven't been scheduled yet.
             return
-        # logger.info(f"Freeing block table for seq {seq_id}, block table: {self.block_tables[seq_id].physical_block_ids}")
-
-
         if isinstance(self.block_tables[seq.seq_id],list):
             # all physical blocks for all layers
             all_phys_ids = list(chain.from_iterable(
@@ -848,6 +851,49 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
             self.block_tables[seq_id].free()
             del self.block_tables[seq_id]
 
+    def free_seq_by_layer(self, seq_blocks): 
+        freed_blocks = []
+        for seq_id, layers in seq_blocks.items():
+            for layer in layers:
+                # collect the block-ids belonging to this (seq_id, layer) pair
+                freed_blocks.extend(self.block_tables[seq_id][layer].physical_block_ids)
+
+                # release the memory associated with those blocks
+                self.block_tables[seq_id][layer].free()
+        logger.debug(f"freed_blocks: {freed_blocks}")
+        return freed_blocks
+    
+    def _allocate_sequence(self, seq: Sequence, device: Device = Device.GPU) -> BlockTable: # Xinyue
+        block_table = BlockTable(
+            block_size=self.block_size,
+            block_allocator=self.block_allocator,
+            max_block_sliding_window=self.max_block_sliding_window,
+        )
+        # Xinyue 
+        if seq.get_token_ids():
+            # NOTE: If there are any factors affecting the block besides
+            # token_ids, they should be added as input to extra_hash.
+            extra_hash = seq.extra_hash()
+
+            # Add blocks to the block table only if the sequence is non empty.
+            block_table.allocate(token_ids=seq.get_token_ids(),
+                                 extra_hash=extra_hash,
+                                 device=device)
+        return block_table
+
+    def allocate_seq_by_layer(self, seq_id, layer_id, n_blocks): 
+        assert(seq_id in self.block_tables) # will this be true for paused or preempt requests 
+        cpu_layer_table = self.cpu_block_tables[seq_id][layer_id]
+        assert(n_blocks == len(cpu_layer_table._blocks)) 
+        token_ids = cpu_layer_table._get_all_token_ids()
+        block_table = BlockTable(
+                                block_size=self.block_size,
+                                block_allocator=self.block_allocator,
+                                max_block_sliding_window=self.max_block_sliding_window,
+                                )
+        block_table.allocate(token_ids=token_ids,
+                        device=Device.GPU)
+        return block_table.physical_block_ids
     def free_cross(self, seq_group: SequenceGroup) -> None:
         request_id = seq_group.request_id
         if request_id not in self.cross_block_tables:
@@ -863,7 +909,16 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
             assert all(b is not None for b in layer_block_ids)
             block_ids.append(layer_block_ids) 
         return block_ids  # type: ignore
-
+    
+    def get_block_table_cpu(self, seq: Sequence) -> List[List[int]]:
+        block_ids = []
+        for i in range(self.num_attention_layers):
+            layer_block_ids = self.cpu_block_tables[seq.seq_id][i].physical_block_ids
+            assert all(b is not None for b in layer_block_ids)
+            block_ids.append(layer_block_ids) 
+        return block_ids  # type: ignore
+    def get_cpu_offset(self) -> int: 
+        return self.cpu_offset 
     def get_cross_block_table(self, seq_group: SequenceGroup) ->List[List[int]]:
         request_id = seq_group.request_id
         assert request_id in self.cross_block_tables

@@ -133,7 +133,10 @@ class FlashAttentionMetadata(AttentionMetadata):
     # 2nd dimensions are padded up to max_blocks_per_seq if it is cuda-graph
     # captured.
     block_tables: Optional[torch.Tensor]
-
+    # (xinyue) we store all kv entries in CPU cpu_block_tables store their block tables in CPU 
+    cpu_block_tables: Optional[torch.Tensor] 
+    cpu_slot_mapping: Optional[torch.Tensor]
+    cpu_offset: int
     # Whether or not if cuda graph is enabled.
     # Cuda-graph is currently enabled for decoding only.
     # TODO(woosuk): Move `use_cuda_graph` out since it's unrelated to attention.
@@ -211,6 +214,9 @@ class FlashAttentionMetadata(AttentionMetadata):
                            self.query_start_loc[:self.num_prefills + 1])
         slot_mapping = (None if self.slot_mapping is None else
                         self.slot_mapping[:self.num_prefill_tokens])
+        cpu_slot_mapping = (None if self.cpu_slot_mapping is None else
+                        self.cpu_slot_mapping[:self.num_prefill_tokens])
+        cpu_offset = self.cpu_offset 
         seq_lens = (None if self.seq_lens is None else
                     self.seq_lens[:self.num_prefills])
         seq_lens_tensor = (None if self.seq_lens_tensor is None else
@@ -223,15 +229,18 @@ class FlashAttentionMetadata(AttentionMetadata):
             block_tables = None
         elif isinstance(self.block_tables,list):
             block_tables = [self.block_tables[i][:self.num_prefills] for i in range(len(self.block_tables))]
+            cpu_block_tables = [self.cpu_block_tables[i][:self.num_prefills] for i in range(len(self.block_tables))]
         else:
             block_tables = (None if self.block_tables is None else
                         self.block_tables[:self.num_prefills])
-
+            cpu_block_tables = None
         self._cached_prefill_metadata = FlashAttentionMetadata(
             num_prefills=self.num_prefills,
             num_prefill_tokens=self.num_prefill_tokens,
             num_decode_tokens=0,
             slot_mapping=slot_mapping,
+            cpu_slot_mapping=cpu_slot_mapping, 
+            cpu_offset=cpu_offset, 
             multi_modal_placeholder_index_maps=self.
             multi_modal_placeholder_index_maps,
             seq_lens=seq_lens,
@@ -244,6 +253,7 @@ class FlashAttentionMetadata(AttentionMetadata):
             seq_start_loc=seq_start_loc,
             context_lens_tensor=context_lens_tensor,
             block_tables=block_tables,
+            cpu_block_tables=cpu_block_tables,
             use_cuda_graph=False,
             # Begin encoder & cross attn fields below...
             encoder_seq_lens=self.encoder_seq_lens,
@@ -275,6 +285,12 @@ class FlashAttentionMetadata(AttentionMetadata):
                            self.seq_lens_tensor[self.num_prefills:])
         block_tables = (None if self.block_tables is None else
                         self.block_tables[self.num_prefills:])
+        cpu_block_tables = (None if self.cpu_block_tables is None else
+                        self.cpu_block_tables[self.num_prefills:])
+        cpu_slot_mapping = (None if self.cpu_slot_mapping is None else
+                        self.cpu_slot_mapping[self.num_prefill_tokens:])
+        cpu_offset = self.cpu_offset
+        
         logger.debug(f"decode_metadata called, block_tables 2 {self.block_tables.shape if self.block_tables is not None else None}")
 
         self._cached_decode_metadata = FlashAttentionMetadata(
@@ -282,6 +298,8 @@ class FlashAttentionMetadata(AttentionMetadata):
             num_prefill_tokens=0,
             num_decode_tokens=self.num_decode_tokens,
             slot_mapping=slot_mapping,
+            cpu_slot_mapping=cpu_slot_mapping,
+            cpu_offset=cpu_offset, 
             multi_modal_placeholder_index_maps=None,
             seq_lens=None,
             seq_lens_tensor=seq_lens_tensor,
@@ -299,6 +317,7 @@ class FlashAttentionMetadata(AttentionMetadata):
             if self.seq_start_loc is not None else None,
             context_lens_tensor=None,
             block_tables=block_tables,
+            cpu_block_tables=cpu_block_tables,
             use_cuda_graph=self.use_cuda_graph,
             # Begin encoder & cross attn fields below...
             encoder_seq_lens=self.encoder_seq_lens,
@@ -416,6 +435,10 @@ class FlashAttentionMetadataBuilder(
         self.sliding_window = input_builder.sliding_window
         self.block_size = input_builder.block_size
 
+        # distn prefetch 
+        self.cpu_slot_mapping:  Union[List[int], List[List[int]]] = []
+        self.cpu_offset: int = 0
+        self.cpu_block_tables: Union[List[List[int]], List[List[List[int]]]] = []
     def _add_seq_group_3d(self,
                         inter_data,
                         chunked_prefill_enabled: bool,
@@ -424,7 +447,9 @@ class FlashAttentionMetadataBuilder(
         is_prompt     = inter_data.is_prompt
         block_tables  = inter_data.block_tables             # 3-D
         seq_ids       = inter_data.seq_ids
-
+        
+        cpu_block_tables = inter_data.cpu_block_tables 
+        self.cpu_offset = inter_data.cpu_offset 
         for (seq_id, token_len, seq_len, curr_seq_len,
             query_len, context_len, curr_sliding_window_block) in zip(
                 seq_ids, [len(t) for t in inter_data.input_tokens],
@@ -449,32 +474,38 @@ class FlashAttentionMetadataBuilder(
 
             # ---------- block-table selection (identical to 2-D) ----------
             bt_seq = []
+            cpu_bt_seq = []
             if prefix_cache_hit:
                 bt_seq = block_tables[seq_id]
+                cpu_bt_seq = cpu_block_tables[seq_id]
             elif ((chunked_prefill_enabled or not is_prompt)
                 and block_tables is not None):
                 
                 if curr_sliding_window_block == 0:
                     bt_seq = block_tables[seq_id]
+                    cpu_bt_seq = cpu_block_tables[seq_id]
+                    
                 else:
                     bt_seq = block_tables[seq_id][-curr_sliding_window_block:]
+                    cpu_bt_seq = cpu_block_tables[seq_id][-curr_sliding_window_block:]
                     
             self.block_tables.append(bt_seq)
-
+            self.cpu_block_tables.append(cpu_bt_seq)
+            
             # ---------- slot-mapping  (layer-major) ----------------------
             is_profile_run = is_block_tables_empty(block_tables)
             num_layers = len(next(iter(inter_data.block_tables.values())))
             # first 3-D call → allocate layer rows
             if not self.slot_mapping or isinstance(self.slot_mapping[0], int):
                 self.slot_mapping = [[] for _ in range(num_layers)]
-
+            if not self.cpu_slot_mapping or isinstance(self.cpu_slot_mapping[0], int):
+                self.cpu_slot_mapping = [[] for _ in range(num_layers)]
             start_idx = compute_slot_mapping_start_idx(
                 is_prompt, query_len, context_len, self.sliding_window)
 
             for layer_idx in range(num_layers):
-                layer_block_tables = {
-                    seq_id: bt_seq[layer_idx]          # bt_seq = [[...], [...], ...]
-                    for seq_id, bt_seq in inter_data.block_tables.items()
+                cpu_layer_block_tables = {
+                    seq_id: inter_data.cpu_block_tables[seq_id][layer_idx]          # bt_seq = [[...], [...], ...]
                 }
                 layer_map = []
                 compute_slot_mapping(
@@ -485,9 +516,56 @@ class FlashAttentionMetadataBuilder(
                     context_len,
                     start_idx,
                     self.block_size,
-                    layer_block_tables,        # wrap for signature
+                    cpu_layer_block_tables,        # wrap for signature
                 )
-                self.slot_mapping[layer_idx].extend(layer_map)    
+                self.cpu_slot_mapping[layer_idx].extend(layer_map)  
+                
+                
+                layer_block_tables = {
+                    seq_id: inter_data.block_tables[seq_id][layer_idx]          # bt_seq = [[...], [...], ...]
+                }
+                if layer_block_tables[seq_id] == []: # offloaded layer 
+                    # Now remap every block-id so they form one contiguous sequence
+                    layer_block_tables: dict[int, list[int]] = {}
+                    if len(self.slot_mapping[layer_idx]) > 0: 
+                        next_id = self.slot_mapping[layer_idx][-1] // 16 + 1
+                    else:
+                        next_id = 0                                            # global counter
+
+                    for seq_id, blk_list in cpu_layer_block_tables.items():
+                        n = len(blk_list)
+                        layer_block_tables[seq_id] = list(range(next_id, next_id + n))
+                        next_id += n
+                    logger.debug(f"seq[{seq_id}]inter block layer_block_tables, {inter_data.block_tables[seq_id][layer_idx] }")
+                    logger.debug(f"seq[{seq_id}]prefetch block layer_block_tables, {layer_block_tables}")
+                    layer_map = []
+                    compute_slot_mapping(
+                        is_profile_run,
+                        layer_map,
+                        seq_id,
+                        seq_len,
+                        context_len,
+                        start_idx,
+                        self.block_size,
+                        layer_block_tables,        # wrap for signature
+                    )
+                    self.slot_mapping[layer_idx].extend(layer_map) 
+                    logger.debug(f"[L{layer_idx}]self.slot_mapping, {self.slot_mapping[layer_idx]}")
+                else:
+                    logger.debug(f"seq[{seq_id}]gpu block layer_block_tables, {layer_block_tables}")
+                    layer_map = []
+                    compute_slot_mapping(
+                        is_profile_run,
+                        layer_map,
+                        seq_id,
+                        seq_len,
+                        context_len,
+                        start_idx,
+                        self.block_size,
+                        layer_block_tables,        # wrap for signature
+                    )
+                    self.slot_mapping[layer_idx].extend(layer_map) 
+                    logger.debug(f"seq[{seq_id}][L{layer_idx}]self.slot_mapping, {self.slot_mapping[layer_idx]}")
     def _add_seq_group(
             self, inter_data: "ModelInputForGPUBuilder.InterDataForSeqGroup",
             chunked_prefill_enabled: bool, prefix_cache_hit: bool):
@@ -586,6 +664,7 @@ class FlashAttentionMetadataBuilder(
         """
         # ── decide once per batch which add-function to use ──────────────
         first_bt = self.input_builder.inter_data_list[0].block_tables
+        cpu_offset = 0
         adder = (self._add_seq_group_3d
                 if _bt_dim(first_bt) == 3
                 else self._add_seq_group)
@@ -618,22 +697,39 @@ class FlashAttentionMetadataBuilder(
             num_decode_tokens = batch_size - self.num_prefill_tokens
             block_tables = self._get_graph_runner_block_tables(
                 num_seqs, self.block_tables)
+            cpu_block_tables = None
         else:
             bt_dim = _bt_dim(self.block_tables)
-            if bt_dim == 2:            
+            sm_dim = _bt_dim(self.slot_mapping)
+            if sm_dim == 1:            
                 block_tables = make_tensor_with_pad(
                     self.block_tables,
                     pad=0,
                     dtype=torch.int,
                     device=device,
                 )
-            elif bt_dim == 3: 
+                if self.cpu_block_tables is not None: 
+                    cpu_block_tables = make_tensor_with_pad(
+                        self.cpu_block_tables,
+                        pad=0,
+                        dtype=torch.int,
+                        device=device,
+                    )
+            elif sm_dim == 2: 
                 block_tables = make_tensor_with_pad_3d(
                     self.block_tables,
                     pad=0,
                     dtype=torch.int,
                     device=device,
                 )
+                if self.cpu_block_tables is not None: 
+                    cpu_block_tables = make_tensor_with_pad_3d(
+                        self.cpu_block_tables,
+                        pad=0,
+                        dtype=torch.int,
+                        device=device,
+                    )
+                cpu_offset = self.input_builder.inter_data_list[0].cpu_offset
         sm_dim = _bt_dim(self.slot_mapping)  # 1 or 2
         if cuda_graph_pad_size != -1:
             # ---------------- graph-capture padding -----------------
@@ -642,13 +738,20 @@ class FlashAttentionMetadataBuilder(
             else:                      # 2-D list, outer = seq
                 for seq_map in self.slot_mapping:            # type: ignore[index]
                     seq_map.extend([PAD_SLOT_ID] * cuda_graph_pad_size)
-
+            self.cpu_slot_mapping = self.slot_mapping
         if sm_dim == 1:
             slot_mapping_tensor = async_tensor_h2d(
                 self.slot_mapping, torch.long, device, self.runner.pin_memory)
+            cpu_slot_mapping_tensor = async_tensor_h2d(
+                self.cpu_slot_mapping, torch.long, device, self.runner.pin_memory)
         else:  # sm_dim == 2
             slot_mapping_tensor = make_tensor_with_pad(
                 self.slot_mapping,                    # List[List[int]]
+                pad=PAD_SLOT_ID,
+                dtype=torch.long,
+                device=device)
+            cpu_slot_mapping_tensor = make_tensor_with_pad(
+                self.cpu_slot_mapping,                    # List[List[int]]
                 pad=PAD_SLOT_ID,
                 dtype=torch.long,
                 device=device)
@@ -679,6 +782,8 @@ class FlashAttentionMetadataBuilder(
         return FlashAttentionMetadata(
             num_prefills=self.num_prefills,
             slot_mapping=slot_mapping_tensor,
+            cpu_slot_mapping=cpu_slot_mapping_tensor,
+            cpu_offset=cpu_offset,
             num_prefill_tokens=self.num_prefill_tokens,
             num_decode_tokens=num_decode_tokens,
             seq_lens=seq_lens,
@@ -692,6 +797,7 @@ class FlashAttentionMetadataBuilder(
             seq_start_loc=seq_start_loc_tensor,
             context_lens_tensor=context_lens_tensor,
             block_tables=block_tables,
+            cpu_block_tables=cpu_block_tables,
             use_cuda_graph=use_captured_graph,
         )
 
@@ -809,12 +915,13 @@ class FlashAttentionImpl(AttentionImpl):
         window_size = self.sliding_window
         alibi_slopes: Optional[torch.Tensor] = self.alibi_slopes
         logits_soft_cap: Optional[float] = self.logits_soft_cap
+        logger.debug(f"cpu_offset:{attn_metadata.cpu_offset}")
 
         # NOTE(HONG): updating KV cache(GPU) here -> implement copying(write) KV cache to CPU cache.
         if kv_cache.numel() > 0:
             key_cache = kv_cache[0]
             value_cache = kv_cache[1]
-
+            logger.debug(f"cpu_slot_mapping: {attn_metadata.cpu_slot_mapping}")
             # We skip updating the KV cache under two conditions:
             #  a. When the Attention Type is ENCODER. In this phase, we compute
             #     only the encoder attention without updating the cache.
@@ -827,9 +934,12 @@ class FlashAttentionImpl(AttentionImpl):
                 if attn_type == AttentionType.ENCODER_DECODER:
                     # Update cross-attention KV cache (prefill-only)
                     updated_slot_mapping = attn_metadata.cross_slot_mapping
+                    updated_slot_mapping_cpu = None
+                    
                 else:
                     # Update self-attention KV cache (prefill/decode)
                     updated_slot_mapping = attn_metadata.slot_mapping
+                    updated_slot_mapping_cpu = attn_metadata.cpu_slot_mapping
 
                 # Reshape the input keys and values and store them in the cache.
                 # If kv_cache is not provided, the new key and value tensors are
@@ -842,8 +952,8 @@ class FlashAttentionImpl(AttentionImpl):
                 torch.ops._C_cache_ops.reshape_and_cache_flash(
                     key,
                     value,
-                    kv_cache[0],
-                    kv_cache[1],
+                    kv_cache[0], # key 
+                    kv_cache[1], # value 
                     updated_slot_mapping.flatten(),  # type: ignore[union-attr]
                     kv_cache_dtype,
                     k_scale,
@@ -868,24 +978,28 @@ class FlashAttentionImpl(AttentionImpl):
                     # print(f"Writing new KV to CPU at layer{layer}")
                     # block_mapping = torch.tensor([[i, i] for i in range(len(key_cache))],
                     #             dtype=torch.bfloat16, device='cpu')
-                    # Temp (xinyue)
-                    assert(kv_cache_cpu is None, "turned off kv cahce cpu for debugging")
-                    if kv_cache_cpu is not None:
+                    if kv_cache_cpu is not None and updated_slot_mapping_cpu.numel()>0:
+                        # compute the offsets for the cpu cache, since the cpu cache does not start from block 0 
+                        
                         with nvtx.annotate(f"Key Value Writing{layer}"):
-                            updated_slot_mapping_cpu = updated_slot_mapping.flatten().to('cpu')
+                            updated_slot_mapping_cpu = updated_slot_mapping_cpu.flatten().to('cpu')
                             key_cpu = key.to('cpu')
-                            value_cpu = value.to('cpu')
+                            value_cpu = value.to('cpu')                             
 
                             PAGE_SIZE = 16 # Is this a parameter or set to match with BLOCK SIZE of paged kv cache? 
                             page_idx = updated_slot_mapping_cpu // PAGE_SIZE      # 각 토큰이 들어갈 페이지 번호
+                            page_idx -= attn_metadata.cpu_offset
+                            assert (page_idx >= 0).all()
                             offset_idx = updated_slot_mapping_cpu % PAGE_SIZE    # 해당 페이지 내부에서의 위치(0~15)
 
                             num_tokens = updated_slot_mapping_cpu.shape[0]
+                            logger.debug(f"updated_slot_mapping_cpu shape {updated_slot_mapping_cpu.shape}")
                             # num_tokens = updated_slot_mapping_cpu.size(0)
                             
                             for i in range(num_tokens):
                                 p = page_idx[i].item()
                                 o = offset_idx[i].item()
+                                logger.debug(f"write to cpu cache [{p}][{o}]")
                                 # copy each token slice                            
                                 kv_cache_cpu[0][p, o, :, :] = key_cpu[i, :, :] # key 
                                 kv_cache_cpu[1][p, o, :, :] = value_cpu[i, :, :] # value
@@ -897,7 +1011,19 @@ class FlashAttentionImpl(AttentionImpl):
                             # # (B) Expand key_states shape to [num_tokens, num_kv_heads, head_size]                                        
                             # kv_cache_cpu[0][page_idx_exp, offset_idx_exp] = key_cpu
                             # kv_cache_cpu[1][page_idx_exp, offset_idx_exp] = value_cpu            
-
+                        # verify writes 
+                        num_tokens = key.shape[0]
+                        for tid, slot in enumerate(updated_slot_mapping):
+                            cpu_slot = updated_slot_mapping_cpu[tid] 
+                            block_idx = slot // 16 
+                            block_offset = slot % 16
+                            cpu_block_idx = cpu_slot // 16 - attn_metadata.cpu_offset
+                            
+                            gpu_cache_key = key_cache[block_idx, block_offset, :, 0] 
+                            cpu_cache_key = kv_cache_cpu[0][cpu_block_idx, block_offset, :, 0] 
+                            logger.debug(f"token {tid} -> slot {slot} = GPUBlock[{block_idx}][{block_offset}] -> CPUBlock[{cpu_block_idx}({cpu_slot // 16})][{block_offset}]")
+                            logger.debug(f"original key {gpu_cache_key}")
+                            logger.debug(f"cached key {cpu_cache_key}")
         logger.debug(f"flash_attn forward received {attn_metadata.block_tables.shape if attn_metadata.block_tables is not None else None}")
         # FIXME Xinyue 
         (num_prefill_query_tokens, num_prefill_kv_tokens,

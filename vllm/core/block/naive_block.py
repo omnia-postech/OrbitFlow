@@ -61,7 +61,8 @@ class NaiveBlockAllocator(BlockAllocator):
             # a block pool between allocators
             self._block_pool = block_pool
     
-    def update_num_blocks(self, num_blocks: int):
+    def update_by_cache_config(self, cache_config):
+        num_blocks = cache_config.num_gpu_blocks
         device = "gpu" if 0 in self._all_block_indices else "cpu" 
         if device == "gpu": # increase size, starts at 0
             new_blocks = max(self._all_block_indices) + 1
@@ -488,3 +489,26 @@ class NaiveBlock(Block):
     @property
     def content_hash(self) -> Optional[int]:
         return None
+    def __repr__(self) -> str:                        # noqa: D401  (simple)
+        """
+        Represent the block with just enough detail for quick inspection.
+
+        - block_id: physical location in the allocator (may be None)
+        - len/size : #tokens currently stored vs. block capacity
+        - full?    : Boolean flag for convenience
+        - prev     : previous block’s `block_id` or None
+        - tokens   : first few token IDs, so large blocks don't spam logs
+        """
+        # Show only a short preview of token IDs
+        preview = self._token_ids[:5]
+        if len(self._token_ids) > 5:
+            preview.append("…")
+
+        return (
+            f"NaiveBlock("
+            f"block_id={self._block_id}, "
+            f"len/size={len(self._token_ids)}/{self._block_size}, "
+            f"full={self.is_full}, "
+            f"prev={getattr(self._prev_block, 'block_id', None)}, "
+            f"tokens={preview})"
+        )

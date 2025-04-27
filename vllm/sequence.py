@@ -875,6 +875,7 @@ class SequenceGroupMetadataDelta(
     seq_data_delta: Dict[int, SequenceDataDelta]
     request_id: str
     block_tables: Dict[int, List[int]]
+    cpu_block_tables: Optional[Dict[int, List[int]]]
     is_prompt: bool
     do_sample: bool = True
     token_chunk_size: Optional[int] = None
@@ -925,6 +926,8 @@ class SequenceGroupMetadata(
     seq_data: Dict[int, SequenceData]
     sampling_params: Optional[SamplingParams]
     block_tables: Dict[int, List[int]]
+    cpu_block_tables: Optional[Dict[int, List[int]]]
+    cpu_offset: int
     do_sample: bool = True
     pooling_params: Optional[PoolingParams] = None
     lora_request: Optional[LoRARequest] = None

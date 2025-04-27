@@ -50,11 +50,14 @@ class BlockTable:
         self._allocator = block_allocator
         if _blocks is None:
             _blocks = []
-        self._blocks: BlockList = BlockList(_blocks)
-
+            self.token_ids = []
+            self._blocks: BlockList = BlockList(_blocks)
+        else: 
+            self.token_ids = self._get_all_token_ids()
+            self._blocks: BlockList = BlockList(_blocks)
+            
         self._max_block_sliding_window = max_block_sliding_window
         self._num_full_slots = self._get_num_token_ids()
-
     @staticmethod
     def get_num_required_blocks(token_ids: List[int],
                                 block_size: int,
@@ -104,6 +107,7 @@ class BlockTable:
                                                      extra_hash=extra_hash)
         self.update(blocks)
         self._num_full_slots = len(token_ids)
+        self.token_ids.extend(token_ids)
 
     def update(self, blocks: List[Block]) -> None:
         """Resets the table to the newly provided blocks 
@@ -312,9 +316,12 @@ class BlockTable:
             blocks.append(block)
 
         return blocks
-
+    
     def _get_all_token_ids(self) -> List[int]:
         # NOTE: This function is O(seq_len); use sparingly.
+        if len(self.token_ids) > 0:
+            return self.token_ids
+
         token_ids: List[int] = []
 
         if not self._is_allocated:
@@ -326,11 +333,7 @@ class BlockTable:
         return token_ids
 
     def _get_num_token_ids(self) -> int:
-        res = 0
-        for block in self.blocks:
-            res += len(block.token_ids)
-
-        return res
+        return len(self.token_ids) 
 
     @property
     def _is_allocated(self) -> bool:

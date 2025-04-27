@@ -80,24 +80,32 @@ def build_layer_metadata(attn_meta):
     All fields are *shared* except .block_tables and .slot_mapping,
     which become layer-specific *views* (no data copy)."""
     bt  = attn_meta.block_tables          # (S, L, B) or (S, 0) 
+    cbt  = attn_meta.cpu_block_tables          # (S, L, B) or (S, 0) 
     sm  = attn_meta.slot_mapping          # (L, B)
+    csm  = attn_meta.cpu_slot_mapping          # (L, B)
     L   = sm.size(0)
-    bt_ndim = bt.ndim
+    sm_ndim = sm.ndim
     layer_metas = []
-    if bt_ndim == 2:
+    
+    if sm_ndim == 1:
         for l in range(L):
             meta_l = copy(attn_meta)     # shallow copy, O(1)
             meta_l.block_tables = bt  # view: (S, 0)
             meta_l.slot_mapping = sm.select(0, l)   # view: (B,)
             layer_metas.append(meta_l)
-    elif bt_ndim == 3:
+    elif sm_ndim == 2:
         for l in range(L):
             meta_l = copy(attn_meta)     # shallow copy, O(1)
-            meta_l.block_tables = bt.select(1, l)   # view: (S, B)
+            if bt.numel()>0:
+                meta_l.block_tables = bt.select(1, l)   # view: (S, B)
             meta_l.slot_mapping = sm.select(0, l)   # view: (B,)
+            if cbt.numel()>0:
+                meta_l.cpu_block_tables = cbt.select(1, l)   # view: (S, B)
+            meta_l.cpu_slot_mapping = csm.select(0, l)   # view: (B,)
             layer_metas.append(meta_l)
     else: 
         return attn_meta # fall back 
+    
     return layer_metas
 
 
@@ -241,6 +249,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             seq_ids: List[int],
             is_prompt: bool,
             block_tables: Optional[Dict[int, List[int]]],
+            cpu_block_tables: Optional[Dict[int, List[int]]],
+            cpu_offset: int,
             computed_block_nums: List[int],
             n_seqs: int = 0,
 
@@ -293,6 +303,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             self.request_id = request_id
             self.is_prompt = is_prompt
             self.block_tables = block_tables
+            self.cpu_block_tables = cpu_block_tables
+            self.cpu_offset = cpu_offset 
             self.computed_block_nums = computed_block_nums
             self.n_seqs = n_seqs
             self.encoder_seq_len = encoder_seq_len
@@ -432,6 +444,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             seq_ids=[0] * num_seqs,
             is_prompt=True,
             block_tables=None,
+            cpu_block_tables=None,
+            cpu_offset=0,
             computed_block_nums=[])
 
     def init_cached_inter_data(self, *args, **kwargs):
@@ -759,12 +773,13 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
 
         if self.runner.model_config.is_encoder_decoder:
             encoder_seq_len = seq_group_metadata.encoder_seq_data.get_len()
-
         inter_data = self.init_cached_inter_data(
             request_id=seq_group_metadata.request_id,
             seq_ids=seq_ids,
             is_prompt=is_prompt,
             block_tables=seq_group_metadata.block_tables,
+            cpu_block_tables=seq_group_metadata.cpu_block_tables,
+            cpu_offset=seq_group_metadata.cpu_offset,
             computed_block_nums=seq_group_metadata.computed_block_nums,
             reinit=True,
             reinit_use_defaults=True,
@@ -841,6 +856,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         create on-device tensors.
         """
         # Combine and flatten intermediate data.
+        logger.debug(f"build got cpu_offset {[i.cpu_offset for i in self.inter_data_list]}")
+        
         input_tokens = []
         token_types = []
         for inter_data in self.inter_data_list:
@@ -943,7 +960,6 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         # Attention metadata.
         attn_metadata = self.attn_metadata_builder.build(
             seq_lens, query_lens, cuda_graph_pad_size, batch_size)
-        # logger.info(f"attn_metadata build {attn_metadata.block_tables}")
         # LoRA data.
         lora_requests = set()
         lora_mapping = None
@@ -1325,6 +1341,8 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                 seq_data={group_id: dummy_data.seq_data},
                 sampling_params=sampling_params,
                 block_tables=None,
+                cpu_block_tables=None,
+                cpu_offset=0,
                 lora_request=dummy_lora_requests_per_seq[group_id]
                 if dummy_lora_requests_per_seq else None,
                 multi_modal_data=dummy_data.multi_modal_data,
@@ -1717,11 +1735,11 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
             model_forward_start.record()
 
         if not bypass_model_exec:
-            if not model_input.attn_metadata.slot_mapping.ndim == 1: 
+            logger.debug(f"model_input.attn_metadata.slot_mapping: ndim={model_input.attn_metadata.slot_mapping.ndim} {model_input.attn_metadata.slot_mapping}")            
+            if  model_input.attn_metadata.slot_mapping.ndim == 2: 
                 layer_metas = build_layer_metadata(model_input.attn_metadata)
             else:
                 layer_metas = model_input.attn_metadata # profile run
-            # with set_forward_context(model_input.attn_metadata, self.vllm_config):
             with set_forward_context(layer_metas, self.vllm_config):
                 hidden_or_intermediate_states = model_executable(
                     input_ids=model_input.input_tokens,

@@ -309,6 +309,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         else:
             return self._get_worker_input_from_broadcast()
 
+    # (xinyue) called in llm_engine
     def execute_model(
         self,
         execute_model_req: Optional[ExecuteModelRequest] = None,
@@ -340,16 +341,12 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                     and self.observability_config.collect_model_execute_time):
                 orig_model_execute_time = intermediate_tensors.tensors.get(
                     "model_execute_time", torch.tensor(0)).item()
-        attn_meta = model_input.attn_metadata
-        num_prefills = attn_meta.num_prefills 
+        # attn_meta = model_input.attn_metadata
+        # num_prefills = attn_meta.num_prefills 
         
         req_ids = [seq_group_metadata.request_id for seq_group_metadata in execute_model_req.seq_group_metadata_list]
         req_to_seq_ids = model_input.request_ids_to_seq_ids
         
-        # Xinyue log prefills 
-        # if num_prefills > 0:
-        #     msg = (f"{num_prefills} prefills for request: {req_ids}")
-        #     logger.info(msg)
         cached_all_token_ids = []
         cached_all_position_ids = []
         req_to_seq_mapping = {}
@@ -364,19 +361,21 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                 req_to_seq_mapping[(request_id, seq_id)] = (st, en)
         cached_all_token_ids = {'token_ids': cached_all_token_ids,'positions':torch.tensor(cached_all_position_ids), 'mappings': req_to_seq_mapping}
         
-        # step = 500
-        # if cached_all_token_ids is not None and len(cached_all_token_ids['token_ids']) % step == 0:
-        #     msg = (f"cached_all_token_ids: {len(cached_all_token_ids['token_ids'])}")
-        #     logger.info(msg)
+        step = 500
+        if cached_all_token_ids is not None and len(cached_all_token_ids['token_ids']) % step == 0:
+            msg = (f"cached_all_token_ids: {len(cached_all_token_ids['token_ids'])}")
+            logger.info(msg)
             
         """ 
             kv_caches layout: [|<-        32 GPU layers        ->|<-next offloaded layer->|]
             For each offloaded layer i, kv_caches[i] is assigned to None. 
             The next offloaded layer is always stored at kv_caches[-1], if prefetch is not done yet, it is None. 
         """
-        self.cache_engine[worker_input.virtual_engine].may_resize_gpu_cache(cached_tokens=cached_all_token_ids, attn_meta=model_input.attn_metadata)
+        self.cache_config = self.cache_engine[worker_input.virtual_engine].may_resize_gpu_cache(cached_tokens=cached_all_token_ids, attn_meta=model_input.attn_metadata, seq_group_metadata=execute_model_req.seq_group_metadata_list, finished_requests = execute_model_req.finished_requests_ids)
         attn_meta = model_input.attn_metadata 
         
+        kv_caches=self.kv_cache[worker_input.virtual_engine] if self.kv_cache is not None else None,
+        kv_caches_cpu=self.kv_cache_cpu[worker_input.virtual_engine] if self.kv_cache_cpu is not None else None,
         output = self.model_runner.execute_model(
             model_input=model_input,
             cached_all_token_ids=cached_all_token_ids,
@@ -389,7 +388,6 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             num_steps=num_steps,
             **kwargs,
         )
-
         model_execute_time = time.perf_counter() - start_time
         if not get_pp_group().is_last_rank:
             # output is IntermediateTensors

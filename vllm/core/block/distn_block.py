@@ -4,11 +4,28 @@ from typing import Deque, FrozenSet, Iterable, List, Optional, Tuple
 from vllm.core.block.common import (BlockPool, CopyOnWriteTracker, RefCounter,
                                     get_all_blocks_recursively)
 from vllm.core.block.interfaces import Block, BlockAllocator, BlockId, Device
-
+from vllm.logger import init_logger
+from vllm.config import CacheConfig
+logger = init_logger(__name__)
 Refcount = int
 
 
 class DistNBlockAllocator(BlockAllocator):
+    """A simple block allocator that manages blocks of memory without prefix
+    caching.
+
+    Args:
+        create_block (Block.Factory): A factory function for creating new
+            blocks. This is used when a DistNBlockAllocator is composed within
+            a prefix caching allocator -- the naive block allocator must
+            construct prefix caching blocks (but shouldn't know anything else
+            about them).
+        num_blocks (int): The total number of blocks to manage.
+        block_size (int): The size of each block in tokens.
+        block_ids (Optional[Iterable[int]], optional): An optional iterable of
+            block IDs. If not provided, block IDs will be assigned sequentially
+            from 0 to num_blocks - 1.
+    """
 
     def __init__(
         self,
@@ -17,7 +34,9 @@ class DistNBlockAllocator(BlockAllocator):
         block_size: int,
         block_ids: Optional[Iterable[int]] = None,
         block_pool: Optional[BlockPool] = None,
+        cache_config: Optional[CacheConfig] = None
     ):
+        self.cache_config = cache_config
         if block_ids is None:
             block_ids = range(num_blocks)
 
@@ -45,18 +64,45 @@ class DistNBlockAllocator(BlockAllocator):
             # a block pool between allocators
             self._block_pool = block_pool
     
-    def update_num_blocks(self, num_blocks: int):
-        new_blocks = max(self._all_block_indices) + 1
-        for i in range(new_blocks, num_blocks):
-            self._free_block_indices.append(i)
+    def update_by_cache_config(self, cache_config):
+        num_blocks = cache_config.num_gpu_blocks
+        device = "gpu" if 0 in self._all_block_indices else "cpu" 
+        if device == "gpu": # increase size, starts at 0
+            new_blocks = max(self._all_block_indices) + 1
+            for i in range(new_blocks, num_blocks):
+                self._free_block_indices.append(i)
         
-        self._all_block_indices = frozenset(range(num_blocks))
+            self._all_block_indices = frozenset(range(num_blocks))
         
-        self._refcounter.new_indices(self._all_block_indices)
+            self._refcounter.new_indices(self._all_block_indices)
         
-        extra_factor = 4
-        self._block_pool.increase_pool_with_size(num_blocks * extra_factor)
-
+            extra_factor = 4
+            self._block_pool.update_block_pool(
+                action='expand',
+                new_size=num_blocks * extra_factor
+            )
+            
+        elif device == "cpu": # change block_ids only as gpu caches expands 
+            new_offset = num_blocks 
+            self._all_block_indices = frozenset(range(new_offset, new_offset + len(self._all_block_indices)))
+            self._free_block_indices = deque([x + new_offset for x in self._free_block_indices])
+            
+            # update refcounter to align with the offset change 
+            old_refcounts = self._refcounter.get_refcounts()
+            self._refcounter = RefCounter(self._all_block_indices)
+            for old_id, count in old_refcounts.items():
+                new_id = old_id + new_offset 
+                for _ in range(count):  
+                    self._refcounter.incr(new_id)
+            self._cow_tracker = CopyOnWriteTracker(
+                refcounter=self._refcounter.as_readonly())
+            # Update block pool
+            self._block_pool.update_block_pool(
+                action='shift',
+                offset=new_offset
+            )
+        else:
+            raise NotImplementedError(f"Unsupported device: {device}")
     def allocate_immutable_block(self,
                                  prev_block: Optional[Block],
                                  token_ids: List[int],
@@ -128,14 +174,12 @@ class DistNBlockAllocator(BlockAllocator):
     def _allocate_block_id(self) -> BlockId:
         if not self._free_block_indices:
             raise BlockAllocator.NoFreeBlocksError()
-
         block_id = self._free_block_indices.popleft()
         self._refcounter.incr(block_id)
         return block_id
 
     def _free_block_id(self, block: Block) -> None:
         block_id = block.block_id
-        assert block_id is not None
 
         refcount = self._refcounter.decr(block_id)
         if refcount == 0:
@@ -186,7 +230,6 @@ class DistNBlockAllocator(BlockAllocator):
 
     def get_num_free_blocks(self) -> int:
         return len(self._free_block_indices)
-
     def get_num_total_blocks(self) -> int:
         return len(self._all_block_indices)
 

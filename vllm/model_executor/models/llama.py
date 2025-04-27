@@ -56,7 +56,8 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
                     is_pp_missing_parameter,
                     make_empty_intermediate_tensors_factory, make_layers,
                     maybe_prefix)
-
+from vllm.worker.utils import remap_to_continuous
+from vllm.worker.model_runner import build_layer_metadata
 import time
 import copy
 import nvtx
@@ -213,13 +214,8 @@ class LlamaAttention(nn.Module):
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         with nvtx.annotate(f"rotary_emb[{layer}]"):
             q, k = self.rotary_emb(positions, q, k)
-        # logger.info(f"Layer {layer} v[-1,:,0]: {v[-1,:5]}")
-        # logger.info(f"Layer {layer} q[-1,:5]: {q[-1,:5]}")
-        # logger.info(f"Layer {layer} k[-1,:5]: {k[-1,:5]}")
-        # logger.info(f"Layer {layer} v[-1,:5]: {v[-1,:5]}")
         with nvtx.annotate(f"attn[{layer}]"):
             attn_output = self.attn(q, k, v, kv_cache, kv_cache_cpu, layer, attn_metadata, is_recomp)
-            # logger.info(f"Layer {layer} attn_output[:5]: {attn_output[0,:5]}")
         with nvtx.annotate(f"o_proj[{layer}]"):
             output, _ = self.o_proj(attn_output)
         return output
@@ -501,6 +497,11 @@ class LlamaModel(nn.Module):
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, IntermediateTensors]:
         logger.debug(f"llamamodel_forward received block_tables = {attn_metadata.block_tables.shape} {attn_metadata.block_tables}")
+        if  attn_metadata.slot_mapping.ndim == 2: 
+            layer_metas = build_layer_metadata(attn_metadata)
+        else:
+            layer_metas = None
+            
         if get_pp_group().is_first_rank:
             if inputs_embeds is not None:
                 hidden_states = inputs_embeds
@@ -512,7 +513,7 @@ class LlamaModel(nn.Module):
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
         
-        is_recomp = True
+        is_recomp = False
         recomputation_vars = None
         
         if is_recomp and attn_metadata.num_prefills == 0:
@@ -521,18 +522,10 @@ class LlamaModel(nn.Module):
 
         for i in range(self.start_layer, self.end_layer):
             layer = self.layers[i]
+            if isinstance(layer_metas, list): 
+                attn_metadata = layer_metas[i]
             # TODO(HONG): Implement prefetching here
             next_layer = i + 1
-            # Implement sync -> wait for prefetch stream to finish
-            # if self._prefetch_stream is not None: 
-            #     torch.cuda.default_stream().wait_stream(self._prefetch_stream)
-
-            # Implement prefetch(i+1 layer) with stream.
-
-                
-            # block_mapping = attn_metadata.block_tables.to('cpu')
-            # positions.numel() == 1 # for decoding == attn_metadata.num_decode_tokens
-
             positions_min = positions.min().item()
             
             kv_cache = None
@@ -541,123 +534,12 @@ class LlamaModel(nn.Module):
 
             logger.debug(f"kv cache len {len(kv_caches)}")
             if attn_metadata.prefill_metadata: # prefill
-                # print(f"Prefill detected at layer{i}. Skipping prefetch.")
-                # default kv cache, no offload
-                if len(kv_caches) == len(self.layers):
-                    logger.debug("case 1") # Pick up from here!
-                    kv_cache = kv_caches[layer_num]  
-                    kv_cache_write = None
-                        
-                # default kv cache, with offload
-                elif len(kv_caches) == len(self.layers) + 1: 
-                    logger.debug("case 2")
-                    if gpu_cpu_cache_map[layer_num] == 0: # offloaded 
-                        logger.debug("case 2-1")
-                        kv_cache = kv_caches[-1]
-                        kv_cache_write = kv_caches_cpu[i]
-                    else:
-                        logger.debug("case 2-2")
-                        kv_cache = kv_caches[layer_num] 
-                        kv_cache_write = kv_caches_cpu[i] # gpu layer 
-                        
-                # flat kv cache, with offload
-                elif len(kv_caches) == 2: # FIXME probably buggy with prefetch on
-                    logger.debug("case 3")
-                    kv_cache_write = kv_caches_cpu[0]
-                    if gpu_cpu_cache_map[layer_num] == 0: # offloaded 
-                        kv_cache = kv_caches[-1]
-                    else:
-                        kv_cache = kv_caches[0] 
-                        
-                # flat kv cache, no offload
-                elif len(kv_caches) == 1: 
-                    logger.debug("case 4")
-                    kv_cache = kv_caches[0] 
-                    kv_cache_write = None
-                else: 
-                    raise ValueError(f"Unsupported kv_caches length: {len(kv_caches)}")
+                kv_cache, kv_cache_write = self.configure_kv_slice_with_prefetch(attn_metadata, layer_metas, kv_caches, kv_caches_cpu,  layer_num, gpu_cpu_cache_map, is_prefill=True)
             else:
-                if recomputation_vars['recomp_pages']: 
-                    start_page, end_page = recomputation_vars["recomp_pages"][0] # FIXME 
-                else: 
-                     start_page, end_page = 0, -1
-                logger.debug(f"KV_CACHES: {len(kv_caches)}, {len(kv_caches[0])}")
-                if len(kv_caches) == len(self.layers) + 1 and kv_caches[-1] is not None: # default cache, with offload
-                    if gpu_cpu_cache_map[layer_num] == 0:
-                        kv_cache = kv_caches[-1]
-                        kv_cache_write = kv_caches_cpu[i]
-                        if self._prefetch_stream is not None: 
-                            start= time.perf_counter()
-                            torch.cuda.default_stream().wait_stream(self._prefetch_stream)
-                            end_time = time.perf_counter()
-                            # print(f"wait stream time {end_time - start} at {end_time}")/
-                    elif layer_num > 0 and gpu_cpu_cache_map[layer_num - 1] == 0:
-                        prefetch_layer = 12345 # FIXME 
-                        for i in range(layer_num, self.end_layer):
-                            if gpu_cpu_cache_map[i] == 0:
-                                prefetch_layer = i
-                                break
-                        if prefetch_layer <= 31:
-                            with torch.cuda.stream(self._prefetch_stream):
-                                # Copy only needed pages in the cache (efficient)
-                                # shape = [num_blocks, block_size, num_kv_heads, head_size]
-                                with nvtx.annotate(f"Key Prefetching{next_layer}"): # FIXME Xinyue 
-                                    kv_caches[-1][0][start_page:end_page, :, :, :].copy_(
-                                        kv_caches_cpu[prefetch_layer][0][start_page:end_page, :, :, :], non_blocking=True
-                                    )
-
-                                with nvtx.annotate(f"Value Prefetetching{next_layer}"):
-                                    kv_caches[-1][1][start_page:end_page, :, :, :].copy_(
-                                        kv_caches_cpu[prefetch_layer][1][start_page:end_page, :, :, :], non_blocking=True
-                                    )
-                        recomp_pos = positions
-                        # 
-                        kv_cache = kv_caches[layer_num]
-                        kv_cache_write = kv_caches_cpu[i]
-                elif len(kv_caches) == len(self.layers) or (len(kv_caches) == len(self.layers) + 1 and kv_caches[-1] is None) : # default cache, no offload
-                        kv_cache = kv_caches[layer_num]
-                        kv_cache_write = None
-                elif len(kv_caches) == 2: # FIXME probably buggy with prefetch on
-                    if gpu_cpu_cache_map[layer_num] == 0:
-                        kv_cache = kv_caches[-1]
-                        kv_cache_write = kv_caches_cpu[0]
-                        if self._prefetch_stream is not None: 
-                            start= time.perf_counter()
-                            torch.cuda.default_stream().wait_stream(self._prefetch_stream)
-                    elif layer_num > 0 and gpu_cpu_cache_map[layer_num - 1] == 0:
-                        prefetch_layer = 12345 # FIXME 
-                        for i in range(layer_num, self.end_layer):
-                            if gpu_cpu_cache_map[i] == 0:
-                                prefetch_layer = i
-                                break
-                        if prefetch_layer <= 31: # probably buggy with prefetch on 
-                            with torch.cuda.stream(self._prefetch_stream):
-                                with nvtx.annotate(f"Key Prefetching{next_layer}"): # FIXME Xinyue 
-                                    kv_caches[-1][0][start_page:end_page, :, :, :].copy_(
-                                        kv_caches_cpu[prefetch_layer][0][start_page:end_page, :, :, :], non_blocking=True
-                                    )
-                                with nvtx.annotate(f"Value Prefetetching{next_layer}"):
-                                    kv_caches[-1][1][start_page:end_page, :, :, :].copy_(
-                                        kv_caches_cpu[prefetch_layer][1][start_page:end_page, :, :, :], non_blocking=True
-                                    )
-                        recomp_pos = positions
-                        # 
-                        kv_cache = kv_caches[0]
-                        kv_cache_write = kv_caches_cpu[0]
-                elif len(kv_caches) == 1: # flatten, no offload
-                        kv_cache = kv_caches[0]
-                        kv_cache_write = None
-                else:
-                    recomp_pos = positions
-                    kv_cache = kv_caches[layer_num]
-                    kv_cache_write = kv_caches_cpu[i]
+                kv_cache, kv_cache_write = self.configure_kv_slice_with_prefetch(attn_metadata, layer_metas, kv_caches, kv_caches_cpu, layer_num,  gpu_cpu_cache_map, is_prefill=False)
 
             logger.debug(f"block_table shape = {attn_metadata.block_tables.shape}")
-            if len(attn_metadata.block_tables.shape) == 3: 
-                layer_attn_metadata = copy.deepcopy(attn_metadata)
-                layer_attn_metadata.block_tables = attn_metadata.block_tables[:,i,:]
-            else: 
-                layer_attn_metadata = attn_metadata    
+            layer_attn_metadata = attn_metadata
             logger.debug(f"layer_attn_metadata.block_tables = {layer_attn_metadata.block_tables.shape} {layer_attn_metadata.block_tables}")
             if i == 0: # first layer
                 # recomp branch, set to false
@@ -713,6 +595,135 @@ class LlamaModel(nn.Module):
         #     msg = f"prefill ends"
         #     logger.debug(msg)
         return hidden_states
+    def configure_kv_slice_with_prefetch(self, attn_metadata, layer_metas,  kv_caches, kv_caches_cpu, layer_num, gpu_cpu_cache_map,  is_prefill=True):
+        '''
+        Configure KV slice with prefetch.
+        '''
+        num_layers = len(self.layers)
+        if is_prefill:
+            # default kv cache, no offload
+            if len(kv_caches) == num_layers:
+                logger.debug(f"prefill branch1")
+                kv_cache = kv_caches[layer_num]  
+                kv_cache_write = None
+                    
+            # default kv cache, with offload
+            elif len(kv_caches) == num_layers + 1: 
+                logger.debug(f"prefill branch2")
+                if gpu_cpu_cache_map[layer_num] == 0: # offloaded 
+                    kv_cache = kv_caches[-1]
+                    kv_cache_write = kv_caches_cpu[layer_num]
+                else:
+                    kv_cache = kv_caches[layer_num] 
+                    kv_cache_write = kv_caches_cpu[layer_num] # gpu layer 
+                    
+            # flat kv cache, with offload
+            elif len(kv_caches) == 2: 
+                logger.debug(f"prefill branch3")
+                kv_cache_write = kv_caches_cpu[0]
+                if gpu_cpu_cache_map[layer_num] == 0: # offloaded 
+                    kv_cache = kv_caches[-1]
+                else:
+                    kv_cache = kv_caches[0] 
+            # flat kv cache, no offload
+            elif len(kv_caches) == 1: 
+                logger.debug(f"prefill branch4")
+                kv_cache = kv_caches[0] 
+                kv_cache_write = kv_caches_cpu[0]
+            else: 
+                raise ValueError(f"Unsupported kv_caches length: {len(kv_caches)}")
+        else: 
+            # default kv cache, no offload
+            if len(kv_caches) == num_layers:
+                logger.debug(f"decode branch1")
+                kv_cache = kv_caches[layer_num]  
+                kv_cache_write = None
+                    
+            # default kv cache, with offload
+            elif len(kv_caches) == num_layers + 1: 
+                logger.debug(f"decode branch2")
+                kv_cache_write = kv_caches_cpu[layer_num]
+                if gpu_cpu_cache_map[layer_num] == 0: # offloaded 
+                    kv_cache = kv_caches[-1]
+                    if self._prefetch_stream is not None: 
+                        torch.cuda.default_stream().wait_stream(self._prefetch_stream)
+                elif layer_num > 0 and gpu_cpu_cache_map[layer_num - 1] == 0: 
+                    kv_cache = kv_caches[layer_num]
+                    prefetch_layer = 12345 # FIXME 
+                    for i in range(layer_num, self.end_layer):
+                        if gpu_cpu_cache_map[i] == 0:
+                            prefetch_layer = i
+                            break
+                    if prefetch_layer <= 31:
+                        with torch.cuda.stream(self._prefetch_stream):
+                            # Copy only needed pages in the cache (efficient)
+                            # shape = [num_blocks, block_size, num_kv_heads, head_size]
+                            with nvtx.annotate(f"Key Prefetching{next_layer}"): # FIXME Xinyue 
+                                kv_caches[-1][0][start_page:end_page, :, :, :].copy_(
+                                    kv_caches_cpu[prefetch_layer][0][start_page:end_page, :, :, :], non_blocking=True
+                                )
+
+                            with nvtx.annotate(f"Value Prefetetching{next_layer}"):
+                                kv_caches[-1][1][start_page:end_page, :, :, :].copy_(
+                                    kv_caches_cpu[prefetch_layer][1][start_page:end_page, :, :, :], non_blocking=True
+                                )
+                else: 
+                    kv_cache = kv_caches[layer_num]
+                    
+            # flat kv cache, with offload
+            elif len(kv_caches) == 2: # FIXME probably buggy with prefetch on
+                logger.debug(f"decode branch3")
+                kv_cache_write = kv_caches_cpu[0]
+                if gpu_cpu_cache_map[layer_num] == 0: # offloaded 
+                    kv_cache = kv_caches[-1]
+                    if self._prefetch_stream is not None: 
+                        start= time.perf_counter()
+                        torch.cuda.default_stream().wait_stream(self._prefetch_stream)
+                        end_time = time.perf_counter()
+                elif layer_num > 0 and gpu_cpu_cache_map[layer_num - 1] == 0: 
+                    kv_cache = kv_caches[0]
+                    next_layer_to_prefetch = len(self.layers) 
+                    for i in range(layer_num, self.end_layer):
+                        if gpu_cpu_cache_map[i] == 0:
+                            next_layer_to_prefetch = i
+                            break     
+                    if next_layer_to_prefetch < len(self.layers): 
+                        # shape = [num_blocks, block_size, num_kv_heads, head_size]
+                        with torch.cuda.stream(self._prefetch_stream):
+                            with nvtx.annotate(f"Key Prefetching{next_layer_to_prefetch}"):
+                                # (xinyue) assume no recomp
+                                logger.debug(f"copying for layer {next_layer_to_prefetch}")
+                                logger.debug(f"cpu_block_tables {layer_metas[next_layer_to_prefetch].cpu_block_tables}")
+                                logger.debug(f"block_tables {layer_metas[next_layer_to_prefetch].block_tables}")
+                                logger.debug(f"cpu_slot_mapping {layer_metas[next_layer_to_prefetch].cpu_slot_mapping}")
+                                logger.debug(f"slot_mapping {layer_metas[next_layer_to_prefetch].slot_mapping}")
+                                # logger.debug(f"block_tables {attn_metadata.block_tables[:,next_layer_to_prefetch,:]}")
+                                
+                                block_table_for_prefetched, blocks_to_write, blocks_to_copy = remap_to_continuous(layer_metas[next_layer_to_prefetch].cpu_block_tables)
+                                layer_metas[next_layer_to_prefetch].block_tables = block_table_for_prefetched
+                                logger.debug(f"copying for layer {next_layer_to_prefetch},  {blocks_to_copy} from cpu to {blocks_to_write}")
+                                kv_caches[-1][0][blocks_to_write].copy_(
+                                    kv_caches_cpu[0][0][blocks_to_copy.cpu()], non_blocking=True
+                                )
+                            with nvtx.annotate(f"Value Prefetching{next_layer_to_prefetch}"):
+                                # (xinyue) assume no recomp
+                                # logger.debug(f"block_tables {attn_metadata.block_tables[:,next_layer_to_prefetch,:]}")
+                                logger.debug(f"copying for layer {next_layer_to_prefetch},  {blocks_to_copy} from cpu to {blocks_to_write}")
+                                kv_caches[-1][1][blocks_to_write].copy_(
+                                    kv_caches_cpu[0][1][blocks_to_copy.cpu()], non_blocking=True
+                                )
+                else: 
+                    kv_cache = kv_caches[0]
+
+            # flat kv cache, no offload
+            elif len(kv_caches) == 1: 
+                logger.debug(f"decode branch4")
+                kv_cache = kv_caches[0] 
+                kv_cache_write = kv_caches_cpu[0]
+                # kv_cache_write = None
+            else: 
+                raise ValueError(f"Unsupported kv_caches length: {len(kv_caches)}")
+        return kv_cache, kv_cache_write
 
     def load_weights(self, weights: Iterable[Tuple[str,
                                                    torch.Tensor]]) -> Set[str]:

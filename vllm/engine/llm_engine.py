@@ -355,6 +355,9 @@ class LLMEngine:
             for v_id in range(self.parallel_config.pipeline_parallel_size)
         ]
 
+        # (xinyue) (HACK) link block_manager with cache engine 
+        for v_id in range(self.parallel_config.pipeline_parallel_size): 
+            self.model_executor.driver_worker.cache_engine[v_id].register_bm(self.scheduler[v_id].block_manager)
         # Metric Logging.
         if self.log_stats:
             if stat_loggers is not None:
@@ -1391,6 +1394,7 @@ class LLMEngine:
                 execute_model_req.async_callback = self.async_callbacks[
                     virtual_engine]
 
+            # (xinyue) worker entry point
             outputs = self.model_executor.execute_model(
                 execute_model_req=execute_model_req)
             

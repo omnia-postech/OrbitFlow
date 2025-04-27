@@ -298,7 +298,9 @@ def seq_group_metadata_builder():
                                  is_prompt=False,
                                  seq_data={},
                                  sampling_params=None,
-                                 block_tables={})
+                                 block_tables={},
+                                 cpu_offset=0,
+                                 cpu_block_tables={})
 
 
 def scheduler_running_outputs_builder():
@@ -360,7 +362,8 @@ class Scheduler:
             num_gpu_blocks=num_gpu_blocks,
             num_cpu_blocks=num_cpu_blocks,
             sliding_window=self.cache_config.sliding_window,
-            enable_caching=self.cache_config.enable_prefix_caching)
+            enable_caching=self.cache_config.enable_prefix_caching,
+            cache_config=self.cache_config)
 
         # Sequence groups in the WAITING state.
         # Contain new prefill or preempted requests.
@@ -451,7 +454,7 @@ class Scheduler:
         if num_cpu_blocks:
             num_cpu_blocks //= self.pipeline_parallel_size
 
-        self.block_manager.update_num_gpu_blocks(num_gpu_blocks)
+        self.block_manager.update_by_cache_config(cache_config)
 
     def add_seq_group(self, seq_group: SequenceGroup) -> None:
         # Add sequence groups to the waiting queue.
@@ -1026,7 +1029,7 @@ class Scheduler:
             if curr_loras is not None and lora_int_id > 0:
                 curr_loras.add(lora_int_id)
             waiting_queue.popleft()
-            self._allocate_and_set_running(seq_group)
+            self._allocate_and_set_running(seq_group) # block allocation here
 
             if enable_chunking and self.scheduler_config.is_multi_step:
                 blocks_to_copy: List[Tuple[int, int]] = []
@@ -1271,7 +1274,7 @@ class Scheduler:
         if self.scheduler_config.chunked_prefill_enabled:
             return self._schedule_chunked_prefill()
         else:
-            return self._schedule_default()
+            return self._schedule_default() # block allocations inside 
 
     def _can_append_slots(self, seq_group: SequenceGroup,
                           enable_chunking: bool) -> bool:
@@ -1312,6 +1315,7 @@ class Scheduler:
         # such as self.running, self.swapped, and self.waiting.
         scheduler_start_time = time.perf_counter()
 
+        # block allocation inside _schedule
         scheduler_outputs: SchedulerOutputs = self._schedule()
         now = time.time()
 
@@ -1337,7 +1341,8 @@ class Scheduler:
             seq_data: Dict[int, SequenceData] = {}
             # seq_id -> physical block numbers
             block_tables: Dict[int, List[int]] = {}
-
+            cpu_block_tables: Dict[int, List[int]] = {}
+            cpu_offset: int = 0
             if seq_group.is_encoder_decoder():
                 # Encoder associated with SequenceGroup
                 encoder_seq = seq_group.get_encoder_seq()
@@ -1355,8 +1360,9 @@ class Scheduler:
                 seq_id = seq.seq_id
                 seq_data[seq_id] = seq.data
                 block_tables[seq_id] = self.block_manager.get_block_table(seq)
-                self.block_manager.access_all_blocks_in_seq(seq, now)
-
+                cpu_block_tables[seq_id] = self.block_manager.get_block_table_cpu(seq)
+                self.block_manager.access_all_blocks_in_seq(seq, now) # used in prefix cache (enable_caching == True)
+            cpu_offset = self.block_manager.get_cpu_offset() 
             if self.cache_config.enable_prefix_caching:
                 common_computed_block_nums = (
                     self.block_manager.get_common_computed_block_ids(
@@ -1391,6 +1397,8 @@ class Scheduler:
                     seq_data=seq_data,
                     sampling_params=seq_group.sampling_params,
                     block_tables=block_tables,
+                    cpu_block_tables=cpu_block_tables,
+                    cpu_offset = cpu_offset,
                     do_sample=do_sample,
                     pooling_params=seq_group.pooling_params,
                     token_chunk_size=token_chunk_size,
@@ -1421,6 +1429,7 @@ class Scheduler:
                     seq_data_delta,
                     seq_group.request_id,
                     block_tables,
+                    cpu_block_tables,
                     is_prompt,
                     do_sample=do_sample,
                     token_chunk_size=token_chunk_size,
@@ -1509,6 +1518,7 @@ class Scheduler:
             self._async_stopped.clear()
 
     def _allocate_and_set_running(self, seq_group: SequenceGroup) -> None:
+        # (xinyue) allocating new sequence here 
         self.block_manager.allocate(seq_group)
         for seq in seq_group.get_seqs(status=SequenceStatus.WAITING):
             seq.status = SequenceStatus.RUNNING

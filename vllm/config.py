@@ -992,6 +992,7 @@ class CacheConfig:
         prefetch_mode: Optional[str] = None,
         prefetch_distance: Optional[int] = None,
         flattened_cache: bool = False, 
+        num_layers: int = 32, 
     ) -> None:
         self.block_size = block_size
         self.gpu_memory_utilization = gpu_memory_utilization
@@ -1007,7 +1008,7 @@ class CacheConfig:
         self.prefetch_mode = prefetch_mode
         self.prefetch_distance = prefetch_distance
         self.flattened_cache = flattened_cache 
-        
+        self.gpu_cpu_cache_map = [1]*num_layers
         self._verify_args()
         self._verify_cache_dtype()
         self._verify_prefix_caching()

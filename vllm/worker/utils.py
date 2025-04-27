@@ -4,7 +4,7 @@ Worker-related helper functions.
 
 from vllm.utils import STR_NOT_IMPL_ENC_DEC_ERR_STRS
 from vllm.worker.model_runner import GPUModelRunnerBase
-
+from torch import tensor, zeros_like
 
 def assert_enc_dec_mr_supported_scenario(
         enc_dec_mr: GPUModelRunnerBase) -> None:
@@ -49,3 +49,27 @@ def assert_enc_dec_mr_supported_scenario(
     if enc_dec_mr.prompt_adapter_config is not None:
         raise NotImplementedError(STR_NOT_IMPL_ENC_DEC_ERR_STRS[
             'STR_NOT_IMPL_ENC_DEC_PROMPT_ADAPTER'])
+
+# helper function to configure prefetch for distn 
+def remap_to_continuous(input_tensor):
+    input_tensor = input_tensor.clone()
+    result = zeros_like(input_tensor)
+
+    curr_idx = 0
+    effective_continuous = []
+    effective_original = []
+
+    for row_idx in range(input_tensor.shape[0]):
+        for col_idx in range(input_tensor.shape[1]):
+            val = input_tensor[row_idx, col_idx].item()
+            if col_idx == 0 or val > input_tensor[row_idx, col_idx - 1].item():
+                result[row_idx, col_idx] = curr_idx
+                effective_continuous.append(curr_idx)
+                effective_original.append(val)
+                curr_idx += 1
+            else:
+                result[row_idx, col_idx] = 0
+
+    flat_continuous = tensor(effective_continuous, device=input_tensor.device, dtype=input_tensor.dtype)
+    flat_original = tensor(effective_original, device=input_tensor.device, dtype=input_tensor.dtype)
+    return result, flat_continuous, flat_original

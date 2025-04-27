@@ -102,3 +102,6 @@ class CacheEngineBase(ABC):
         parallel_config: ParallelConfig,
     ) -> int:
         raise NotImplementedError
+
+    def register_bm(self, block_manager): 
+        pass

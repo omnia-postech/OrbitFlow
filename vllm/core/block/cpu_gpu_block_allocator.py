@@ -28,6 +28,7 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
         num_gpu_blocks: int,
         num_cpu_blocks: int,
         block_size: int,
+        cache_config = None
     ) -> DeviceAwareBlockAllocator:
         """Creates a CpuGpuBlockAllocator instance with the specified
         configuration.
@@ -77,20 +78,6 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
                 block_size=block_size,
                 block_ids=cpu_block_ids,
             )
-        # elif allocator_type == "distn":
-        #     gpu_allocator: BlockAllocator = DistNBlockAllocator(
-        #         create_block=NaiveBlock,  # type: ignore
-        #         num_blocks=num_gpu_blocks,
-        #         block_size=block_size,
-        #         block_ids=gpu_block_ids,
-        #     )
-
-        #     cpu_allocator: BlockAllocator = NaiveBlockAllocator(
-        #         create_block=NaiveBlock,  # type: ignore
-        #         num_blocks=num_cpu_blocks,
-        #         block_size=block_size,
-        #         block_ids=cpu_block_ids,
-        #     )
         elif allocator_type == "prefix_caching":
             gpu_allocator = PrefixCachingBlockAllocator(
                 num_blocks=num_gpu_blocks,
@@ -103,6 +90,22 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
                 block_size=block_size,
                 block_ids=cpu_block_ids,
             )
+        elif allocator_type == "prefetch":
+            gpu_allocator: BlockAllocator = DistNBlockAllocator(
+                create_block=NaiveBlock,  # type: ignore
+                num_blocks=num_gpu_blocks,
+                block_size=block_size,
+                block_ids=gpu_block_ids,
+                cache_config=cache_config,
+            )
+
+            cpu_allocator: BlockAllocator = DistNBlockAllocator(
+                create_block=NaiveBlock,  # type: ignore
+                num_blocks=num_cpu_blocks,
+                block_size=block_size,
+                block_ids=cpu_block_ids,
+                cache_config=cache_config,
+            )
         else:
             raise ValueError(f"Unknown allocator type {allocator_type=}")
 
@@ -111,10 +114,10 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
             gpu_block_allocator=gpu_allocator,
         )
         
-    def update_gpu_allocator(self, num_blocks) -> None:
+    def update_by_cache_config(self, cache_config) -> None:
         
-        self._allocators[Device.GPU].update_num_blocks(num_blocks)
-        self._allocators[Device.CPU].update_num_blocks(num_blocks)
+        self._allocators[Device.GPU].update_by_cache_config(cache_config)
+        self._allocators[Device.CPU].update_by_cache_config(cache_config)
         
         self._block_ids_to_allocator: Dict[int, BlockAllocator] = {}
         for _, allocator in self._allocators.items():
@@ -140,9 +143,6 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
         for _, allocator in self._allocators.items():
             for block_id in allocator.all_block_ids:
                 self._block_ids_to_allocator[block_id] = allocator
-
-    def change_cache_config(self, num_gpu_blocks) -> None:
-        pass
 
     def allocate_or_get_null_block(self) -> Block:
         if self._null_block is None:

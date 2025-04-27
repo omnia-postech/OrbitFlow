@@ -223,7 +223,7 @@ class Worker(LocalOrDistributedWorkerBase):
         else:
             num_gpu_blocks = int(available_kv_cache_memory // cache_block_size)
             # num_gpu_blocks = 10081
-            num_cpu_blocks = 10081
+            num_cpu_blocks = 10081 * 32 if self.cache_config.flattened_cache else 10081
             # num_cpu_blocks = int(self.cache_config.swap_space_bytes //
             #                      cache_block_size)
         num_gpu_blocks = max(num_gpu_blocks, 0)
@@ -300,10 +300,12 @@ class Worker(LocalOrDistributedWorkerBase):
             self.cache_engine[ve].gpu_cache
             for ve in range(self.parallel_config.pipeline_parallel_size)
         ]
+        logger.info(f"gpu_cache shape:{self.gpu_cache[0][0].shape}, {self.gpu_cache[0][1].shape}")
         self.cpu_cache = [
             self.cache_engine[ve].cpu_cache
             for ve in range(self.parallel_config.pipeline_parallel_size)
         ]
+        logger.info(f"cpu_cache shape:{self.cpu_cache[0][0].shape}")
 
     def _warm_up_model(self) -> None:
         if not self.model_config.enforce_eager:
@@ -417,6 +419,8 @@ class Worker(LocalOrDistributedWorkerBase):
         execute_model_req: ExecuteModelRequest,
         intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> Optional[List[SamplerOutput]]:
+        logger.info(f"cpu_block_tables{execute_model_req.seq_group_metadata_list[0].cpu_block_tables}")
+        
         if execute_model_req is not None:
             new_seq_group_metadata_list = self._get_cached_seq_group_metadata(
                 execute_model_req.seq_group_metadata_list,
