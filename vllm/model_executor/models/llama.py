@@ -57,10 +57,25 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
                     make_empty_intermediate_tensors_factory, make_layers,
                     maybe_prefix)
 from vllm.worker.utils import remap_to_continuous
-from vllm.worker.model_runner import build_layer_metadata
 import time
-import copy
 import nvtx
+def scatter_blocks_cpu_to_gpu(
+        dst: torch.Tensor,       # [num_blocks, B, H, D] on cuda
+        src: torch.Tensor,       # same shape on pinned CPU
+        dst_ids: torch.Tensor,   # LongTensor[N]  (GPU, CPU, or Python list)
+        src_ids: torch.Tensor,   # LongTensor[N]  (usually same as dst_ids)
+        stream: torch.cuda.Stream):
+    """
+    Copy multiple (possibly non-contiguous) blocks from CPU → GPU with
+    zero extra GPU memory.  Each block copy is async if `src` is pinned.
+    """
+    assert dst.device.type == "cuda" and src.device.type == "cpu"
+    dst_ids = dst_ids.tolist()  # make Python ints → scalar indexing = view
+    src_ids = src_ids.tolist()
+
+    with torch.cuda.stream(stream):
+        for d, s in zip(dst_ids, src_ids):
+            dst[d].copy_(src[s], non_blocking=True)
 
 class LlamaMLP(nn.Module):
 
@@ -496,12 +511,14 @@ class LlamaModel(nn.Module):
         intermediate_tensors: Optional[IntermediateTensors],
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, IntermediateTensors]:
-        logger.debug(f"llamamodel_forward received block_tables = {attn_metadata.block_tables.shape} {attn_metadata.block_tables}")
-        if  attn_metadata.slot_mapping.ndim == 2: 
-            layer_metas = build_layer_metadata(attn_metadata)
-        else:
-            layer_metas = None
-            
+        layer_metas = attn_metadata
+        # if  attn_metadata.slot_mapping.ndim == 2: 
+        #     layer_metas = build_layer_metadata(attn_metadata)
+        # else:
+        #     layer_metas = None
+        if kv_caches_cpu[0].numel()>0:
+            assert kv_caches_cpu[0].is_pinned(), "CPU KV cache must be pinned for non_blocking=True"
+
         if get_pp_group().is_first_rank:
             if inputs_embeds is not None:
                 hidden_states = inputs_embeds
@@ -647,6 +664,8 @@ class LlamaModel(nn.Module):
                     kv_cache = kv_caches[-1]
                     if self._prefetch_stream is not None: 
                         torch.cuda.default_stream().wait_stream(self._prefetch_stream)
+                    else: 
+                        raise ValueError("prefetch stream not set ")
                 elif layer_num > 0 and gpu_cpu_cache_map[layer_num - 1] == 0: 
                     kv_cache = kv_caches[layer_num]
                     prefetch_layer = 12345 # FIXME 
@@ -677,10 +696,10 @@ class LlamaModel(nn.Module):
                 if gpu_cpu_cache_map[layer_num] == 0: # offloaded 
                     kv_cache = kv_caches[-1]
                     if self._prefetch_stream is not None: 
-                        start= time.perf_counter()
                         torch.cuda.default_stream().wait_stream(self._prefetch_stream)
-                        end_time = time.perf_counter()
-                elif layer_num > 0 and gpu_cpu_cache_map[layer_num - 1] == 0: 
+                        logger.info(f"Prefetch Layer[{layer_num}], block_table:{attn_metadata.block_tables}, cpu_bt:{attn_metadata.cpu_block_tables}")
+                        logger.info(f"Prefetch Layer[{layer_num}], slot_mapping:{attn_metadata.slot_mapping}, cpu_slot_mapping:{attn_metadata.cpu_slot_mapping}")
+                elif (layer_num > 0 and gpu_cpu_cache_map[layer_num - 1] == 0) or layer_num == 0: 
                     kv_cache = kv_caches[0]
                     next_layer_to_prefetch = len(self.layers) 
                     for i in range(layer_num, self.end_layer):
@@ -698,19 +717,42 @@ class LlamaModel(nn.Module):
                                 logger.debug(f"cpu_slot_mapping {layer_metas[next_layer_to_prefetch].cpu_slot_mapping}")
                                 logger.debug(f"slot_mapping {layer_metas[next_layer_to_prefetch].slot_mapping}")
                                 # logger.debug(f"block_tables {attn_metadata.block_tables[:,next_layer_to_prefetch,:]}")
+
+                            
+                                block_table_for_prefetched, blocks_to_write, blocks_to_copy = remap_to_continuous(
+                                    layer_metas[next_layer_to_prefetch].cpu_block_tables,
+                                    layer_metas[next_layer_to_prefetch].block_tables
+                                )                       
+                                logger.info(f"NEW {block_table_for_prefetched}, {blocks_to_write}, {blocks_to_copy}")
                                 
-                                block_table_for_prefetched, blocks_to_write, blocks_to_copy = remap_to_continuous(layer_metas[next_layer_to_prefetch].cpu_block_tables)
                                 layer_metas[next_layer_to_prefetch].block_tables = block_table_for_prefetched
-                                logger.debug(f"copying for layer {next_layer_to_prefetch},  {blocks_to_copy} from cpu to {blocks_to_write}")
-                                kv_caches[-1][0][blocks_to_write].copy_(
-                                    kv_caches_cpu[0][0][blocks_to_copy.cpu()], non_blocking=True
+                                blocks_to_copy_offset = blocks_to_copy-attn_metadata.cpu_offset
+                                
+                                # dst.index_copy_(0, idx, src) # async since src(cpu cache) is pinned   
+                                scatter_blocks_cpu_to_gpu(
+                                    dst=kv_caches[-1][0],          # key or value tensor on GPU
+                                    src=kv_caches_cpu[0][0],       # matching CPU tensor
+                                    dst_ids=blocks_to_write,       # LongTensor on GPU
+                                    src_ids=blocks_to_copy_offset, # LongTensor or list
+                                    stream=self._prefetch_stream
                                 )
+                                logger.info(f"copying Key for layer {next_layer_to_prefetch},  CPUBlock[{blocks_to_copy_offset.tolist()}({blocks_to_copy.tolist()})]cpu to GPUCache[{blocks_to_write.tolist()}]")
+                                logger.info(f"CPUBlock[{blocks_to_copy_offset.tolist()}({blocks_to_copy.tolist()})] {kv_caches_cpu[0][0][blocks_to_copy_offset.tolist(), 0, :, 0]}")
+                                
+                                
+                                # kv_caches[-1][0][blocks_to_write].copy_(
+                                #     kv_caches_cpu[0][0][blocks_to_copy_offset.cpu()], non_blocking=True
+                                # )
                             with nvtx.annotate(f"Value Prefetching{next_layer_to_prefetch}"):
                                 # (xinyue) assume no recomp
                                 # logger.debug(f"block_tables {attn_metadata.block_tables[:,next_layer_to_prefetch,:]}")
                                 logger.debug(f"copying for layer {next_layer_to_prefetch},  {blocks_to_copy} from cpu to {blocks_to_write}")
-                                kv_caches[-1][1][blocks_to_write].copy_(
-                                    kv_caches_cpu[0][1][blocks_to_copy.cpu()], non_blocking=True
+                                scatter_blocks_cpu_to_gpu(
+                                    dst=kv_caches[-1][1],          # key or value tensor on GPU
+                                    src=kv_caches_cpu[0][1],       # matching CPU tensor
+                                    dst_ids=blocks_to_write,       # LongTensor on GPU
+                                    src_ids=blocks_to_copy_offset, # LongTensor or list
+                                    stream=self._prefetch_stream
                                 )
                 else: 
                     kv_cache = kv_caches[0]

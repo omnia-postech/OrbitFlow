@@ -83,6 +83,8 @@ def build_layer_metadata(attn_meta):
     cbt  = attn_meta.cpu_block_tables          # (S, L, B) or (S, 0) 
     sm  = attn_meta.slot_mapping          # (L, B)
     csm  = attn_meta.cpu_slot_mapping          # (L, B)
+    attn_meta._cached_prefill_metadata=None # FIXME (xinyue) if attn_meta.prefill_meta called before this function, the cached version will be wrong
+    attn_meta._cached_decode_metadata=None # FIXME (xinyue) if attn_meta.decode_meta called before this function, the cached version will be wrong
     L   = sm.size(0)
     sm_ndim = sm.ndim
     layer_metas = []
@@ -96,11 +98,20 @@ def build_layer_metadata(attn_meta):
     elif sm_ndim == 2:
         for l in range(L):
             meta_l = copy(attn_meta)     # shallow copy, O(1)
-            if bt.numel()>0:
-                meta_l.block_tables = bt.select(1, l)   # view: (S, B)
+            if bt.ndim == 3:
+                if bt.size(1) == 0:                       # no blocks yet
+                    # create an empty (S, 0) view without touching dim-1
+                    meta_l.block_tables = bt
+                else:
+                    meta_l.block_tables = bt.select(1, l) # (S, B) view
+            else:                                              # already 2-D
+                meta_l.block_tables = bt 
             meta_l.slot_mapping = sm.select(0, l)   # view: (B,)
-            if cbt.numel()>0:
-                meta_l.cpu_block_tables = cbt.select(1, l)   # view: (S, B)
+            if cbt is not None and cbt.ndim == 3:
+                if bt.size(1) == 0:                       # no blocks yet
+                    meta_l.cpu_block_tables = cbt
+                else:
+                    meta_l.cpu_block_tables = cbt.select(1, l)
             meta_l.cpu_slot_mapping = csm.select(0, l)   # view: (B,)
             layer_metas.append(meta_l)
     else: 
@@ -960,6 +971,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         # Attention metadata.
         attn_metadata = self.attn_metadata_builder.build(
             seq_lens, query_lens, cuda_graph_pad_size, batch_size)
+        # logger.info(f"build_returnd {attn_metadata}")
         # LoRA data.
         lora_requests = set()
         lora_mapping = None
@@ -1363,6 +1375,10 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
             torch.tensor([], dtype=torch.float32, device=self.device)
             for _ in range(num_layers)
         ]
+        kv_caches_cpu = [
+            torch.tensor([], dtype=torch.float32, device="cpu", pin_memory=True)
+            for _ in range(num_layers)
+        ]
         finished_requests_ids = [seq.request_id for seq in seqs]
         model_input = self.prepare_model_input(
             seqs, finished_requests_ids=finished_requests_ids)
@@ -1373,7 +1389,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                 dtype=self.model_config.dtype,
                 device=self.device)
 
-        self.execute_model(model_input, [0,], kv_caches, kv_caches, [1,] * 32, intermediate_tensors)
+        self.execute_model(model_input, [0,], kv_caches, kv_caches_cpu, [1,] * 32, intermediate_tensors)
         torch.cuda.synchronize()
         return
 
@@ -1738,8 +1754,12 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
             logger.debug(f"model_input.attn_metadata.slot_mapping: ndim={model_input.attn_metadata.slot_mapping.ndim} {model_input.attn_metadata.slot_mapping}")            
             if  model_input.attn_metadata.slot_mapping.ndim == 2: 
                 layer_metas = build_layer_metadata(model_input.attn_metadata)
+                logger.info(f"model runner received L1 {layer_metas[1]}")
+                logger.info(f"model runner received L2 {layer_metas[2]}")
             else:
                 layer_metas = model_input.attn_metadata # profile run
+                logger.info(f"model runner received 1D meta {layer_metas}")
+
             with set_forward_context(layer_metas, self.vllm_config):
                 hidden_or_intermediate_states = model_executable(
                     input_ids=model_input.input_tokens,
@@ -1748,7 +1768,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
                     kv_caches=kv_caches,
                     kv_caches_cpu=kv_caches_cpu,                    
                     gpu_cpu_cache_map=gpu_cpu_cache_map,
-                    attn_metadata=model_input.attn_metadata,
+                    attn_metadata=layer_metas,
                     intermediate_tensors=intermediate_tensors,
                     **MultiModalKwargs.as_kwargs(multi_modal_kwargs,
                                                  device=self.device),

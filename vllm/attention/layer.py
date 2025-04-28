@@ -282,59 +282,6 @@ direct_register_custom_op(
     dispatch_key=current_platform.dispatch_key,
 )
 
-
-# def unified_attention_with_output(
-#     query: torch.Tensor,
-#     key: torch.Tensor,
-#     value: torch.Tensor,
-#     output: torch.Tensor,
-#     kv_cache: torch.Tensor,
-#     kv_cache_cpu: torch.Tensor,
-#     layer: int,
-#     attn_type: str,
-#     layer_name: str,
-# ) -> None:
-#     forward_context: ForwardContext = get_forward_context()
-#     attn_metadata = forward_context.dynamic_forward_context
-    
-#     full_block_tables = attn_metadata.block_tables
-#     full_slot_mappings = attn_metadata.slot_mapping
-#     # (xinyue) modiying in llama.py does not propagate to here 
-#     logger.debug(f"Layer {layer} attn_metadata.block_tables: {attn_metadata.block_tables}")
-#     # logger.debug(f"Layer {layer} attn_metadata: {repr(attn_metadata)}")
-    
-#     if layer == 0: 
-#         logger.debug(f"full block_tables: {attn_metadata.block_tables}")
-#         logger.debug(f"full_slot_mapping {attn_metadata.slot_mapping.shape} {attn_metadata.slot_mapping}")
-#     if attn_metadata.slot_mapping.ndim == 2:  
-#         if attn_metadata.block_tables.ndim == 2: # prefill 
-#             block_tables = attn_metadata.block_tables
-#         else:
-#             block_tables = attn_metadata.block_tables[:,layer,:]
-#         slot_mapping = attn_metadata.slot_mapping[layer,:]
-#         attn_metadata.block_tables = block_tables
-#         attn_metadata.slot_mapping = slot_mapping
-#         logger.debug(f"3d attn_metadata.block_tables: {attn_metadata.block_tables.shape} {attn_metadata.block_tables}")   
-#         logger.debug(f"2d attn_metadata.slot_mapping: {attn_metadata.slot_mapping.shape} {attn_metadata.slot_mapping}")   
-#     else:
-#         logger.debug(f"2d attn_metadata.block_tables: {attn_metadata.block_tables.shape} {attn_metadata.block_tables}")    
-#         logger.debug(f"1d attn_metadata.slot_mapping: {attn_metadata.slot_mapping.shape} {attn_metadata.slot_mapping}")    
-    
-#     self = forward_context.static_forward_context[layer_name]
-#     self.impl.forward(query, 
-#                       key,
-#                       value,
-#                       kv_cache,
-#                       kv_cache_cpu,
-#                       layer,
-#                       attn_metadata,
-#                       self._k_scale,
-#                       self._v_scale,
-#                       attn_type=attn_type,
-#                       output=output)
-#     attn_metadata.block_tables = full_block_tables
-#     attn_metadata.slot_mapping = full_slot_mappings
-
 def unified_attention_with_output(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -352,27 +299,13 @@ def unified_attention_with_output(
     if isinstance(attn_metadata, list):
         attn_metadata = attn_metadata[layer]
         
-    # (xinyue) modiying in llama.py does not propagate to here 
-    logger.debug(f"Layer {layer} attn_metadata.block_tables: {attn_metadata.block_tables}")
-    # logger.debug(f"Layer {layer} attn_metadata: {repr(attn_metadata)}")
-    
-    logger.debug(f"full block_tables: {attn_metadata.block_tables}")
-    logger.debug(f"full_slot_mapping {attn_metadata.slot_mapping.shape} {attn_metadata.slot_mapping}")
-    # if attn_metadata.slot_mapping.ndim == 2:  
-    #     if attn_metadata.block_tables.ndim == 2: # prefill 
-    #         block_tables = attn_metadata.block_tables
-    #     else:
-    #         block_tables = attn_metadata.block_tables[:,layer,:]
-    #     slot_mapping = attn_metadata.slot_mapping[layer,:]
-    #     attn_metadata.block_tables = block_tables
-    #     attn_metadata.slot_mapping = slot_mapping
-    #     logger.debug(f"3d attn_metadata.block_tables: {attn_metadata.block_tables.shape} {attn_metadata.block_tables}")   
-    #     logger.debug(f"2d attn_metadata.slot_mapping: {attn_metadata.slot_mapping.shape} {attn_metadata.slot_mapping}")   
-    # else:
-    #     logger.debug(f"2d attn_metadata.block_tables: {attn_metadata.block_tables.shape} {attn_metadata.block_tables}")    
-    #     logger.debug(f"1d attn_metadata.slot_mapping: {attn_metadata.slot_mapping.shape} {attn_metadata.slot_mapping}")    
-    
-    logger.debug(f"layer {layer} kv_cache {kv_cache.shape} kv_cache_cpu {kv_cache_cpu.shape if kv_cache_cpu is not None else None}")
+
+    # verification 
+    block_table = attn_metadata.block_tables
+    if block_table.numel() > 0:
+        logger.info(f"kv_cache[0][{block_table.tolist()}]{kv_cache[0][block_table,0, :,0]}")
+    else: 
+        logger.info(f"Prefill, No kv cache")
     self = forward_context.static_forward_context[layer_name]
     self.impl.forward(query, 
                       key,
@@ -385,9 +318,6 @@ def unified_attention_with_output(
                       self._v_scale,
                       attn_type=attn_type,
                       output=output)
-    # attn_metadata.block_tables = full_block_tables
-    # attn_metadata.slot_mapping = full_slot_mappings
-
 
 def unified_attention_with_output_fake(
     query: torch.Tensor,

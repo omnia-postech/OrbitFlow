@@ -650,6 +650,8 @@ class FlattenedCacheEngine(CacheEngineBase):
         kv_cache: List[torch.Tensor] = []
         total_cpu_bytes = 0
         pin_memory = is_pin_memory_available()
+        logger.info(f"CPU CACHE PINNED: {pin_memory}")
+        
         flattened_kv_cache = torch.zeros(kv_cache_shape,
                                         dtype=self.dtype,
                                         pin_memory=pin_memory,

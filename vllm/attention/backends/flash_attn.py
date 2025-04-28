@@ -212,10 +212,29 @@ class FlashAttentionMetadata(AttentionMetadata):
         # Compute some attn_metadata fields which default to None
         query_start_loc = (None if self.query_start_loc is None else
                            self.query_start_loc[:self.num_prefills + 1])
-        slot_mapping = (None if self.slot_mapping is None else
-                        self.slot_mapping[:self.num_prefill_tokens])
-        cpu_slot_mapping = (None if self.cpu_slot_mapping is None else
-                        self.cpu_slot_mapping[:self.num_prefill_tokens])
+
+        if self.slot_mapping == None: 
+            slot_mapping = None 
+        elif self.slot_mapping.ndim == 1: 
+            slot_mapping = self.slot_mapping[:self.num_prefill_tokens]
+        elif self.slot_mapping.ndim == 2: 
+            slot_mapping = self.slot_mapping[:, :self.num_prefill_tokens]
+        else:
+            raise ValueError(
+                f"slot_mapping must be 1-D or 2-D, got ndim={self.slot_mapping.ndim}"
+            )
+
+        if self.cpu_slot_mapping == None: 
+            cpu_slot_mapping = None 
+        elif self.cpu_slot_mapping.ndim == 1: 
+            cpu_slot_mapping = self.cpu_slot_mapping[:self.num_prefill_tokens]
+        elif self.cpu_slot_mapping.ndim == 2: 
+            cpu_slot_mapping = self.cpu_slot_mapping[:, :self.num_prefill_tokens]
+        else:
+            raise ValueError(
+                f"cpu_slot_mapping must be 1-D or 2-D, got ndim={self.cpu_slot_mapping.ndim}"
+            )
+            
         cpu_offset = self.cpu_offset 
         seq_lens = (None if self.seq_lens is None else
                     self.seq_lens[:self.num_prefills])
@@ -651,7 +670,6 @@ class FlashAttentionMetadataBuilder(
 
     def build(self, seq_lens: List[int], query_lens: List[int],
               cuda_graph_pad_size: int, batch_size: int):
-        logger.debug(f"build_received : {self.input_builder.inter_data_list[0].block_tables}")
         
         """Build attention metadata with on-device tensors.
 
@@ -959,19 +977,6 @@ class FlashAttentionImpl(AttentionImpl):
                     k_scale,
                     v_scale,
                 )
-                
-                # verify writes 
-                num_tokens = key.shape[0]
-                for tid, slot in enumerate(updated_slot_mapping):
-                    block_idx = slot // 16 
-                    block_offset = slot % 16
-                    
-                    original_key = key[tid, :, 0] # first element of every head (8 heads)
-                    
-                    cached_key = key_cache[block_idx, block_offset, :, 0] 
-                    logger.debug(f"token {tid} -> slot {slot} = Block[{block_idx}][{block_offset}]")
-                    logger.debug(f"original key {original_key}")
-                    logger.debug(f"cached key {cached_key}")
                     
                 # TODO(HONG): Copy only blocks that are updated with newly generated tokens.                
                 if layer != 0:
@@ -980,7 +985,6 @@ class FlashAttentionImpl(AttentionImpl):
                     #             dtype=torch.bfloat16, device='cpu')
                     if kv_cache_cpu is not None and updated_slot_mapping_cpu.numel()>0:
                         # compute the offsets for the cpu cache, since the cpu cache does not start from block 0 
-                        
                         with nvtx.annotate(f"Key Value Writing{layer}"):
                             updated_slot_mapping_cpu = updated_slot_mapping_cpu.flatten().to('cpu')
                             key_cpu = key.to('cpu')
@@ -999,10 +1003,16 @@ class FlashAttentionImpl(AttentionImpl):
                             for i in range(num_tokens):
                                 p = page_idx[i].item()
                                 o = offset_idx[i].item()
-                                logger.debug(f"write to cpu cache [{p}][{o}]")
+                                logger.info(f"token {i} -> slot {updated_slot_mapping_cpu[i]} = CPUBlock[{p}][{o}]")
+    
                                 # copy each token slice                            
                                 kv_cache_cpu[0][p, o, :, :] = key_cpu[i, :, :] # key 
                                 kv_cache_cpu[1][p, o, :, :] = value_cpu[i, :, :] # value
+                                
+                                original_key = key_cpu[i, :, 0] # first element of every head (8 heads)
+                                cached_key = kv_cache_cpu[0][p, o, :, 0] 
+                                logger.info(f"original key {original_key}")
+                                logger.info(f"cached key {cached_key}")
                             
                             # method 2
                             # # (A) Expand block_idx, offset_idx to match [num_tokens, 1, 1]
@@ -1011,19 +1021,19 @@ class FlashAttentionImpl(AttentionImpl):
                             # # (B) Expand key_states shape to [num_tokens, num_kv_heads, head_size]                                        
                             # kv_cache_cpu[0][page_idx_exp, offset_idx_exp] = key_cpu
                             # kv_cache_cpu[1][page_idx_exp, offset_idx_exp] = value_cpu            
-                        # verify writes 
-                        num_tokens = key.shape[0]
-                        for tid, slot in enumerate(updated_slot_mapping):
-                            cpu_slot = updated_slot_mapping_cpu[tid] 
-                            block_idx = slot // 16 
-                            block_offset = slot % 16
-                            cpu_block_idx = cpu_slot // 16 - attn_metadata.cpu_offset
+                        # # verify writes 
+                        # num_tokens = key.shape[0]
+                        # for tid, slot in enumerate(updated_slot_mapping):
+                        #     cpu_slot = updated_slot_mapping_cpu[tid] 
+                        #     block_idx = slot // 16 
+                        #     block_offset = slot % 16
+                        #     cpu_block_idx = cpu_slot // 16 - attn_metadata.cpu_offset
                             
-                            gpu_cache_key = key_cache[block_idx, block_offset, :, 0] 
-                            cpu_cache_key = kv_cache_cpu[0][cpu_block_idx, block_offset, :, 0] 
-                            logger.debug(f"token {tid} -> slot {slot} = GPUBlock[{block_idx}][{block_offset}] -> CPUBlock[{cpu_block_idx}({cpu_slot // 16})][{block_offset}]")
-                            logger.debug(f"original key {gpu_cache_key}")
-                            logger.debug(f"cached key {cpu_cache_key}")
+                        #     logger.info(f"[L{layer}] token {tid} -> slot {slot} = GPUBlock[{block_idx}][{block_offset}] -> CPUBlock[{cpu_block_idx}({cpu_slot // 16})][{block_offset}]")
+                        #     gpu_cache_key = key_cache[block_idx, block_offset, :, 0] 
+                        #     cpu_cache_key = kv_cache_cpu[0][cpu_block_idx, block_offset, :, 0] 
+                        #     logger.info(f"original key {gpu_cache_key}")
+                        #     logger.info(f"cached key {cpu_cache_key}")
         logger.debug(f"flash_attn forward received {attn_metadata.block_tables.shape if attn_metadata.block_tables is not None else None}")
         # FIXME Xinyue 
         (num_prefill_query_tokens, num_prefill_kv_tokens,
