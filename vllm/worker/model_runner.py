@@ -1389,7 +1389,8 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                 dtype=self.model_config.dtype,
                 device=self.device)
 
-        self.execute_model(model_input, [0,], kv_caches, kv_caches_cpu, [1,] * 32, intermediate_tensors)
+        gpu_cpu_cache_map = {seq_id:[1,]*32 for seq_id in range(max_num_seqs)}
+        self.execute_model(model_input, [0,], kv_caches, kv_caches_cpu, gpu_cpu_cache_map, intermediate_tensors)
         torch.cuda.synchronize()
         return
 
@@ -1682,8 +1683,8 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
         model_input: ModelInputForGPUWithSamplingMetadata,
         cached_all_token_ids: List[int],
         kv_caches: List[torch.Tensor],
-        kv_caches_cpu: List[torch.Tensor],        
-        gpu_cpu_cache_map: List[int],
+        kv_caches_cpu: List[torch.Tensor],       
+        gpu_cpu_cache_map: Dict[int, List[int]], 
         intermediate_tensors: Optional[IntermediateTensors] = None,
         num_steps: int = 1,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:

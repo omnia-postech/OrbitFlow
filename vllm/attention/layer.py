@@ -304,8 +304,6 @@ def unified_attention_with_output(
     block_table = attn_metadata.block_tables
     if block_table.numel() > 0:
         logger.info(f"kv_cache[0][{block_table.tolist()}]{kv_cache[0][block_table,0, :,0]}")
-    else: 
-        logger.info(f"Prefill, No kv cache")
     self = forward_context.static_forward_context[layer_name]
     self.impl.forward(query, 
                       key,

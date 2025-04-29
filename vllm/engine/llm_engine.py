@@ -238,7 +238,6 @@ class LLMEngine:
             vllm_config,
             use_cached_outputs,
         )
-
         self.log_stats = log_stats
         self.use_cached_outputs = use_cached_outputs
 

@@ -4,6 +4,7 @@ import enum
 import hashlib
 import json
 import os
+from collections import defaultdict
 import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -989,8 +990,9 @@ class CacheConfig:
         
         # dist-n configs
         is_monolithic_distn: bool = False,
-        prefetch_mode: Optional[str] = None,
+        prefetch_mode: str = "none",
         prefetch_distance: Optional[int] = None,
+        merge_prefetch_buffer: bool = True,
         flattened_cache: bool = False, 
         num_layers: int = 32, 
     ) -> None:
@@ -1008,7 +1010,9 @@ class CacheConfig:
         self.prefetch_mode = prefetch_mode
         self.prefetch_distance = prefetch_distance
         self.flattened_cache = flattened_cache 
-        self.gpu_cpu_cache_map = [1]*num_layers
+        self.merge_prefetch_buffer = merge_prefetch_buffer 
+        self.gpu_cpu_cache_map: Dict[int, List[int]] = defaultdict(list)
+
         self._verify_args()
         self._verify_cache_dtype()
         self._verify_prefix_caching()

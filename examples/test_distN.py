@@ -462,7 +462,7 @@ def main(configs):
             prefetch_distance = 0 
     
     flattened_cache = configs.flattened_cache if hasattr(configs, "flattened_cache") else False
-
+    merge_prefetch_buffer = configs.merge_prefetch_buffer if hasattr(configs, "merge_prefetch_buffer") else True
     batch_size = trace.batch_size if hasattr(trace, "batch_size") else BATCH_SIZE
     # prompts = trace.requests if hasattr(trace, "requests") else trace.samples
     
@@ -472,6 +472,7 @@ def main(configs):
     print(f"prefetch_distance: {prefetch_distance}")
     print(f"gpu_memory_utilization: {gpu_memory_utilization}")
     print(f"num_gpu_blocks_override: {num_gpu_blocks_override}")
+    print(f"merge_prefetch_buffer: {merge_prefetch_buffer}")
     
     args = EngineArgs(
         model=MODEL,
@@ -488,6 +489,7 @@ def main(configs):
         prefetch_distance = prefetch_distance,
         enable_chunked_prefill=False,
         flattened_cache=flattened_cache,
+        merge_prefetch_buffer=merge_prefetch_buffer,
         # No prefetch, (N=1,static), (N=dynamic,mono), (N=dynamic,dyn), the last two version, N only decreases 
         # multi-request version (might decrease, or increase)
         # num_gpu_blocks_override: Optional[int] = None
@@ -526,7 +528,12 @@ if __name__ == "__main__":
                         type=bool,
                         default=False,
                         help="whether the kv cache is flattened")
+    parser.add_argument("--merge-prefetch-buffer",
+                        type=bool,
+                        default=False,
+                        help="whether the prefetch buffer is merged")
     args = parser.parse_args()    
+    print(args)
     # --- Setup Logging ---
     logging.basicConfig(filename=args.output_log, level=logging.INFO, format="%(message)s")
     main(args)

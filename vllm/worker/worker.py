@@ -300,7 +300,11 @@ class Worker(LocalOrDistributedWorkerBase):
             self.cache_engine[ve].gpu_cache
             for ve in range(self.parallel_config.pipeline_parallel_size)
         ]
-        logger.info(f"gpu_cache shape:{self.gpu_cache[0][0].shape}, {self.gpu_cache[0][1].shape}")
+        # Pretty-print shapes of every tensor in the GPU cache
+        all_shapes = ", ".join(str(t.shape)                 # e.g. "(1024, 2, 32, 16, 128)"
+                            for tensors in self.gpu_cache  # list per pipeline stage
+                            for t in tensors)              # each tensor in that stage
+        logger.info(f"gpu_cache shapes: {all_shapes}")
         self.cpu_cache = [
             self.cache_engine[ve].cpu_cache
             for ve in range(self.parallel_config.pipeline_parallel_size)

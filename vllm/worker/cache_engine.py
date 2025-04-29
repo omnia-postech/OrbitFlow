@@ -11,6 +11,8 @@ from vllm.logger import init_logger
 from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, LayerBlockType,
                         get_dtype_size, is_pin_memory_available)
 from vllm.worker.cache_engine_base import CacheEngineBase
+from vllm.attention import AttentionMetadata
+
 import time
 from dataclasses import dataclass, field
 logger = init_logger(__name__)
@@ -555,7 +557,6 @@ class FlattenedCacheEngine(CacheEngineBase):
     caches. It also provides methods for performing KV cache operations, such
     as swapping and copying.
     """
-
     def __init__(
         self,
         cache_config: CacheConfig,
@@ -568,9 +569,12 @@ class FlattenedCacheEngine(CacheEngineBase):
         self.kv_cache_shape = list(self.attn_backend.get_kv_cache_shape(
             self.num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size))
 
-        self.gpu_cpu_cache_map = [1,] * self.num_attention_layers
-        self.cpu_cache_num, self.gpu_cache_num = self.determine_cache_num_with_map(self.gpu_cpu_cache_map)
-
+        self.gpu_cpu_cache_map: Dict[int, List[int]] = {}
+        # self.cpu_cache_num, self.gpu_cache_num = self.determine_cache_num_with_map(self.gpu_cpu_cache_map)
+        self.is_monolithic_distn = cache_config.is_monolithic_distn
+        self.prefetch_mode = cache_config.prefetch_mode
+        self.prefetch_distance = cache_config.prefetch_distance 
+        self.merge_prefetch_buffer = cache_config.merge_prefetch_buffer 
         # prefetch_enabled = True 
         # Initialize the cache.
         self.gpu_cache = self._allocate_kv_cache_gpu(
@@ -578,23 +582,66 @@ class FlattenedCacheEngine(CacheEngineBase):
             # self.num_gpu_blocks, self.device_config.device_type, cache_config.prefetch_mode!="none")
         self.cpu_cache = self._allocate_kv_cache_cpu(self.num_cpu_blocks, "cpu")
         
-        self.is_monolithic_distn = cache_config.is_monolithic_distn
-        self.prefetch_mode = cache_config.prefetch_mode
-        self.prefetch_distance = cache_config.prefetch_distance 
+        
         msg = f"Prefetch mode: {self.prefetch_mode}, prefetch distance: {self.prefetch_distance}"
+        msg = f"Merge prefetch buffer: {self.merge_prefetch_buffer}"
         logger.info(msg)
         self.num_attention_layers = model_config.get_num_layers_by_block_type(
             parallel_config, LayerBlockType.attention)
-        self.mapping = MappingTable(num_layers=self.num_attention_layers,cpu_offset=0)
+        
+        self.mapping = MappingTable(num_layers=self.num_attention_layers,cpu_offset=0, gpu_cpu_cache_map=self.gpu_cpu_cache_map)
+        self.set_offload_algo()
+        
         if self.prefetch_mode == "distn":
             msg = "DistN mode:" + "monolithic" if self.is_monolithic_distn else "dynamic"
             logger.info(msg)
+        
         free_mem, total_mem = torch.cuda.mem_get_info()
         msg = f"Free Memory: {free_mem / 1024 / 1024} MB"
         logger.info(msg)
         msg = f"Total Memory: {total_mem / 1024 / 1024} MB"
         logger.info(msg)
-
+    def set_offload_algo(self):
+        # registry ------------------------------------------------------------
+        #  prefetch_mode : (should_reconfigure_fn,   reconfigure_fn)
+        offload_algos = {
+            "none":            (self._no_prefetch,                 self._noop_resize),
+            "static":          (self.offload_static_uniform,       self.resize_with_fixed_ratio),
+            "static_req_wise": (self.offload_static_req_wise,      self.resize_with_fixed_ratio_per_req),
+            "distn":           (self.offload_distn_single,         self.resize_with_fixed_ratio),
+        }
+        try:
+            should_fn, resize_fn = offload_algos[self.prefetch_mode]
+        except KeyError:
+            raise ValueError(f"Unknown prefetch_mode: {self.prefetch_mode}")
+        self.should_reconfigure_offload = should_fn
+        self.reconfigure_offload        = resize_fn
+        self.configured = "static" not in self.prefetch_mode 
+    @staticmethod
+    def _no_prefetch(*args, **kwargs) -> bool:
+        """Dummy handler: prefetch disabled."""
+        return False
+    @staticmethod
+    def _noop_resize(*_, **__) -> None:    # does nothing
+        pass
+    def offload_distn_single(self,attn_meta:AttentionMetadata, cached_tokens:Dict[str, Any]):
+        """ N never increases """
+        allocated_blocks = attn_meta.block_tables.numel() - ((attn_meta.block_tables == 0).sum().item()-1)      
+        total_blocks = self.cache_config.num_gpu_blocks
+        # if last blocks of all sequences are not full, no need to resize 
+        mappings = cached_tokens["mappings"] # (req_id, seq_id) -> (st_position, en_position) 
+        num_required_blocks = 0 
+        for (req_id, seq_id), (st_position, en_position) in mappings.items():
+            # st_position and en_position are in number of blocks 
+            if (en_position - st_position) % self.block_size == 0: # full block 
+                num_required_blocks += 1 
+        resize_cache = (allocated_blocks + num_required_blocks) >= total_blocks 
+        return resize_cache 
+    def offload_static_uniform(self,attn_meta:AttentionMetadata, cached_tokens:Dict[str, Any]):
+        return not self.configured
+    def offload_static_req_wise(self,attn_meta:AttentionMetadata, cached_tokens:Dict[str, Any]):
+        return not self.configured
+    
     def register_bm(self, block_manager): 
         self.block_manager = block_manager
         logger.info(f"Linking block manager")
@@ -602,42 +649,99 @@ class FlattenedCacheEngine(CacheEngineBase):
         self,
         num_blocks: int,
         device: str,
-        prefetch_enabled:bool
-    ) -> List[torch.Tensor]: # Xinyue, keep the semantic, but list contains only one member for all layers 
-        """Allocates KV cache on the specified device."""
-        kv_cache_shape = self.attn_backend.get_kv_cache_shape(
-            num_blocks, self.block_size, self.num_kv_heads, self.head_size)
+        prefetch_enabled: bool,
+    ) -> List[torch.Tensor]:
+        """
+        Allocates the KV cache on `device`.
+
+        ── Behaviour ────────────────────────────────────────────────────────────────
+        * Always returns a list with **exactly one tensor** that holds the KV cache.
+        * If `prefetch_enabled` is False      ➜ tensor stores the main KV cache only
+        * If `prefetch_enabled` is True:
+            * and `self.merge_prefetch_buffer` is False (default) ➜ 2-region layout
+            is implemented with **two tensors** (main + prefetch) exactly as
+            before.
+            * and `self.merge_prefetch_buffer` is True  ➜ a **single, merged tensor**
+            is allocated;   `self.prefetch_offset` equals the first *block index*
+            that belongs to the prefetch region.
+        """
+
+        # ---------- convenience ----------
+        elem_size = torch.tensor([], dtype=self.dtype).element_size() * 2 # 2 accooutns for key and value
+        num_blocks_per_layer = (
+            num_blocks // self.num_attention_layers if prefetch_enabled else 0
+        )
+
         kv_cache: List[torch.Tensor] = []
-        total_gpu_bytes = 0
-        prefetch_cache_bytes = 0
-        flattened_kv_cache = torch.zeros(kv_cache_shape,
-                                        dtype=self.dtype,
-                                        device=device)  
-        kv_cache.append(flattened_kv_cache)
-        kv_cache_bytes = 2 * flattened_kv_cache.numel()
-        total_gpu_bytes += kv_cache_bytes
-        
-        if prefetch_enabled: 
-            num_blocks_layer = num_blocks//self.num_attention_layers 
-            prefetch_cache_shape = self.attn_backend.get_kv_cache_shape(
-            num_blocks_layer, self.block_size, self.num_kv_heads, self.head_size)
-            prefetch_cache = torch.zeros(prefetch_cache_shape,
-                                            dtype=self.dtype,
-                                            device=device)  
-            prefetch_cache_bytes = 2 * prefetch_cache.numel()
-            total_gpu_bytes += prefetch_cache_bytes
-            kv_cache.append(prefetch_cache)
+        total_gpu_bytes = kv_cache_bytes = prefetch_cache_bytes = 0
 
+        # ---------- merged layout ----------------------------------------------
+        if prefetch_enabled and self.merge_prefetch_buffer:
+            merged_blocks = num_blocks + num_blocks_per_layer
+            cache_shape = self.attn_backend.get_kv_cache_shape(
+                merged_blocks,
+                self.block_size,
+                self.num_kv_heads,
+                self.head_size,
+            )
+            merged_cache = torch.zeros(cache_shape, dtype=self.dtype, device=device)
+            kv_cache.append(merged_cache)
 
-        total_gpu_bytes = total_gpu_bytes / 1024 / 1024
-        kv_cache_bytes = kv_cache_bytes / 1024 / 1024
-        prefetch_cache_bytes = prefetch_cache_bytes / 1024 / 1024
-        msg = f"GPU cache allocated {total_gpu_bytes} MB -> KV cache {kv_cache_bytes} MB, prefetch cache {prefetch_cache_bytes} MB"
-        logger.info(msg)
-        msg = f"GPU cache shape {kv_cache[0].shape}, {kv_cache[1].shape}"
-        logger.info(msg)
-        return kv_cache
-    
+            # offset (measured in “block” dimension, i.e. dim-0)
+            self.prefetch_offset = num_blocks
+            total_gpu_bytes = merged_cache.numel() * elem_size
+            prefetch_cache_bytes = (
+                merged_cache.shape[1] - self.prefetch_offset # num blocks - gpu
+            ) * merged_cache[:,0,:,:,:].numel() * elem_size  # bytes in the prefetch region
+            kv_cache_bytes = total_gpu_bytes - prefetch_cache_bytes  # single tensor
+            # ------------------------------------------------------------------
+        else:
+            # ---------- original layout (two tensors when prefetch is on) -------
+            main_shape = self.attn_backend.get_kv_cache_shape(
+                num_blocks,
+                self.block_size,
+                self.num_kv_heads,
+                self.head_size,
+            )
+            main_cache = torch.zeros(main_shape, dtype=self.dtype, device=device)
+            kv_cache.append(main_cache)
+            kv_cache_bytes = main_cache.numel() * elem_size
+            total_gpu_bytes += kv_cache_bytes
+            self.prefetch_offset = None
+
+            if prefetch_enabled:
+                prefetch_shape = self.attn_backend.get_kv_cache_shape(
+                    num_blocks_per_layer,
+                    self.block_size,
+                    self.num_kv_heads,
+                    self.head_size,
+                )
+                prefetch_cache = torch.zeros(
+                    prefetch_shape, dtype=self.dtype, device=device
+                )
+                kv_cache.append(prefetch_cache)
+                prefetch_cache_bytes = prefetch_cache.numel() * elem_size
+                total_gpu_bytes += prefetch_cache_bytes
+            # ------------------------------------------------------------------
+
+        # -------------- logging (MiB) -------------------------------------------
+        mib = lambda b: round(b / 1024 / 1024, 2)
+        logger.info(
+            "GPU cache allocated %.2f MiB  →  main %.2f MiB, prefetch %.2f MiB",
+            mib(total_gpu_bytes),
+            mib(kv_cache_bytes),
+            mib(prefetch_cache_bytes),
+        )
+        if len(kv_cache) == 1:
+            logger.info("GPU cache shape %s (merged)", tuple(kv_cache[0].shape))
+        else:  # two-tensor case
+            logger.info(
+                "GPU cache shapes main %s, prefetch %s",
+                tuple(kv_cache[0].shape),
+                tuple(kv_cache[1].shape),
+            )
+        # ------------------------------------------------------------------------
+        return kv_cache 
     def _allocate_kv_cache_cpu(
         self,
         num_blocks: int,
@@ -775,43 +879,12 @@ class FlattenedCacheEngine(CacheEngineBase):
             finished_requests=None
         ):
         self.mapping.update_mapping_table(attn_meta,seq_group_metadata,finished_requests)
-        if self.prefetch_mode == "none":
-            return self.cache_config
-        elif self.prefetch_mode == "static": 
-            assert self.prefetch_distance is not None 
-            new_cache_config = self.resize_with_fixed_ratio(self.prefetch_distance, attn_meta)
-            return new_cache_config
-        
-        # allocated blocks 
-        # allocated_blocks = sum(len(block_table) for block_table in attn_meta.block_tables)  
-        allocated_blocks = attn_meta.block_tables.numel() - ((attn_meta.block_tables == 0).sum().item()-1)      
-
-        # total blocks (as seen by the model for full layer cache)
-        total_blocks = self.cache_config.num_gpu_blocks
-
-        # if last blocks of all sequences are not full, no need to resize 
-        mappings = cached_tokens["mappings"] # (req_id, seq_id) -> (st_position, en_position) 
-        num_required_blocks = 0 
-        for (req_id, seq_id), (st_position, en_position) in mappings.items():
-            # st_position and en_position are in number of blocks 
-            if (en_position - st_position) % self.block_size == 0: # full block 
-                num_required_blocks += 1 
-
-        if (allocated_blocks + num_required_blocks) >= total_blocks:
-            current_ratio = 0
-            for i in range(self.num_attention_layers):
-                if self.gpu_cpu_cache_map[i] == 0:
-                    current_ratio = i
-                    break
-            if current_ratio == 1:
-                return self.cache_config.num_gpu_blocks
-            new_cache_config = self.resize_cache_with_next_ratio()
-            msg = (f"cache ratio update at {len(cached_tokens['token_ids'])+1}th token; num_gpu_cache: {total_blocks} -> {new_cache_config.num_gpu_blocks}")
-            # logger.info(f"allocated_blocks, num_required_blocks, total_blocks:{allocated_blocks,num_required_blocks,total_blocks}\n")
-            logger.info(msg)
-            return new_cache_config 
-        else:
-            return self.cache_config
+        if self.should_reconfigure_offload(attn_meta, cached_tokens):
+            self.cache_config =  self.reconfigure_offload(self.prefetch_distance, configure_paused=False)
+            logger.info(f"attn_metadata after resizing:{attn_meta.block_tables}")
+            
+            # logger.info(f"mapping after resize: {self.mapping}")
+        return self.cache_config
     
     @staticmethod
     def _should_live_on_gpu(layer_id: int, prefetch_distance: int) -> bool:
@@ -827,6 +900,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         if prefetch_distance < 0:
             return True                      # “∞ distance” → keep everything
         return (layer_id % (prefetch_distance + 1)) != prefetch_distance
+    
     def resize_with_fixed_ratio(self, prefetch_distance, configure_paused=True):
         """
         Re-partition KV blocks between GPU and CPU caches with a fixed
@@ -841,7 +915,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             but still have GPU blocks. If False, leave those sequences untouched.
         """
         tic = time.time()
-        logger.debug(f"resize, target_distance: {prefetch_distance}")
+        logger.info(f"resize_with_fixed_ratio, target_distance: {prefetch_distance}")
 
         mapping = self.mapping          # shorthand
         bm       = self.block_manager    # block manager helper
@@ -874,9 +948,9 @@ class FlattenedCacheEngine(CacheEngineBase):
                     cpu_blocks = mapping.cpu_map.get(sid, {}).get(layer)
                     if cpu_blocks:
                         alloc_plan.append((sid, layer, cpu_blocks))
-        logger.debug(f"dealloc_layers {dealloc_layers}")
-        logger.debug(f"expected_freed {expected_freed}")
-        logger.debug(f"alloc_plan {alloc_plan}")
+        logger.info(f"dealloc_layers {dealloc_layers}")
+        logger.info(f"expected_freed {expected_freed}")
+        logger.info(f"alloc_plan {alloc_plan}")
         # Task 2. Figure out how to modify the caches 
         """
         We will apply the same prefetch distance to all target sequences. 
@@ -893,7 +967,7 @@ class FlattenedCacheEngine(CacheEngineBase):
 
             # sanity check: make sure the block-manager really freed what we think
             expected_flat = [bid for bids in expected_freed.values() for bid in bids]
-            logger.debug(f"expected_flat: {expected_flat}")
+            logger.info(f"expected_flat: {expected_flat}")
             
             assert sorted(freed_ids_flat) == sorted(expected_flat), (
                 "Mismatch between expected and actually freed block-ids"
@@ -908,8 +982,135 @@ class FlattenedCacheEngine(CacheEngineBase):
         for sid, layer, cpu_blocks in alloc_plan:
             n_blocks = len(cpu_blocks)
             new_gpu_blocks = bm.allocate_seq_by_layer(sid, layer, n_blocks)   # → List[int]
-            logger.debug(f"cpu_blocks:{cpu_blocks}")
-            logger.debug(f"new_gpu_blocks:{new_gpu_blocks}")
+            logger.info(f"cpu_blocks:{cpu_blocks}")
+            logger.info(f"new_gpu_blocks:{new_gpu_blocks}")
+            
+            # copy payload CPU → GPU
+            for dst, src in zip(new_gpu_blocks, cpu_blocks):
+                self.gpu_cache[dst].copy_(self.cpu_cache[src],non_blocking=False)
+
+            # update mapping
+            mapping.gpu_map.setdefault(sid, {})[layer] = new_gpu_blocks
+        
+        # Task 3. allocation and deallocation. 
+        """ 
+        call block_manager.free(List(block_ids)) and block_manager.allocate(# blocks) to perform allocation and deallocation. 
+        For allocations, store the allocated block ids back to collected data structure. Then copy the blocks specified by the cpu block ids from the cpu cache, to the newly allocated block ids of the GPU cache. 
+        """
+        
+        logger.info(f"mapping after resize: {mapping}")
+        logger.info(f"GPU map after resize:{mapping.gpu_map}")
+        self.cache_config.gpu_cpu_cache_map = self.gpu_cpu_cache_map 
+        bm.cache_config = self.cache_config
+
+        return self.cache_config
+    
+    def resize_with_fixed_ratio_per_req(self, prefetch_distance, configure_paused=True):
+        """
+        Re-partition KV-cache blocks with a *per-sequence* fixed-ratio policy.
+
+        Parameters
+        ----------
+        prefetch_distance : Dict[int, int]
+            Mapping  {seq_id -> distance}.  Layer `ℓ` is kept on GPU
+            iff  (ℓ % (d + 1) == 0)  where  d = prefetch_distance[seq_id].
+        configure_paused : bool, default=True
+            Apply the policy to sequences that are paused-GPU residents; if
+            False, those sequences keep their current layout.
+
+        Raises
+        ------
+        ValueError
+            If `prefetch_distance` contains a `seq_id` that is not present in
+            `mapping.all_seqs`.
+        """
+        tic = time.time()
+        logger.info(f"resize_with_fixed_ratio_per_req, target_distance: {prefetch_distance}")
+
+        mapping = self.mapping          # shorthand
+        bm       = self.block_manager    # block manager helper
+        # Task 1. Compute the objective mapping table.  
+        """
+            prefetch distance: how far are two cpu-only KV layers. 0 means all layers are on CPU only. 1 means every other layer is on CPU-only
+            configure_paused: we apply this distance to active-GPU requests all the time. We never apply this two the cpu cache. But for paused-gpu, its a maybe.
+                             if configure_paused is true, we apply to paused-gpu requests. 
+        """
+        candidates: set[int] = set(mapping.active_gpu_seqs)
+        if configure_paused:
+            candidates |= set(mapping.paused_gpu_seqs)
+
+        #HARDCODE 
+        prefetch_distance = [5,4,3,2]
+        # prefetch_distance = [2,3,4,5]
+        # prefetch_distance = [2,2,2,2]
+        prefetch_distance = {candidate: dist for candidate, dist in zip(candidates, prefetch_distance)}
+        logger.debug(f"resize, target_distance: {prefetch_distance}")
+
+        all_seq_ids: Set[int] = set(mapping.all_seqs)
+        unknown_ids           = set(prefetch_distance) - all_seq_ids
+        if unknown_ids:
+            raise ValueError(
+                f"Invalid seq_id(s) {sorted(unknown_ids)} – not found in mapping.all_seqs"
+            )
+
+
+        dealloc_layers: Dict[int, List[int]] = defaultdict(list)
+        expected_freed: Dict[int, List[int]] = defaultdict(list)   # for sanity-check
+        alloc_plan: List[Tuple[int, int, List[int]]] = []          # (seq, layer, cpu_blocks)
+        for sid in candidates:
+            dist = prefetch_distance[sid]
+
+            for layer in range(mapping.num_layers):
+                curr_gpu_blocks = mapping.gpu_map.get(sid, {}).get(layer)
+                want_gpu        = self._should_live_on_gpu(layer, dist)
+                self.mapping._set_gpu_flag(sid, layer, want_gpu)
+                # ---------- plan eviction (GPU → CPU) ----------------------- #
+                if curr_gpu_blocks and not want_gpu:
+                    dealloc_layers[sid].append(layer)
+                    expected_freed[sid].extend(curr_gpu_blocks)
+
+                # ---------- plan promotion (CPU → GPU) ---------------------- #
+                elif (not curr_gpu_blocks) and want_gpu:
+                    cpu_blocks = mapping.cpu_map.get(sid, {}).get(layer)
+                    if cpu_blocks:
+                        alloc_plan.append((sid, layer, cpu_blocks))
+
+        logger.info(f"dealloc_layers {dealloc_layers}")
+        logger.info(f"expected_freed {expected_freed}")
+        logger.info(f"alloc_plan {alloc_plan}")
+        # Task 2. Figure out how to modify the caches 
+        """
+        We will apply the same prefetch distance to all target sequences. 
+        For each sequence, consider each layer separately. For each (seq, layer) pair:
+        case 1. (CPU, GPU) -> CPU only. We need to remove its block tables from the mapping table. 
+        case 2. CPU only -> (CPU, GPU). We need to allocate GPU blocks for it based on the size of its allocation on the CPU, fetch it 
+                and store in the GPU cache. 
+        case 3. CPU only -> CPU only; or (CPU, GPU) -> (CPU, GPU). Do nothing 
+        
+        Collect all the blocks to free. Then collect (seq, layer) pairs that requires allocation, alone with the allocation size (# blocks) and its cpu block ids. 
+        """
+        if dealloc_layers:
+            freed_ids_flat = bm.free_seq_by_layer(dealloc_layers)        # List[int]
+
+            # sanity check: make sure the block-manager really freed what we think
+            expected_flat = [bid for bids in expected_freed.values() for bid in bids]
+            logger.info(f"expected_flat: {expected_flat}")
+            
+            assert sorted(freed_ids_flat) == sorted(expected_flat), (
+                "Mismatch between expected and actually freed block-ids"
+            )
+
+            # purge mapping
+            for sid, layers in dealloc_layers.items():
+                for layer in layers:
+                    mapping.gpu_map[sid][layer] = None
+
+        # -- 2b. ALLOCATE ------------------------------------------------------- #
+        for sid, layer, cpu_blocks in alloc_plan:
+            n_blocks = len(cpu_blocks)
+            new_gpu_blocks = bm.allocate_seq_by_layer(sid, layer, n_blocks)   # → List[int]
+            logger.info(f"cpu_blocks:{cpu_blocks}")
+            logger.info(f"new_gpu_blocks:{new_gpu_blocks}")
             
             # # copy payload CPU → GPU
             # for dst, src in zip(new_gpu_blocks, cpu_blocks):
@@ -924,99 +1125,14 @@ class FlattenedCacheEngine(CacheEngineBase):
         For allocations, store the allocated block ids back to collected data structure. Then copy the blocks specified by the cpu block ids from the cpu cache, to the newly allocated block ids of the GPU cache. 
         """
         
-        logger.debug(f"mapping after resize: {mapping}")
-        logger.debug(f"GPU map after resize:{mapping.gpu_map}")
-        self.cache_config.gpu_cpu_cache_map = self.gpu_cpu_cache_map 
+        logger.info(f"mapping after resize: {mapping}")
+        logger.info(f"GPU map after resize:{mapping.gpu_map}")
+        logger.info(f"gpu_cpu_cache_map after resize:{mapping.gpu_cpu_cache_map}")
+        self.cache_config.gpu_cpu_cache_map = self.gpu_cpu_cache_map = self.mapping.gpu_cpu_cache_map
         bm.cache_config = self.cache_config
 
-        # return self.cache_config
-    def resize_cache_with_next_ratio(self):
-        start = time.time()
-        
-        if self.is_monolithic_distn:
-            new_gpu_cpu_cache_map = self.next_map_mono(self.gpu_cpu_cache_map)
-        else:
-            new_gpu_cpu_cache_map = self.next_map(self.gpu_cpu_cache_map)
-            
-        _, new_gpu_cache_num = self.determine_cache_num_with_map(new_gpu_cpu_cache_map)
-        
-        
-        gpu_cache_to_delete = []
-
-        for layer_num in range(self.num_attention_layers):
-            # check out the logic here
-            # 1 -> 0, offload from GPU to CPU 
-            if new_gpu_cpu_cache_map[layer_num] == 0:
-                if self.gpu_cpu_cache_map[layer_num] == 1:
-                    # Xinyue blocking copy, what's the reason? 
-                    self.cpu_cache[layer_num][:, :self.num_gpu_blocks,:,:,:].copy_(self.gpu_cache[layer_num], non_blocking=False)
-                    gpu_cache_to_delete.append(self.gpu_cache[layer_num])
-                    self.gpu_cache[layer_num] = None
-
-        torch.cuda.synchronize()
-
-        # Free GPU memory for newly offloaded layers
-        for cache in gpu_cache_to_delete:
-            del cache
-        gc.collect()
-        torch.cuda.empty_cache()
-        
-        # 0 -> 1, fetch from CPU to GPU
-        for layer_num in range(self.num_attention_layers):
-            if new_gpu_cpu_cache_map[layer_num] == 1:
-                if self.gpu_cpu_cache_map[layer_num] == 0:
-                    # Xinyue self.cpu_cache is append-only? Will :self.num_gpu_blocks be errouneous?
-                    self.gpu_cache[layer_num] = self.cpu_cache[layer_num][:, :self.num_gpu_blocks,:,:,:].to(self.device_config.device_type)
-        
-        kv_cache_shape = list(self.attn_backend.get_kv_cache_shape(
-            self.num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size))
-        
-        # FIXME new_gpu_cache_num maybe 0 => divide by zero 
-        new_num_gpu_blocks = int(self.num_gpu_blocks * self.gpu_cache_num / new_gpu_cache_num) if new_gpu_cache_num != 0 else 0 
-        new_kv_cache_shape = list(self.attn_backend.get_kv_cache_shape(
-            new_num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size))
-
-
-        # what should new shape be? skip? 
-        new_shape = list(self.attn_backend.get_kv_cache_shape(
-            new_num_gpu_blocks - self.num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size))
-        
-        """ kv_caches => new rows, only block number is changed"""
-        new_rows = torch.zeros(new_shape,
-                        dtype=self.dtype,
-                        pin_memory=self.gpu_cache[0].is_pinned() if self.gpu_cache[0] is not None else False,
-                        device=self.gpu_cache[0].device)
-        
-        for layer_num in range(self.num_attention_layers):
-            if new_gpu_cpu_cache_map[layer_num] == 1:
-                # Xinyue Append? this means new_num_gpu_blocks > self.num_gpu_blocks should always be true? 
-                # if gpu_cache is really cache residing in gpu, this should not be true? since some 
-                self.gpu_cache[layer_num] = torch.cat([self.gpu_cache[layer_num], new_rows], dim=1)
-        
-        # No offload -> some offload 
-        if self.gpu_cache_num == self.num_attention_layers and new_gpu_cache_num < self.num_attention_layers:
-            self.gpu_cache[-1] = torch.zeros(new_kv_cache_shape,
-                        dtype=self.dtype,
-                        # pin_memory=pin_memory,
-                        device=self.device_config.device_type)
-        if self.gpu_cache[-1] != None: # for fetched offloaded layer
-            self.gpu_cache[-1] = torch.cat([self.gpu_cache[-1], new_rows], dim=1)
-        del new_rows
-
-        self.num_gpu_blocks = new_num_gpu_blocks
-        self.cache_config.num_gpu_blocks = int(self.cache_config.num_gpu_blocks * self.gpu_cache_num / new_gpu_cache_num)
-
-        self.gpu_cpu_cache_map = new_gpu_cpu_cache_map
-        self.gpu_cache_num = new_gpu_cache_num
-
-
-        torch.cuda.synchronize()
-
-        msg = f"cache rearr time: {time.time() - start} ms"
-        logger.info(msg)
-
         return self.cache_config
-    
+        
     def _allocate_kv_cache(
         self,
         num_blocks: int,
@@ -1106,6 +1222,8 @@ class MappingTable:
     cpu_map:     dict[int, dict[int, Optional[list[int]]]] = field(default_factory=dict)
     prefetch_map:dict[int, dict[int, Optional[list[int]]]] = field(default_factory=dict)
 
+    gpu_cpu_cache_map: dict[int, List[int]] = field(default_factory=dict)
+
     num_layers: int = 0
     cpu_offset: int = 0 
     def update_mapping_table(self, attn_meta, seq_group_metadata, finished_requests: Optional[List[str]] = None):
@@ -1124,6 +1242,7 @@ class MappingTable:
                 self.cpu_map.pop(sid, None)
                 self.prefetch_map.pop(sid, None)
                 self.seq_to_req.pop(sid, None)
+                self.gpu_cpu_cache_map.pop(sid, None)
 
             # drop them from all *placement* sets
             for container in (
@@ -1157,9 +1276,14 @@ class MappingTable:
         # remember any new mappings so we still know the request later
         self.seq_to_req.update(current_seq_to_req)
 
+
+        # HACK (xinyue) exempt preempt decode sequences due to continuous batchd prefill 
+        prefill_step = attn_meta.num_prefills > 0
+        prev_active_gpu = self.active_gpu_seqs.copy()
         # --------------------------------------------------------------------------- #
         # Reset the *seq-level* placement sets
         # --------------------------------------------------------------------------- #
+        # in continous batching, decode sequence will be paused but only for one step
         self.all_seqs.clear()
         self.active_gpu_seqs.clear()
         self.paused_gpu_seqs.clear()
@@ -1173,12 +1297,16 @@ class MappingTable:
         for sid in self.all_seqs:
             has_gpu = _has_blocks(self.gpu_map, sid)
             has_cpu = _has_blocks(self.cpu_map, sid)
-
-            if sid in current_seq_ids:                  # ---------- ACTIVE ----------
+            considered_active = (
+                sid in current_seq_ids                         # executed this tick
+                or (prefill_step and has_gpu and sid in prev_active_gpu)
+                                                            # decode sequence stalled for 1 tick
+            )
+            if considered_active:                  
                 if has_gpu:
-                    self.active_gpu_seqs.add(sid)
+                    self.active_gpu_seqs.add(sid)       # some or no offload 
                 else:
-                    self.paused_cpu_seqs.add(sid)       # active but CPU-only
+                    self.paused_cpu_seqs.add(sid)       # active but CPU-only (Full offload)
             else:                                       # ---------- PAUSED ----------
                 if has_gpu:
                     self.paused_gpu_seqs.add(sid)       # paused-GPU
@@ -1200,7 +1328,8 @@ class MappingTable:
         self.paused_gpu_by_req = _group_by_req(self.paused_gpu_seqs)
         self.paused_cpu_by_req = _group_by_req(self.paused_cpu_seqs)
 
-        logger.debug(f"current {self.__repr__()}")
+
+        logger.info(f"update_mapping table {self.__repr__()}")
 
     def _validate_cache(self, gpu_slot_mapping, cpu_slot_mapping, cpu_offset):
         # check if the mapping is valid 
@@ -1236,6 +1365,14 @@ class MappingTable:
                 cpu_bt[seq_id] = bt
 
         return gpu_bt, cpu_bt
+
+    def _set_gpu_flag(self, sid: int, layer: int, want_gpu: bool):
+        """
+        Ensure gpu_cpu_cache_map[sid][layer] is 1 if `want_gpu` else 0.
+        """
+        if not sid in self.gpu_cpu_cache_map:
+            self.gpu_cpu_cache_map[sid] = [1] * self.num_layers
+        self.gpu_cpu_cache_map[sid][layer] = 1 if want_gpu else 0
     
     def __repr__(self) -> str:                           # noqa: D401
         """
@@ -1276,8 +1413,14 @@ class MappingTable:
             lines.append("  by-req :  " + "  ".join(req_summ))
 
         # -------- per-sequence table ----------------------------------- #
-        hdr = "\n  seq-id   GPU-layers   CPU-layers   state"
-        underline = "\n  ------   ----------   ----------   -----"
+        hdr = (
+            "\n  seq-id   GPU-layers                                   "
+            "CPU-layers   state"
+        )
+        underline = (
+            "\n  ------   -------------------------------------------- "
+            "----------   -----"
+        )
         lines.append(hdr + underline)
 
         def _non_empty_layers(m: dict[int, dict[int, Optional[list]]], sid: int) -> int:
@@ -1289,9 +1432,20 @@ class MappingTable:
                 lines.append("  …            (truncated after 10 seqs)")
                 break
 
+            # ------- layer counts -------------------------------------- #
             gpu_layers = _non_empty_layers(self.gpu_map, sid)
             cpu_layers = _non_empty_layers(self.cpu_map, sid)
+            total      = self.num_layers or max(gpu_layers, cpu_layers)
 
+            # ------- 1/0 bitmap ---------------------------------------- #
+            bitmap: list[int] = [
+                1 if self.gpu_map.get(sid, {}).get(lyr) else 0
+                for lyr in range(total)
+            ]
+            # e.g.  “10 / 32 (1,1,1,0, … )”
+            gpu_field = f"{gpu_layers:2d} / {total:<2d} ({''.join(map(str, bitmap))})"
+
+            # ------- state --------------------------------------------- #
             if sid in self.active_gpu_seqs:
                 state = "ACTIVE-GPU"
             elif sid in self.paused_gpu_seqs:
@@ -1301,12 +1455,11 @@ class MappingTable:
             else:
                 state = "FINISHED"
 
-            total = self.num_layers or max(gpu_layers, cpu_layers)
             lines.append(
-                f"  {sid:6d}   "
-                f"{gpu_layers:2d} / {total:<2d}   "
-                f"{cpu_layers:2d} / {total:<2d}   "
-                f"{state}"
+                f"  {sid:6d}     {gpu_field:<30}   "
+                f"{cpu_layers:2d} / {total:<2d}   {state}"
             )
 
         return "\n".join(lines)
+    
+    

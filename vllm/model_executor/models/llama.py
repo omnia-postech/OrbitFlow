@@ -56,9 +56,10 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
                     is_pp_missing_parameter,
                     make_empty_intermediate_tensors_factory, make_layers,
                     maybe_prefix)
-from vllm.worker.utils import remap_to_continuous
+from vllm.worker.utils import compute_inds_for_prefetch, remap_to_continuous
 import time
 import nvtx
+import random
 def scatter_blocks_cpu_to_gpu(
         dst: torch.Tensor,       # [num_blocks, B, H, D] on cuda
         src: torch.Tensor,       # same shape on pinned CPU
@@ -297,7 +298,6 @@ class LlamaDecoderLayer(nn.Module):
         residual: Optional[torch.Tensor],
         is_recomp: Optional[bool] = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        logger.debug(f"decodelayer received {attn_metadata.block_tables.shape} {attn_metadata.block_tables}")
         # Self Attention
         if residual is None:
             residual = hidden_states
@@ -337,7 +337,7 @@ class LlamaModel(nn.Module):
         cache_config = vllm_config.cache_config
         quant_config = vllm_config.quant_config
         lora_config = vllm_config.lora_config
-
+        self.batch_size = vllm_config.scheduler_config.max_num_seqs 
         self.config = config
         self.padding_idx = config.pad_token_id
         lora_vocab = (lora_config.lora_extra_vocab_size *
@@ -371,10 +371,41 @@ class LlamaModel(nn.Module):
             make_empty_intermediate_tensors_factory(
                 ["hidden_states", "residual"], config.hidden_size))
         
-        self._prefetch_stream = torch.cuda.Stream()
+        # allow different requests to used different streams 
+        self._max_prefetch_streams = 2 * self.batch_size
+        try:
+            self._prefetch_streams = [torch.cuda.Stream() for _ in range(self.batch_size)]
+        except: 
+            raise RuntimeError("Not enough streams") 
+        self.prefetch_queue = {} # {seq_id, stream}
         self.PAGE_SIZE = 16
         self.recomp_ratio = 0.0
+    def _acquire_prefetch_stream(self) -> tuple[int, Any]:
+        """
+        Get an idle CUDA stream from `self._prefetch_streams`, or create a
+        new one up to `self._max_prefetch_streams`.
 
+        Returns
+        -------
+        (idx, stream)
+            idx  – position in `self._prefetch_streams`
+            stream – the `torch.cuda.Stream` object
+        (None, None)
+            when all streams are busy *and* the pool has reached its cap
+        """
+        for i, s in enumerate(self._prefetch_streams):
+            if s.query():              # True → no pending kernels
+                return i, s
+
+        if len(self._prefetch_streams) < self._max_prefetch_streams:
+            new_stream = torch.cuda.Stream(priority=-1)   # low-priority async
+            if new_stream is not None: 
+                self._prefetch_streams.append(new_stream)
+                return len(self._prefetch_streams) - 1, new_stream
+        
+        i = random.randrange(len(self._prefetch_streams))
+        return i, self._prefetch_streams[i]
+    
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
     
@@ -506,16 +537,23 @@ class LlamaModel(nn.Module):
         cached_all_token_ids: List[int],
         kv_caches: List[torch.Tensor],
         kv_caches_cpu: List[torch.Tensor],
-        gpu_cpu_cache_map: List[int],
+        gpu_cpu_cache_map: Dict[int, List[int]],
         attn_metadata: AttentionMetadata,
         intermediate_tensors: Optional[IntermediateTensors],
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, IntermediateTensors]:
         layer_metas = attn_metadata
-        # if  attn_metadata.slot_mapping.ndim == 2: 
-        #     layer_metas = build_layer_metadata(attn_metadata)
-        # else:
-        #     layer_metas = None
+        layer_gpu_seqs = [
+            [sid for sid, mask in gpu_cpu_cache_map.items() if mask[layer]]
+            for layer in range(len(self.layers))
+        ]
+        logger.info(f"layer_gpu_seqs: {layer_gpu_seqs}")
+        if isinstance(layer_metas,list):
+            logger.info(f"-----")
+            logger.info(f"Layer 2 Meta: {layer_metas[2]}")
+            logger.info(f"-----")
+            logger.info(f"Layer 3 Meta: {layer_metas[3]}")
+            logger.info(f"-----")
         if kv_caches_cpu[0].numel()>0:
             assert kv_caches_cpu[0].is_pinned(), "CPU KV cache must be pinned for non_blocking=True"
 
@@ -541,6 +579,7 @@ class LlamaModel(nn.Module):
             layer = self.layers[i]
             if isinstance(layer_metas, list): 
                 attn_metadata = layer_metas[i]
+            
             # TODO(HONG): Implement prefetching here
             next_layer = i + 1
             positions_min = positions.min().item()
@@ -551,9 +590,9 @@ class LlamaModel(nn.Module):
 
             logger.debug(f"kv cache len {len(kv_caches)}")
             if attn_metadata.prefill_metadata: # prefill
-                kv_cache, kv_cache_write = self.configure_kv_slice_with_prefetch(attn_metadata, layer_metas, kv_caches, kv_caches_cpu,  layer_num, gpu_cpu_cache_map, is_prefill=True)
+                kv_cache, kv_cache_write = self.configure_kv_slice_with_prefetch(attn_metadata, layer_metas, kv_caches, kv_caches_cpu,  layer_num, layer_gpu_seqs, is_prefill=True)
             else:
-                kv_cache, kv_cache_write = self.configure_kv_slice_with_prefetch(attn_metadata, layer_metas, kv_caches, kv_caches_cpu, layer_num,  gpu_cpu_cache_map, is_prefill=False)
+                kv_cache, kv_cache_write = self.configure_kv_slice_with_prefetch(attn_metadata, layer_metas, kv_caches, kv_caches_cpu, layer_num,  layer_gpu_seqs, is_prefill=False)
 
             logger.debug(f"block_table shape = {attn_metadata.block_tables.shape}")
             layer_attn_metadata = attn_metadata
@@ -604,18 +643,12 @@ class LlamaModel(nn.Module):
             })
 
         hidden_states, _ = self.norm(hidden_states, residual)
-        # Xinyue Why??? 
-        # if attn_metadata.decode_metadata:
-        #     hidden_states = hidden_states[-1:]
-            
-        # if attn_metadata.num_prefills > 0:
-        #     msg = f"prefill ends"
-        #     logger.debug(msg)
         return hidden_states
-    def configure_kv_slice_with_prefetch(self, attn_metadata, layer_metas,  kv_caches, kv_caches_cpu, layer_num, gpu_cpu_cache_map,  is_prefill=True):
+    def configure_kv_slice_with_prefetch(self, attn_metadata, layer_metas,  kv_caches, kv_caches_cpu, layer_num, layer_gpu_seqs,  is_prefill=True):
         '''
         Configure KV slice with prefetch.
         '''
+        num_seqs = max(attn_metadata.num_prefills, attn_metadata.num_decode_tokens)
         num_layers = len(self.layers)
         if is_prefill:
             # default kv cache, no offload
@@ -627,7 +660,8 @@ class LlamaModel(nn.Module):
             # default kv cache, with offload
             elif len(kv_caches) == num_layers + 1: 
                 logger.debug(f"prefill branch2")
-                if gpu_cpu_cache_map[layer_num] == 0: # offloaded 
+                assert (len(layer_gpu_seqs[layer_num]) in [0, num_seqs] )
+                if len(layer_gpu_seqs[layer_num]) == 0: # offloaded 
                     kv_cache = kv_caches[-1]
                     kv_cache_write = kv_caches_cpu[layer_num]
                 else:
@@ -637,14 +671,20 @@ class LlamaModel(nn.Module):
             # flat kv cache, with offload
             elif len(kv_caches) == 2: 
                 logger.debug(f"prefill branch3")
+                assert (len(layer_gpu_seqs[layer_num]) in [0, num_seqs] )
                 kv_cache_write = kv_caches_cpu[0]
-                if gpu_cpu_cache_map[layer_num] == 0: # offloaded 
+                if len(layer_gpu_seqs[layer_num]) == 0: # offloaded 
                     kv_cache = kv_caches[-1]
                 else:
                     kv_cache = kv_caches[0] 
-            # flat kv cache, no offload
-            elif len(kv_caches) == 1: 
+            # flat kv cache, with offload, one gpu buffer 
+            elif len(kv_caches) == 1 and len(kv_caches[0]) > 3200: # temp fixe this check 
                 logger.debug(f"prefill branch4")
+                kv_cache = kv_caches[0] 
+                kv_cache_write = kv_caches_cpu[0]
+            # flat kv cache, no offload
+            elif len(kv_caches) == 1:
+                logger.debug(f"prefill branch5")
                 kv_cache = kv_caches[0] 
                 kv_cache_write = kv_caches_cpu[0]
             else: 
@@ -652,37 +692,38 @@ class LlamaModel(nn.Module):
         else: 
             # default kv cache, no offload
             if len(kv_caches) == num_layers:
-                logger.debug(f"decode branch1")
+                logger.info(f"decode branch1")
                 kv_cache = kv_caches[layer_num]  
                 kv_cache_write = None
                     
             # default kv cache, with offload
             elif len(kv_caches) == num_layers + 1: 
-                logger.debug(f"decode branch2")
+                logger.info(f"decode branch2")
                 kv_cache_write = kv_caches_cpu[layer_num]
-                if gpu_cpu_cache_map[layer_num] == 0: # offloaded 
+                assert (len(layer_gpu_seqs[layer_num]) in [0, num_seqs] )
+                if len(layer_gpu_seqs[layer_num]) == 0: # offloaded 
                     kv_cache = kv_caches[-1]
-                    if self._prefetch_stream is not None: 
-                        torch.cuda.default_stream().wait_stream(self._prefetch_stream)
+                    if self._prefetch_streams[0] is not None: 
+                        torch.cuda.default_stream().wait_stream(self._prefetch_streams[0])
                     else: 
                         raise ValueError("prefetch stream not set ")
-                elif layer_num > 0 and gpu_cpu_cache_map[layer_num - 1] == 0: 
+                elif layer_num > 0 and len(layer_gpu_seqs[layer_num - 1]) == 0: 
                     kv_cache = kv_caches[layer_num]
                     prefetch_layer = 12345 # FIXME 
                     for i in range(layer_num, self.end_layer):
-                        if gpu_cpu_cache_map[i] == 0:
+                        if len(layer_gpu_seqs[layer_num - 1]) < num_seqs: # some offload 
                             prefetch_layer = i
                             break
                     if prefetch_layer <= 31:
-                        with torch.cuda.stream(self._prefetch_stream):
+                        with torch.cuda.stream(self._prefetch_streams[0]):
                             # Copy only needed pages in the cache (efficient)
                             # shape = [num_blocks, block_size, num_kv_heads, head_size]
-                            with nvtx.annotate(f"Key Prefetching{next_layer}"): # FIXME Xinyue 
+                            with nvtx.annotate(f"Key Prefetching{prefetch_layer}"): # FIXME Xinyue 
                                 kv_caches[-1][0][start_page:end_page, :, :, :].copy_(
                                     kv_caches_cpu[prefetch_layer][0][start_page:end_page, :, :, :], non_blocking=True
                                 )
 
-                            with nvtx.annotate(f"Value Prefetetching{next_layer}"):
+                            with nvtx.annotate(f"Value Prefetetching{prefetch_layer}"):
                                 kv_caches[-1][1][start_page:end_page, :, :, :].copy_(
                                     kv_caches_cpu[prefetch_layer][1][start_page:end_page, :, :, :], non_blocking=True
                                 )
@@ -690,32 +731,35 @@ class LlamaModel(nn.Module):
                     kv_cache = kv_caches[layer_num]
                     
             # flat kv cache, with offload
-            elif len(kv_caches) == 2: # FIXME probably buggy with prefetch on
-                logger.debug(f"decode branch3")
+            elif len(kv_caches) == 2:
+                logger.info(f"decode branch3")
                 kv_cache_write = kv_caches_cpu[0]
-                if gpu_cpu_cache_map[layer_num] == 0: # offloaded 
+                assert (len(layer_gpu_seqs[layer_num]) in [0, num_seqs] )
+                
+                if len(layer_gpu_seqs[layer_num]) == 0: # offloaded 
                     kv_cache = kv_caches[-1]
-                    if self._prefetch_stream is not None: 
-                        torch.cuda.default_stream().wait_stream(self._prefetch_stream)
+                    if self._prefetch_streams[0] is not None: 
+                        torch.cuda.default_stream().wait_stream(self._prefetch_streams[0])
                         logger.info(f"Prefetch Layer[{layer_num}], block_table:{attn_metadata.block_tables}, cpu_bt:{attn_metadata.cpu_block_tables}")
                         logger.info(f"Prefetch Layer[{layer_num}], slot_mapping:{attn_metadata.slot_mapping}, cpu_slot_mapping:{attn_metadata.cpu_slot_mapping}")
-                elif (layer_num > 0 and gpu_cpu_cache_map[layer_num - 1] == 0) or layer_num == 0: 
+                elif (layer_num > 0 and len(layer_gpu_seqs[layer_num - 1] == 0)) or layer_num == 0: 
                     kv_cache = kv_caches[0]
                     next_layer_to_prefetch = len(self.layers) 
                     for i in range(layer_num, self.end_layer):
-                        if gpu_cpu_cache_map[i] == 0:
+                        if len(layer_gpu_seqs[i]) < num_seqs:
                             next_layer_to_prefetch = i
                             break     
                     if next_layer_to_prefetch < len(self.layers): 
                         # shape = [num_blocks, block_size, num_kv_heads, head_size]
-                        with torch.cuda.stream(self._prefetch_stream):
+                        st_id, prefetch_stream = self._acquire_prefetch_stream()
+                        with torch.cuda.stream(prefetch_stream):
                             with nvtx.annotate(f"Key Prefetching{next_layer_to_prefetch}"):
                                 # (xinyue) assume no recomp
-                                logger.debug(f"copying for layer {next_layer_to_prefetch}")
-                                logger.debug(f"cpu_block_tables {layer_metas[next_layer_to_prefetch].cpu_block_tables}")
-                                logger.debug(f"block_tables {layer_metas[next_layer_to_prefetch].block_tables}")
-                                logger.debug(f"cpu_slot_mapping {layer_metas[next_layer_to_prefetch].cpu_slot_mapping}")
-                                logger.debug(f"slot_mapping {layer_metas[next_layer_to_prefetch].slot_mapping}")
+                                logger.info(f"copying for layer {next_layer_to_prefetch}")
+                                logger.info(f"cpu_block_tables {layer_metas[next_layer_to_prefetch].cpu_block_tables}")
+                                logger.info(f"cpu_slot_mapping {layer_metas[next_layer_to_prefetch].cpu_slot_mapping}")
+                                logger.info(f"block_tables {layer_metas[next_layer_to_prefetch].block_tables}")
+                                logger.info(f"slot_mapping {layer_metas[next_layer_to_prefetch].slot_mapping}")
                                 # logger.debug(f"block_tables {attn_metadata.block_tables[:,next_layer_to_prefetch,:]}")
 
                             
@@ -734,7 +778,7 @@ class LlamaModel(nn.Module):
                                     src=kv_caches_cpu[0][0],       # matching CPU tensor
                                     dst_ids=blocks_to_write,       # LongTensor on GPU
                                     src_ids=blocks_to_copy_offset, # LongTensor or list
-                                    stream=self._prefetch_stream
+                                    stream=self._prefetch_streams[0]
                                 )
                                 logger.info(f"copying Key for layer {next_layer_to_prefetch},  CPUBlock[{blocks_to_copy_offset.tolist()}({blocks_to_copy.tolist()})]cpu to GPUCache[{blocks_to_write.tolist()}]")
                                 logger.info(f"CPUBlock[{blocks_to_copy_offset.tolist()}({blocks_to_copy.tolist()})] {kv_caches_cpu[0][0][blocks_to_copy_offset.tolist(), 0, :, 0]}")
@@ -752,14 +796,93 @@ class LlamaModel(nn.Module):
                                     src=kv_caches_cpu[0][1],       # matching CPU tensor
                                     dst_ids=blocks_to_write,       # LongTensor on GPU
                                     src_ids=blocks_to_copy_offset, # LongTensor or list
-                                    stream=self._prefetch_stream
+                                    stream=self._prefetch_streams[0]
                                 )
                 else: 
                     kv_cache = kv_caches[0]
+            # flat kv cache, offload within kv 
+            elif len(kv_caches) == 1 and len(kv_caches[0][0]) > 3200: # temp, fix this check  
+                logger.info(f"decode branch4")
+                kv_cache_write = kv_caches_cpu[0]
+                kv_cache = kv_caches[0]
+                # assert(len(layer_gpu_seqs[layer_num]) in [0, num_seqs])
+                if len(layer_gpu_seqs[layer_num]) < num_seqs: # offloaded 
+                    kv_cache = kv_caches[-1]
+                    seqs_to_prefetch = set(range(num_seqs)) - set(layer_gpu_seqs[layer_num])
+                    prefetch_task_id = "".join([str(i) for i in seqs_to_prefetch])       
+                    if prefetch_task_id in self.prefetch_queue: 
+                        prefetch_stream = self._prefetch_streams[self.prefetch_queue[prefetch_task_id]]
+                        torch.cuda.default_stream().wait_stream(prefetch_stream)
+                        logger.info(f"Prefetch Layer[{layer_num}], block_table:{attn_metadata.block_tables}, cpu_bt:{attn_metadata.cpu_block_tables}")
+                        logger.info(f"Prefetch Layer[{layer_num}], slot_mapping:{attn_metadata.slot_mapping}, cpu_slot_mapping:{attn_metadata.cpu_slot_mapping}")
+                elif (layer_num > 0 and len(layer_gpu_seqs[layer_num-1]) < num_seqs) or layer_num == 0: 
+                    next_layer_to_prefetch = len(self.layers) 
+                    for i in range(layer_num, self.end_layer):
+                        if len(layer_gpu_seqs[i]) < num_seqs:
+                            next_layer_to_prefetch = i
+                            break     
+                    if next_layer_to_prefetch < len(self.layers): 
+                        # shape = [num_blocks, block_size, num_kv_heads, head_size]
+                        seqs_to_prefetch = set(range(num_seqs)) - set(layer_gpu_seqs[i])
+                        prefetch_task_id = "".join([str(i) for i in seqs_to_prefetch])
+                        st_idx, prefetch_stream = self._acquire_prefetch_stream()
+                        with torch.cuda.stream(prefetch_stream):
+                            with nvtx.annotate(f"Key Prefetching{next_layer_to_prefetch}"):
+                                # (xinyue) assume no recomp
+                                logger.info(f"copying for layer {next_layer_to_prefetch}, seq_ids {seqs_to_prefetch}")
+                                logger.info(f"cpu_block_tables {layer_metas[next_layer_to_prefetch].cpu_block_tables}")
+                                logger.debug(f"cpu_slot_mapping {layer_metas[next_layer_to_prefetch].cpu_slot_mapping}")
+                                logger.info(f"gpu_block_tables {layer_metas[next_layer_to_prefetch].block_tables}")
+                                logger.debug(f"slot_mapping {layer_metas[next_layer_to_prefetch].slot_mapping}")
+                                logger.info(f"seq_num_blocks {[x // 16 + 1 for x in attn_metadata.seq_start_loc]}")
 
+                                block_table_for_prefetched, blocks_to_write, blocks_to_copy = compute_inds_for_prefetch(
+                                    layer_metas[next_layer_to_prefetch].cpu_block_tables,
+                                    layer_metas[next_layer_to_prefetch].block_tables,
+                                    seq_ids=list(seqs_to_prefetch),
+                                    seq_num_blocks=[x // 16 + 1 for x in attn_metadata.seq_start_loc],  # fix this before running 
+                                    cpu_offset=attn_metadata.cpu_offset, 
+                                    prefetch_offset=attn_metadata.cpu_offset
+                                )                       
+                                slot_mapping = layer_metas[next_layer_to_prefetch].slot_mapping 
+                                slot_mapping += attn_metadata.cpu_offset*16 
+                                logger.info(f"block_table_for_prefetched {block_table_for_prefetched.tolist()}")
+                                logger.info(f"blocks_to_write {blocks_to_write.tolist()}")
+                                logger.info(f"blocks_to_copy {blocks_to_copy.tolist()}")
+                                
+                                layer_metas[next_layer_to_prefetch].block_tables = block_table_for_prefetched
+                                layer_metas[next_layer_to_prefetch].slot_mapping = slot_mapping
+                                
+                                # dst.index_copy_(0, idx, src) # async since src(cpu cache) is pinned   
+                                scatter_blocks_cpu_to_gpu(
+                                    dst=kv_caches[-1][0],          # key or value tensor on GPU
+                                    src=kv_caches_cpu[0][0],       # matching CPU tensor
+                                    dst_ids=blocks_to_write,       # LongTensor on GPU
+                                    src_ids=blocks_to_copy, # LongTensor or list
+                                    stream=prefetch_stream
+                                )
+                                logger.info(f"copying Key for layer {next_layer_to_prefetch},  CPUBlock[{(blocks_to_copy).tolist()}({(blocks_to_copy+3200).tolist()}) to GPUCache[{blocks_to_write.tolist()}]")
+                                logger.info(f"CPUBlock[{(blocks_to_copy).tolist()}({(blocks_to_copy+3200).tolist()})] {kv_caches_cpu[0][0][(blocks_to_copy-3200).tolist(), 0, :, 0]}")
+                                
+                                
+                            # kv_caches[-1][0][blocks_to_write].copy_(
+                            #     kv_caches_cpu[0][0][blocks_to_copy_offset.cpu()], non_blocking=True
+                            # )
+                        with nvtx.annotate(f"Value Prefetching{next_layer_to_prefetch}"):
+                            # (xinyue) assume no recomp
+                            # logger.debug(f"block_tables {attn_metadata.block_tables[:,next_layer_to_prefetch,:]}")
+                            logger.debug(f"copying for layer {next_layer_to_prefetch},  {blocks_to_copy} from cpu to {blocks_to_write}")
+                            scatter_blocks_cpu_to_gpu(
+                                dst=kv_caches[-1][1],          # key or value tensor on GPU
+                                src=kv_caches_cpu[0][1],       # matching CPU tensor
+                                dst_ids=blocks_to_write,       # LongTensor on GPU
+                                src_ids=blocks_to_copy, # LongTensor or list
+                                stream=prefetch_stream
+                            )
+                        self.prefetch_queue[prefetch_task_id]= st_idx
             # flat kv cache, no offload
             elif len(kv_caches) == 1: 
-                logger.debug(f"decode branch4")
+                logger.info(f"decode branch5")
                 kv_cache = kv_caches[0] 
                 kv_cache_write = kv_caches_cpu[0]
                 # kv_cache_write = None
@@ -961,7 +1084,7 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         cached_all_token_ids: List[int],
         kv_caches: List[torch.Tensor],
         kv_caches_cpu: List[torch.Tensor],        
-        gpu_cpu_cache_map: List[int],
+        gpu_cpu_cache_map: Dict[int, List[int]],
         attn_metadata: AttentionMetadata,
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
