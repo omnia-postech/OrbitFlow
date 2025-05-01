@@ -1048,7 +1048,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         ):
         self.mapping.update_mapping_table(attn_meta,seq_group_metadata,finished_requests)
         self.cache_config.gpu_cpu_cache_map = self.gpu_cpu_cache_map = self.mapping.gpu_cpu_cache_map
-        logger.info(self.cache_config.gpu_cpu_cache_map)
+        logger.info(f"gpu_cpu_cache_map: {self.cache_config.gpu_cpu_cache_map}")
         
 
         # TODO(HONG): implementing pause/resume cache_update feature here -> move or apply this part to proper place later.
@@ -1059,61 +1059,64 @@ class FlattenedCacheEngine(CacheEngineBase):
             # logger.debug(f"mapping after resize: {self.mapping}")
         return self.cache_config
     
-    def pause_resume_cache_update(self) -> None:        
+    def pause_resume_cache_update(self) -> None:
+        """
+        Pause any paused-GPU sequences by offloading their last GPU layer,
+        and resume any sequences that have returned to active-GPU by reloading
+        their previously offloaded layers.
+        """
         logger.info("===== pause_resume_cache_update START =====")
+
         # ----------------- PAUSE -----------------
         paused_gpu_seqs = list(self.mapping.paused_gpu_seqs)
-        logger.info(f"[pause_resume_cache_update] paused_gpu_seqs: {paused_gpu_seqs}")
+        logger.info(f"[PAUSE] paused_gpu_seqs: {paused_gpu_seqs}")
 
         for seq_id in paused_gpu_seqs:
-            logger.info(f"--- process start: seq_id={seq_id} ---")
-            # 이 seq_id의 레이어→블록 매핑
+            logger.info(f"[PAUSE] Processing seq_id={seq_id}")
             layer_map = self.mapping.gpu_map.get(seq_id, {})
             if not layer_map:
-                logger.info(f"no gpu_map for seq_id={seq_id}. skipped.")
-                # 완전히 해제된 것으로 간주
+                logger.info(f"[PAUSE] No gpu_map entry for seq_id={seq_id}, marking CPU-only")
                 self.mapping.paused_gpu_seqs.discard(seq_id)
                 self.mapping.paused_cpu_seqs.add(seq_id)
                 continue
 
             # 실제로 블록이 남아있는 레이어만 뽑아냄
             alive_layers = [lyr for lyr, blks in layer_map.items() if blks]
-            logger.info(f"seq_id={seq_id} alive_layers: {alive_layers}")
+            logger.info(f"[PAUSE] seq_id={seq_id} alive_layers: {alive_layers}")
 
             if not alive_layers:
-                logger.info(f"no GPU layers left for seq_id={seq_id}, transfer to CPU-only")
+                logger.info(f"[PAUSE] seq_id={seq_id} has no alive GPU layers, moving to paused_cpu_seqs")
                 self.mapping.paused_gpu_seqs.discard(seq_id)
                 self.mapping.paused_cpu_seqs.add(seq_id)
                 continue
 
             # 마지막 레이어 선택
             last_layer = max(alive_layers)
-            logger.info(f"seq_id={seq_id} → last layer {last_layer} free process start")
+            logger.info(f"[PAUSE] seq_id={seq_id} → offloading last_layer={last_layer}")
 
+            # Record for later resume
+            self._paused_layers_freed[seq_id].append(last_layer)
+            logger.debug(f"[PAUSE] Recorded layer {last_layer} for seq_id={seq_id} in _paused_layers_freed")
+            
             # block_manager로 해당 레이어 블록 해제
             freed_block_ids = self.block_manager.free_seq_by_layer({seq_id: [last_layer]})
-            logger.info(f"seq_id={seq_id} layer={last_layer} freed_block_ids={freed_block_ids}")
+            logger.info(f"[PAUSE] seq_id={seq_id} freed_block_ids={freed_block_ids}")
 
-            # mapping에서도 해당 레이어 엔트리 비우기
-            self.mapping.gpu_map[seq_id][last_layer] = None
-            logger.info(f"seq_id={seq_id} mapping.gpu_map[{seq_id}][{last_layer}] cleared")
+            # Clear mapping entry
+            self.mapping.gpu_map[seq_id][last_layer] = []
+            logger.info(f"[PAUSE] seq_id={seq_id} mapping.gpu_map[{seq_id}][{last_layer}] cleared")
 
-            # 전역 맵도 offload 표시 (0)
-            self.cache_config.gpu_cpu_cache_map[last_layer] = False
-            logger.info(f"GLOBAL gpu_cpu_cache_map[{last_layer}] set to False")
+            # Update per-sequence flag
+            self.mapping._set_gpu_flag(seq_id, last_layer, False)
+            logger.info(f"[PAUSE] seq_id={seq_id} mapping flag set to False for layer {last_layer}")
 
-            # 남은 GPU 레이어가 있는지 확인
-            remaining_gpu_layers = [
-                lyr for lyr, blks in self.mapping.gpu_map[seq_id].items() if blks
-            ]
-            logger.info(f"seq_id={seq_id} remaining_gpu_layers after free: {remaining_gpu_layers}")
+            remaining = [lyr for lyr, blks in self.mapping.gpu_map[seq_id].items() if blks]
+            logger.info(f"[PAUSE] seq_id={seq_id} remaining_gpu_layers after offload: {remaining}")
 
-            if not remaining_gpu_layers:
-                logger.info(f"no gpu layers left for seq_id={seq_id} → move to paused_cpu_seqs")
+            if not remaining:
+                logger.info(f"[PAUSE] seq_id={seq_id} no GPU layers left → moving to paused_cpu_seqs")
                 self.mapping.paused_gpu_seqs.discard(seq_id)
-                self.mapping.paused_cpu_seqs.add(seq_id)                
-
-            logger.info(f"--- process end: seq_id={seq_id} ---")
+                self.mapping.paused_cpu_seqs.add(seq_id)
 
         # ----------------- RESUME -----------------
         # 기록된 paused 레이어가 있고, 현재 active_gpu 로 돌아온 seq_id들
@@ -1122,40 +1125,44 @@ class FlattenedCacheEngine(CacheEngineBase):
 
         for seq_id in resume_ids:
             layers_to_restore = self._paused_layers_freed.pop(seq_id)
-            logger.info(f"--- process start (RESUME): seq_id={seq_id}, layers={layers_to_restore} ---")
+            logger.info(f"[RESUME] seq_id={seq_id}, restoring layers: {layers_to_restore}")
 
             for layer in layers_to_restore:
                 cpu_blocks = self.mapping.cpu_map.get(seq_id, {}).get(layer) or []
                 if not cpu_blocks:
-                    logger.warning(f"seq_id={seq_id} layer={layer} no CPU blocks → skip")
+                    logger.info(f"[RESUME] seq_id={seq_id} layer={layer} has no CPU blocks → skipping")
                     continue
 
-                # GPU 에 block 재할당
-                new_gpu_blocks = self.block_manager.allocate_seq_by_layer(
-                    seq_id, layer, len(cpu_blocks))
-                logger.info(f"seq_id={seq_id} layer={layer} re-allocated gpu_blocks={new_gpu_blocks}")
+                # Allocate new GPU blocks
+                new_gpu_blocks = self.block_manager.allocate_seq_by_layer(seq_id, layer, len(cpu_blocks))
+                logger.info(f"[RESUME] seq_id={seq_id} layer={layer} re-allocated gpu_blocks={new_gpu_blocks}")
 
-                # mapping 갱신
+                # Update mapping
                 self.mapping.gpu_map.setdefault(seq_id, {})[layer] = new_gpu_blocks
 
-                # 실제 KV 데이터 복사 (cpu_cache → gpu_cache)
-                # src_to_dst 텐서 형식: [[cpu_block, gpu_block], …]
-                pairs = torch.tensor(
-                    [[src, dst] for src, dst in zip(cpu_blocks, new_gpu_blocks)],
-                    device=self.device_config.device_type,
-                )
-                self.swap_in(pairs)
-                logger.info(f"seq_id={seq_id} layer={layer} copied CPU→GPU for {list(zip(cpu_blocks, new_gpu_blocks))}")
+                # Copy KV from CPU → GPU using flattened cache layout
+                logger.info(f"[RESUME] Copying KV from CPU→GPU for seq_id={seq_id}, layer={layer}")
+                for src, dst in zip(cpu_blocks, new_gpu_blocks):
+                    # key
+                    self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][src], non_blocking=False)
+                    # value
+                    self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][src], non_blocking=False)
+                    logger.debug(f"[RESUME] seq_id={seq_id} CPU_block={src} → GPU_block={dst}")
 
-                # 전역 맵도 resume 표시 (1)
-                self.cache_config.gpu_cpu_cache_map[layer] = True
-                logger.info(f"GLOBAL gpu_cpu_cache_map[{layer}] set to True")
+                # Update per-sequence flag
+                self.mapping._set_gpu_flag(seq_id, layer, True)
+                logger.info(f"[RESUME] seq_id={seq_id} mapping flag set to True for layer {layer}")
 
             # PAUSED-CPU 에서 완전 복귀했으니 상태 이동
             self.mapping.paused_cpu_seqs.discard(seq_id)
             self.mapping.active_gpu_seqs.add(seq_id)
-            logger.info(f"seq_id={seq_id} moved to ACTIVE-GPU")
-            logger.info(f"--- process end (RESUME): seq_id={seq_id} ---")        
+            logger.info(f"[RESUME] seq_id={seq_id} moved to ACTIVE-GPU")
+            logger.info(f"--- process end (RESUME): seq_id={seq_id} ---")   
+
+        # ----------------- SYNCHRONIZE GLOBAL MAP -----------------
+        self.cache_config.gpu_cpu_cache_map = self.gpu_cpu_cache_map = self.mapping.gpu_cpu_cache_map
+        self.block_manager.cache_config = self.cache_config
+        logger.info(f"[SYNC] global gpu_cpu_cache_map synchronized: {self.cache_config.gpu_cpu_cache_map}")     
 
         logger.info("===== pause_resume_cache_update END =====")
     
@@ -1350,14 +1357,13 @@ class FlattenedCacheEngine(CacheEngineBase):
             candidates |= set(mapping.paused_gpu_seqs)
 
         #HARDCODE 
-        prefetch_distance = torch.randint(0, 5, (len(candidates),)).tolist()
-        # prefetch_distance = {0:2, 1:3}
-        prefetch_distance = [2,3,4,5]
+        # prefetch_distance = torch.randint(0, 5, (len(candidates),)).tolist()        
+        # prefetch_distance = [2,3,4,5]
         # prefetch_distance = [2,2,2,2]
-        prefetch_distance = {sid: dist for sid, dist in zip(candidates, prefetch_distance)}
+        # prefetch_distance = {sid: dist for sid, dist in zip(candidates, prefetch_distance)}
         
-        # prefetch_distance = {0:3, 1:3}
-        # prefetch_distance = {candidate: dist for candidate, dist in prefetch_distance.items() if candidate in candidates}
+        prefetch_distance = {0:2, 1:2}
+        prefetch_distance = {candidate: dist for candidate, dist in prefetch_distance.items() if candidate in candidates}
         logger.info(f"resize, target_distance: {prefetch_distance}")
         
         logger.debug(f"GPU map before resize:{mapping.gpu_map}")

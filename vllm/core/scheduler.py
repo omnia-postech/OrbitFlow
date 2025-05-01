@@ -608,7 +608,7 @@ class Scheduler:
                 if self.deposit_map.get(g.request_id, 0) > 0
                 and any(seq.status == SequenceStatus.RUNNING for seq in g.get_seqs())
             ]
-            logger.info(f"candidates: {candidates}")
+            logger.info(f"PAUSE candidates: {candidates}")
             if candidates: 
                 # candidates[1].get_seqs()[0].get_output_len()
                 pause_victim = max(candidates, key=lambda g: g.get_seqs()[0].get_output_len())
