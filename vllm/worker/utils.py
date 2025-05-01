@@ -4,7 +4,7 @@ Worker-related helper functions.
 
 from vllm.utils import STR_NOT_IMPL_ENC_DEC_ERR_STRS
 from vllm.worker.model_runner import GPUModelRunnerBase
-from torch import tensor,Tensor, zeros_like, cat
+from torch import tensor,Tensor, zeros_like, cat,arange
 from typing import Tuple, Sequence
 def assert_enc_dec_mr_supported_scenario(
         enc_dec_mr: GPUModelRunnerBase) -> None:
@@ -146,7 +146,13 @@ def compute_inds_for_prefetch(
     blocks_to_copy  : 1-D tensor [N]     – original cpu_tables ids (src)
     """
     assert len(seq_ids) > 0 
+    total_new_blks = sum(seq_num_blocks[sid] for sid in seq_ids)
     device, dtype = cpu_tables.device, cpu_tables.dtype
+    blocks_to_write = arange(total_new_blks,        # 0,1,2,…
+                                device=device,
+                                dtype=dtype) + prefetch_offset
+
+    
     seq_ids = list(seq_ids)
     # flatten the target cpu blocks 
     flattened_src = [] 
@@ -154,15 +160,22 @@ def compute_inds_for_prefetch(
         n_blk = seq_num_blocks[sid]
         flattened_src.append(cpu_tables[sid, :n_blk]) 
     
-    blocks_to_copy_raw = cat(flattened_src)                     # [3200, 3201, 3202, ...] # cpu block ids 
-    blocks_to_copy = blocks_to_copy_raw - cpu_offset            # physical block id in the CPU cache
-    blocks_to_write = blocks_to_copy + prefetch_offset          # physical block id in the GPU cache 
+    blocks_to_copy_raw = cat([
+        cpu_tables[sid, :seq_num_blocks[sid]] for sid in seq_ids
+    ])
+    blocks_to_copy = blocks_to_copy_raw - cpu_offset        
+    
     prefetch_tables = gpu_tables 
     
-    offset = 0 
+    # keep a view we can slice per-sequence
+    dst_cursor = 0
     for sid in seq_ids:
         n_blk = seq_num_blocks[sid]
-        prefetch_tables[sid, :n_blk] = blocks_to_copy_raw[offset:offset + n_blk] - cpu_offset + prefetch_offset
-        offset += n_blk
+        # contiguous slice in the GPU prefetch region
+        tgt_slice = blocks_to_write[dst_cursor: dst_cursor + n_blk]
+        prefetch_tables[sid, :n_blk] = tgt_slice
+        if (prefetch_tables[:,-1] == 0).all():
+            prefetch_tables = prefetch_tables[:, :-1]
+        dst_cursor += n_blk
     
     return prefetch_tables, blocks_to_write, blocks_to_copy

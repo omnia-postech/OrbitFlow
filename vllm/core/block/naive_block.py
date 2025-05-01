@@ -169,6 +169,7 @@ class NaiveBlockAllocator(BlockAllocator):
         return block
 
     def _allocate_block_id(self) -> BlockId:
+        
         if not self._free_block_indices:
             raise BlockAllocator.NoFreeBlocksError()
         block_id = self._free_block_indices.popleft()

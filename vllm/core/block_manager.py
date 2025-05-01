@@ -799,18 +799,18 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         seq_block_tables = self.block_tables[seq.seq_id]
         for i, block_table in enumerate(seq_block_tables):
             if gpu_cpu_cache_map[seq.seq_id][i]:
-                try:
-                    block_table.append_token_ids(
-                        token_ids=block_table.get_unseen_token_ids(seq.get_token_ids()),
-                        num_lookahead_slots=num_lookahead_slots,
-                        num_computed_slots=seq.data.get_num_computed_tokens(),
-                        extra_hash=seq.extra_hash(),
-                    )
-                except: 
-                    for i, block_table in enumerate(seq_block_tables):
-                        logger.info(f"self.block_tables[{seq.seq_id}]: {block_table.physical_block_ids}")
-                    logger.info(f"gpu_cpu_cache_map[{seq.seq_id}][{i}] {gpu_cpu_cache_map[seq.seq_id][i]}\n full map: {gpu_cpu_cache_map}\n")
-                    raise RuntimeError("check")
+                # try:
+                block_table.append_token_ids(
+                    token_ids=block_table.get_unseen_token_ids(seq.get_token_ids()),
+                    num_lookahead_slots=num_lookahead_slots,
+                    num_computed_slots=seq.data.get_num_computed_tokens(),
+                    extra_hash=seq.extra_hash(),
+                )
+                # except: 
+                #     for i, block_table in enumerate(seq_block_tables):
+                #         logger.info(f"self.block_tables[{seq.seq_id}]: {block_table.physical_block_ids}")
+                #     logger.info(f"gpu_cpu_cache_map[{seq.seq_id}][{i}] {gpu_cpu_cache_map[seq.seq_id][i]}\n full map: {gpu_cpu_cache_map}\n")
+                #     raise RuntimeError("check")
                 
             else: 
                 assert(not block_table._is_allocated)
@@ -821,6 +821,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
                 token_ids=block_table.get_unseen_token_ids(seq.get_token_ids()),
                 num_lookahead_slots=num_lookahead_slots,
                 num_computed_slots=seq.data.get_num_computed_tokens(),
+                device=Device.CPU,
                 extra_hash=seq.extra_hash(),
             )
         # Return any new copy-on-writes.

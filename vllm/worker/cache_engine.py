@@ -12,12 +12,177 @@ from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, LayerBlockType,
                         get_dtype_size, is_pin_memory_available)
 from vllm.worker.cache_engine_base import CacheEngineBase
 from vllm.attention import AttentionMetadata
-
+from vllm.attention.backends.utils import compute_slot_mapping
 import time
 from dataclasses import dataclass, field
 logger = init_logger(__name__)
 
+from typing import Sequence, Literal
 
+
+def kv_cache_slots_to_string(
+    kv: torch.Tensor,
+    slots: Sequence[int],
+    *,
+    kind: Literal["key", "value"] | None = None,
+    head: int = 0,
+    dim: int = 0,
+) -> str:
+    """
+    Build a formatted table (returned as a single string) showing one scalar
+    from the KV-cache for each requested slot.
+
+    Parameters
+    ----------
+    kv
+        KV cache tensor of shape (2, #blocks, block_size, #heads, head_dim).
+        kv[0] is key, kv[1] is value.
+    slots
+        Iterable of flattened slot indices.  Flattening rule:
+        slot = block_idx * block_size + offset_in_block.
+    kind
+        "key" – show only keys, "value" – show only values, None – both (default).
+    head
+        Attention-head index to sample the scalar from (default 0).
+    dim
+        Dimension inside the head vector to show (default 0).
+
+    Returns
+    -------
+    str
+        A newline-terminated string ready for logger.info.
+    """
+    if kv.ndim != 5 or kv.size(0) != 2:
+        raise ValueError(
+            "kv must have shape (2, #blocks, block_size, #heads, head_dim)"
+        )
+
+    _, n_blocks, block_size, n_heads, head_dim = kv.shape
+    if not (0 <= head < n_heads and 0 <= dim < head_dim):
+        raise ValueError(f"head must be < {n_heads} and dim < {head_dim}")
+
+    label_width = max(len(str(s)) for s in slots)
+    header = f"{'slot':>{label_width}}  block  offset"
+    if kind is None:
+        header += "        key               value"
+    else:
+        header += f"       {kind}"
+
+    lines = [header, "-" * len(header)]
+
+    for s in slots:
+        if s < 0 or s >= n_blocks * block_size:
+            raise IndexError(
+                f"slot {s} out of range for cache with {n_blocks * block_size} slots"
+            )
+
+        block_idx, offset = divmod(s, block_size)
+        key_scalar = kv[0, block_idx, offset, head, dim].item()
+        value_scalar = kv[1, block_idx, offset, head, dim].item()
+
+        if kind == "key":
+            line = (
+                f"{s:>{label_width}}  {block_idx:>5}  {offset:>6}  "
+                f"{key_scalar: .6e}"
+            )
+        elif kind == "value":
+            line = (
+                f"{s:>{label_width}}  {block_idx:>5}  {offset:>6}  "
+                f"{value_scalar: .6e}"
+            )
+        else:
+            line = (
+                f"{s:>{label_width}}  {block_idx:>5}  {offset:>6}  "
+                f"{key_scalar: .6e}   {value_scalar: .6e}"
+            )
+        lines.append(line)
+
+    return "\n".join(lines)
+def sid2sgidx(
+    seg_group_metadata,
+) -> Dict[int, int]:
+    """
+    Return a mapping {seq_id: group_idx} such that each `seq_id`
+    is mapped to the position (0-based) of the `SequenceGroupMetadata`
+    that contains it.
+
+    Raises
+    ------
+    ValueError
+        If the same `seq_id` appears in more than one group.
+    """
+    seq_to_group: Dict[int, int] = {}
+
+    for group_idx, group in enumerate(seg_group_metadata):
+        for seq_id in group.seq_data.keys():
+            if seq_id in seq_to_group:           # sanity-check uniqueness
+                raise ValueError(
+                    f"seq_id {seq_id} appears in multiple groups "
+                    f"(earlier in group {seq_to_group[seq_id]}, "
+                    f"again in group {group_idx})."
+                )
+            seq_to_group[seq_id] = group_idx
+    return seq_to_group
+
+
+# ------------------------------------------------------------------ #
+#  Rebuild slot-mapping for ONE layer only                           #
+# ------------------------------------------------------------------ #
+def rebuild_slot_mapping_one_layer(
+    seq_groups: list,
+    layer_idx: int,
+) -> list:
+    """
+    Re-compute self.slot_mapping[layer_idx] from current block_tables.
+
+    * seq_groups    : current SequenceGroupMetadata list
+    * layer_idx     : the layer you just mutated
+    * block_size    : KV block length (16 for vLLM)
+    * is_profile_run: forward to `compute_slot_mapping`
+    """
+    if_profile_run = False
+    block_size = 16 
+    # ensure outer list exists
+    new_slot_mapping: list[int] = []      # <-- starts empty
+    next_id = 0                           # contiguous id counter for this layer
+
+    # Create a quick sid → group lookup once
+    sid2group = {sid: g
+                 for g in seq_groups
+                 for sid in g.block_tables.keys()}
+
+    # Stable traversal order
+    for sid in sorted(sid2group):
+        g = sid2group[sid]
+
+        # -- authoritative block list for this layer ---------------- #
+        gpu_blocks = g.block_tables[sid][layer_idx]
+        if gpu_blocks:                              # already on GPU
+            layer_block_tables = {sid: gpu_blocks}
+        else:                                       # still on CPU
+            cpu_blocks = g.cpu_block_tables[sid][layer_idx]
+            n = len(cpu_blocks)
+            layer_block_tables = {sid: list(range(next_id, next_id + n))}
+            next_id += n                            # advance contiguous ids
+
+        # -- build per-token slot map -------------------------------- #
+        seq_len       = g.seq_data[sid].get_num_computed_tokens()
+        context_len   = len(g.seq_data[sid].prompt_token_ids)                     # adjust for SWA if any
+        start_idx     = 0                           # prompt offset if any
+
+        tmp: list[int] = []
+        compute_slot_mapping(
+            False,
+            tmp,
+            sid,
+            seq_len,
+            context_len,
+            start_idx,
+            block_size,
+            layer_block_tables,
+        )
+        new_slot_mapping.extend(tmp)
+    return new_slot_mapping
 class CacheEngine(CacheEngineBase):
     """Manages the KV cache.
 
@@ -52,15 +217,15 @@ class CacheEngine(CacheEngineBase):
         self.prefetch_distance = cache_config.prefetch_distance 
         
         msg = f"Prefetch mode: {self.prefetch_mode}, prefetch distance: {self.prefetch_distance}"
-        logger.info(msg)
+        logger.debug(msg)
         if self.prefetch_mode == "distn":
             msg = "DistN mode:" + "monolithic" if self.is_monolithic_distn else "dynamic"
-            logger.info(msg)
+            logger.debug(msg)
         free_mem, total_mem = torch.cuda.mem_get_info()
         msg = f"Free Memory: {free_mem / 1024 / 1024} MB"
-        logger.info(msg)
+        logger.debug(msg)
         msg = f"Total Memory: {total_mem / 1024 / 1024} MB"
-        logger.info(msg)
+        logger.debug(msg)
 
     def _allocate_kv_cache_gpu(
         self,
@@ -106,7 +271,7 @@ class CacheEngine(CacheEngineBase):
 
         total_gpu_bytes = total_gpu_bytes / 1024 / 1024
         msg = f"GPU cache allocated {total_gpu_bytes} MB -> per layer {2 * new_layer_kv_cache.numel()/1024/1024} MB"
-        logger.info(msg)
+        logger.debug(msg)
         return kv_cache
     
     def _allocate_kv_cache_cpu(
@@ -141,7 +306,7 @@ class CacheEngine(CacheEngineBase):
             total_cpu_bytes += byte_size
         total_cpu_bytes = total_cpu_bytes / 1024 / 1024
         msg = f"CPU allocated {total_cpu_bytes} MB -> per layer {byte_size/1024/1024} MB"
-        logger.info(msg)
+        logger.debug(msg)
         return kv_cache
     
     """ Cache number in granularity of layers"""
@@ -165,7 +330,7 @@ class CacheEngine(CacheEngineBase):
             new_gpu_cpu_cache_map[self.num_attention_layers-1] = 0
             new_gpu_cpu_cache_map[int(self.num_attention_layers / 2) - 1] = 0
             msg = f"current ratio: no offload -> next ratio: {int(self.num_attention_layers / 2)}"
-            logger.info(msg)
+            logger.debug(msg)
         else:
             current_ratio = 0
             for i in range(self.num_attention_layers):
@@ -181,19 +346,19 @@ class CacheEngine(CacheEngineBase):
                     break
                 next_ratio -= 1
             msg = f"current ratio: {current_ratio} -> next ratio: {next_ratio}"
-            logger.info(msg)
+            logger.debug(msg)
 
             target_map = [1,] * self.num_attention_layers
             # msg = (f"target map: {target_map}\n"
             msg = (f"current mapping: {self.gpu_cpu_cache_map}")
-            logger.info(msg)
+            logger.debug(msg)
 
             for i in range(self.num_attention_layers):
                 if (i + 1) % (next_ratio + 1) == 0:
                     target_map[i] = 0
             
             msg = f"new map: {target_map}"
-            logger.info(msg)
+            logger.debug(msg)
 
             new_gpu_cpu_cache_map = target_map
 
@@ -214,7 +379,7 @@ class CacheEngine(CacheEngineBase):
 
             next_ratio = current_ratio - 1
             msg = f"next ratio: {next_ratio}"
-            logger.info(msg)
+            logger.debug(msg)
 
             while next_ratio > 0:
                 if self.num_attention_layers // (current_ratio + 1) != self.num_attention_layers // (next_ratio + 1):
@@ -223,7 +388,7 @@ class CacheEngine(CacheEngineBase):
 
             target_map = [1,] * self.num_attention_layers
             msg = f"target map: {target_map}"
-            logger.info(msg)
+            logger.debug(msg)
 
             for i in range(self.num_attention_layers):
                 if (i + 1) % (next_ratio + 1) == 0:
@@ -242,7 +407,7 @@ class CacheEngine(CacheEngineBase):
                 new_gpu_cpu_cache_map[i] = target_map[i]
             
             msg = f"new map: {new_gpu_cpu_cache_map}"
-            logger.info(msg)
+            logger.debug(msg)
 
         return new_gpu_cpu_cache_map
 
@@ -285,8 +450,8 @@ class CacheEngine(CacheEngineBase):
                 return self.cache_config.num_gpu_blocks
             updated_num_gpu_cache = self.resize_cache_with_next_ratio()
             msg = (f"cache ratio update at {len(cached_tokens['token_ids'])+1}th token; num_gpu_cache: {total_blocks} -> {updated_num_gpu_cache}")
-            # logger.info(f"allocated_blocks, num_required_blocks, total_blocks:{allocated_blocks,num_required_blocks,total_blocks}\n")
-            logger.info(msg)
+            # logger.debug(f"allocated_blocks, num_required_blocks, total_blocks:{allocated_blocks,num_required_blocks,total_blocks}\n")
+            logger.debug(msg)
             return updated_num_gpu_cache 
         else:
             return self.cache_config.num_gpu_blocks
@@ -301,7 +466,7 @@ class CacheEngine(CacheEngineBase):
         msg = "Setting static prefetch distance, this should happen only once."
         target_map = [1,] * self.num_attention_layers
         msg = f"target map: {target_map}"
-        logger.info(msg)
+        logger.debug(msg)
 
         for i in range(self.num_attention_layers):
             if (i + 1) % (prefetch_distance + 1) == 0:
@@ -312,9 +477,9 @@ class CacheEngine(CacheEngineBase):
         
         free_mem, total_mem = torch.cuda.mem_get_info()
         msg = f"Total Memory: {total_mem / 1024 / 1024} MB"
-        logger.info(msg)
+        logger.debug(msg)
         msg = f"Free Memory before rearr: {free_mem / 1024 / 1024} MB"
-        logger.info(msg)
+        logger.debug(msg)
 
         gpu_cache_to_delete = []
 
@@ -346,7 +511,7 @@ class CacheEngine(CacheEngineBase):
         
         free_mem, total_mem = torch.cuda.mem_get_info()
         msg = f"Free Memory after rearr: {free_mem / 1024 / 1024} MB"
-        logger.info(msg)
+        logger.debug(msg)
         
         kv_cache_shape = list(self.attn_backend.get_kv_cache_shape(
             self.num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size))
@@ -388,12 +553,12 @@ class CacheEngine(CacheEngineBase):
 
         free_mem, total_mem = torch.cuda.mem_get_info()
         msg = f"Free Memory final: {free_mem / 1024 / 1024} MB"
-        logger.info(msg)
+        logger.debug(msg)
 
         torch.cuda.synchronize()
 
         msg = f"cache rearr time: {time.time() - start} ms"
-        logger.info(msg)
+        logger.debug(msg)
 
         return self.cache_config.num_gpu_blocks
     def resize_cache_with_next_ratio(self):
@@ -409,9 +574,9 @@ class CacheEngine(CacheEngineBase):
         
         # free_mem, total_mem = torch.cuda.mem_get_info()
         # msg = f"Total Memory: {total_mem / 1024 / 1024} MB"
-        # logger.info(msg)
+        # logger.debug(msg)
         # msg = f"Free Memory before rearr: {free_mem / 1024 / 1024} MB"
-        # logger.info(msg)
+        # logger.debug(msg)
 
         gpu_cache_to_delete = []
 
@@ -443,7 +608,7 @@ class CacheEngine(CacheEngineBase):
         
         # free_mem, total_mem = torch.cuda.mem_get_info()
         # msg = f"Free Memory after rearr: {free_mem / 1024 / 1024} MB"
-        # logger.info(msg)
+        # logger.debug(msg)
         
         kv_cache_shape = list(self.attn_backend.get_kv_cache_shape(
             self.num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size))
@@ -485,12 +650,12 @@ class CacheEngine(CacheEngineBase):
 
         # free_mem, total_mem = torch.cuda.mem_get_info()
         # msg = f"Free Memory final: {free_mem / 1024 / 1024} MB"
-        # logger.info(msg)
+        # logger.debug(msg)
 
         torch.cuda.synchronize()
 
         msg = f"cache rearr time: {time.time() - start} ms"
-        logger.info(msg)
+        logger.debug(msg)
 
         return self.cache_config.num_gpu_blocks
     
@@ -585,7 +750,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         
         msg = f"Prefetch mode: {self.prefetch_mode}, prefetch distance: {self.prefetch_distance}"
         msg = f"Merge prefetch buffer: {self.merge_prefetch_buffer}"
-        logger.info(msg)
+        logger.debug(msg)
         self.num_attention_layers = model_config.get_num_layers_by_block_type(
             parallel_config, LayerBlockType.attention)
         
@@ -594,13 +759,13 @@ class FlattenedCacheEngine(CacheEngineBase):
         
         if self.prefetch_mode == "distn":
             msg = "DistN mode:" + "monolithic" if self.is_monolithic_distn else "dynamic"
-            logger.info(msg)
+            logger.debug(msg)
         
         free_mem, total_mem = torch.cuda.mem_get_info()
         msg = f"Free Memory: {free_mem / 1024 / 1024} MB"
-        logger.info(msg)
+        logger.debug(msg)
         msg = f"Total Memory: {total_mem / 1024 / 1024} MB"
-        logger.info(msg)
+        logger.debug(msg)
     def set_offload_algo(self):
         # registry ------------------------------------------------------------
         #  prefetch_mode : (should_reconfigure_fn,   reconfigure_fn)
@@ -644,7 +809,7 @@ class FlattenedCacheEngine(CacheEngineBase):
     
     def register_bm(self, block_manager): 
         self.block_manager = block_manager
-        logger.info(f"Linking block manager")
+        logger.debug(f"Linking block manager")
     def _allocate_kv_cache_gpu(
         self,
         num_blocks: int,
@@ -726,16 +891,16 @@ class FlattenedCacheEngine(CacheEngineBase):
 
         # -------------- logging (MiB) -------------------------------------------
         mib = lambda b: round(b / 1024 / 1024, 2)
-        logger.info(
+        logger.debug(
             "GPU cache allocated %.2f MiB  →  main %.2f MiB, prefetch %.2f MiB",
             mib(total_gpu_bytes),
             mib(kv_cache_bytes),
             mib(prefetch_cache_bytes),
         )
         if len(kv_cache) == 1:
-            logger.info("GPU cache shape %s (merged)", tuple(kv_cache[0].shape))
+            logger.debug("GPU cache shape %s (merged)", tuple(kv_cache[0].shape))
         else:  # two-tensor case
-            logger.info(
+            logger.debug(
                 "GPU cache shapes main %s, prefetch %s",
                 tuple(kv_cache[0].shape),
                 tuple(kv_cache[1].shape),
@@ -754,7 +919,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         kv_cache: List[torch.Tensor] = []
         total_cpu_bytes = 0
         pin_memory = is_pin_memory_available()
-        logger.info(f"CPU CACHE PINNED: {pin_memory}")
+        logger.debug(f"CPU CACHE PINNED: {pin_memory}")
         
         flattened_kv_cache = torch.zeros(kv_cache_shape,
                                         dtype=self.dtype,
@@ -766,7 +931,7 @@ class FlattenedCacheEngine(CacheEngineBase):
 
         total_cpu_bytes = total_cpu_bytes / 1024 / 1024
         msg = f"CPU cache allocated {total_cpu_bytes} MB"
-        logger.info(msg)
+        logger.debug(msg)
         return kv_cache
     
     """ Cache number in granularity of layers"""
@@ -790,7 +955,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             new_gpu_cpu_cache_map[self.num_attention_layers-1] = 0
             new_gpu_cpu_cache_map[int(self.num_attention_layers / 2) - 1] = 0
             msg = f"current ratio: no offload -> next ratio: {int(self.num_attention_layers / 2)}"
-            logger.info(msg)
+            logger.debug(msg)
         else:
             current_ratio = 0
             for i in range(self.num_attention_layers):
@@ -806,19 +971,19 @@ class FlattenedCacheEngine(CacheEngineBase):
                     break
                 next_ratio -= 1
             msg = f"current ratio: {current_ratio} -> next ratio: {next_ratio}"
-            logger.info(msg)
+            logger.debug(msg)
 
             target_map = [1,] * self.num_attention_layers
             # msg = (f"target map: {target_map}\n"
             msg = (f"current mapping: {self.gpu_cpu_cache_map}")
-            logger.info(msg)
+            logger.debug(msg)
 
             for i in range(self.num_attention_layers):
                 if (i + 1) % (next_ratio + 1) == 0:
                     target_map[i] = 0
             
             msg = f"new map: {target_map}"
-            logger.info(msg)
+            logger.debug(msg)
 
             new_gpu_cpu_cache_map = target_map
 
@@ -839,7 +1004,7 @@ class FlattenedCacheEngine(CacheEngineBase):
 
             next_ratio = current_ratio - 1
             msg = f"next ratio: {next_ratio}"
-            logger.info(msg)
+            logger.debug(msg)
 
             while next_ratio > 0:
                 if self.num_attention_layers // (current_ratio + 1) != self.num_attention_layers // (next_ratio + 1):
@@ -848,7 +1013,7 @@ class FlattenedCacheEngine(CacheEngineBase):
 
             target_map = [1,] * self.num_attention_layers
             msg = f"target map: {target_map}"
-            logger.info(msg)
+            logger.debug(msg)
 
             for i in range(self.num_attention_layers):
                 if (i + 1) % (next_ratio + 1) == 0:
@@ -867,7 +1032,7 @@ class FlattenedCacheEngine(CacheEngineBase):
                 new_gpu_cpu_cache_map[i] = target_map[i]
             
             msg = f"new map: {new_gpu_cpu_cache_map}"
-            logger.info(msg)
+            logger.debug(msg)
 
         return new_gpu_cpu_cache_map
 
@@ -879,11 +1044,12 @@ class FlattenedCacheEngine(CacheEngineBase):
             finished_requests=None
         ):
         self.mapping.update_mapping_table(attn_meta,seq_group_metadata,finished_requests)
+        self.cache_config.gpu_cpu_cache_map = self.gpu_cpu_cache_map = self.mapping.gpu_cpu_cache_map
+        logger.info(self.cache_config.gpu_cpu_cache_map)
+        
         if self.should_reconfigure_offload(attn_meta, cached_tokens):
-            self.cache_config =  self.reconfigure_offload(self.prefetch_distance, configure_paused=False)
-            logger.info(f"attn_metadata after resizing:{attn_meta.block_tables}")
-            
-            # logger.info(f"mapping after resize: {self.mapping}")
+            self.cache_config = self.reconfigure_offload(self.prefetch_distance, configure_paused=False, attn_meta=attn_meta, seq_group_metadata=seq_group_metadata)
+            # logger.debug(f"mapping after resize: {self.mapping}")
         return self.cache_config
     
     @staticmethod
@@ -901,7 +1067,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             return True                      # “∞ distance” → keep everything
         return (layer_id % (prefetch_distance + 1)) != prefetch_distance
     
-    def resize_with_fixed_ratio(self, prefetch_distance, configure_paused=True):
+    def resize_with_fixed_ratio(self, prefetch_distance, attn_meta, seq_group_metadata, configure_paused=True):
         """
         Re-partition KV blocks between GPU and CPU caches with a fixed
         `prefetch_distance` policy.
@@ -915,7 +1081,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             but still have GPU blocks. If False, leave those sequences untouched.
         """
         tic = time.time()
-        logger.info(f"resize_with_fixed_ratio, target_distance: {prefetch_distance}")
+        logger.debug(f"resize_with_fixed_ratio, target_distance: {prefetch_distance}")
 
         mapping = self.mapping          # shorthand
         bm       = self.block_manager    # block manager helper
@@ -948,9 +1114,9 @@ class FlattenedCacheEngine(CacheEngineBase):
                     cpu_blocks = mapping.cpu_map.get(sid, {}).get(layer)
                     if cpu_blocks:
                         alloc_plan.append((sid, layer, cpu_blocks))
-        logger.info(f"dealloc_layers {dealloc_layers}")
-        logger.info(f"expected_freed {expected_freed}")
-        logger.info(f"alloc_plan {alloc_plan}")
+        logger.debug(f"dealloc_layers {dealloc_layers}")
+        logger.debug(f"expected_freed {expected_freed}")
+        logger.debug(f"alloc_plan {alloc_plan}")
         # Task 2. Figure out how to modify the caches 
         """
         We will apply the same prefetch distance to all target sequences. 
@@ -967,7 +1133,7 @@ class FlattenedCacheEngine(CacheEngineBase):
 
             # sanity check: make sure the block-manager really freed what we think
             expected_flat = [bid for bids in expected_freed.values() for bid in bids]
-            logger.info(f"expected_flat: {expected_flat}")
+            logger.debug(f"expected_flat: {expected_flat}")
             
             assert sorted(freed_ids_flat) == sorted(expected_flat), (
                 "Mismatch between expected and actually freed block-ids"
@@ -982,12 +1148,13 @@ class FlattenedCacheEngine(CacheEngineBase):
         for sid, layer, cpu_blocks in alloc_plan:
             n_blocks = len(cpu_blocks)
             new_gpu_blocks = bm.allocate_seq_by_layer(sid, layer, n_blocks)   # → List[int]
-            logger.info(f"cpu_blocks:{cpu_blocks}")
-            logger.info(f"new_gpu_blocks:{new_gpu_blocks}")
+            logger.debug(f"cpu_blocks:{cpu_blocks}")
+            logger.debug(f"new_gpu_blocks:{new_gpu_blocks}")
             
             # copy payload CPU → GPU
             for dst, src in zip(new_gpu_blocks, cpu_blocks):
-                self.gpu_cache[dst].copy_(self.cpu_cache[src],non_blocking=False)
+                self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][src],non_blocking=False)
+                self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][src],non_blocking=False)
 
             # update mapping
             mapping.gpu_map.setdefault(sid, {})[layer] = new_gpu_blocks
@@ -998,14 +1165,14 @@ class FlattenedCacheEngine(CacheEngineBase):
         For allocations, store the allocated block ids back to collected data structure. Then copy the blocks specified by the cpu block ids from the cpu cache, to the newly allocated block ids of the GPU cache. 
         """
         
-        logger.info(f"mapping after resize: {mapping}")
-        logger.info(f"GPU map after resize:{mapping.gpu_map}")
+        logger.debug(f"mapping after resize: {mapping}")
+        logger.debug(f"GPU map after resize:{mapping.gpu_map}")
         self.cache_config.gpu_cpu_cache_map = self.gpu_cpu_cache_map 
         bm.cache_config = self.cache_config
 
-        return self.cache_config
+        return self.cache_config 
     
-    def resize_with_fixed_ratio_per_req(self, prefetch_distance, configure_paused=True):
+    def resize_with_fixed_ratio_per_req(self, prefetch_distance, attn_meta, seq_group_metadata, configure_paused=True,):
         """
         Re-partition KV-cache blocks with a *per-sequence* fixed-ratio policy.
 
@@ -1023,12 +1190,43 @@ class FlattenedCacheEngine(CacheEngineBase):
         ValueError
             If `prefetch_distance` contains a `seq_id` that is not present in
             `mapping.all_seqs`.
+            
+        seg_group_metadata: List[SequenceGroupMetadata] 
+        SequenceGroupMetadata= (request_id, is_prompt, seq_data:dict, )
+        seq_data: Dict(seq_id, SequenceData, sampling_params, block_tables: dict[seq_id, list(block_ids)* num_layers], cpu_offset, ... ) 
+        SequenceData = (prompt_token_ids, output_token_ids, get_num_computed_tokens) 
+        
+        What I want: 
+        seq_id to SequenceGroupMetadata mapping; seq_id 10 was in 3rd SequenceGroupMetadata in the list, then 10 -> 2
+        1. all block_tables: merging the block tables from each request to {seq_id: list(block_table)} 
+        2. Given a modified list of block tables, update the original seq_group_metadata inplace. 
+        
+        a. seq_id to SequenceGroupMetadata mapping; seq_id 10 was in 3rd SequenceGroupMetadata in the list, then 10 -> 2 
+           seq_group_metadata[sid2idx].block_tables[sid][layer_idx] = updated_block_table[sid][layer_idx] 
         """
+        if not hasattr(self,"_counter"): 
+            self._counter = 0 
+        
+        # if self._counter == 0: # prefill of request 0 
+        # logger.info(f"GPU KEY at _coutner = {self._counter}")
+        # slots_to_look_at = [0, 1, 2, 3, 4, 5, 6, 16, 17, 18, 19, 20, 21, 22, 32, 33, 34, 35, 36, 37, 38, 48, 49, 50, 51, 52, 53, 54, 64, 65, 66, 67, 68, 69, 70, 80, 81, 82, 83, 84, 85, 86, 96, 97, 98, 99, 100, 101, 102, 112, 113, 114, 115, 116, 117, 118, 128, 129, 130, 131, 132, 133, 134, 144, 145, 146, 147, 148, 149, 150, 160, 161, 162, 163, 164, 165, 166, 176, 177, 178, 179, 180, 181, 182, 192, 193, 194, 195, 196, 197, 198, 208, 209, 210, 211, 212, 213, 214, 224, 225, 226, 227, 228, 229, 230, 240, 241, 242, 243, 244, 245, 246, 256, 257, 258, 259, 260, 261, 262, 272, 273, 274, 275, 276, 277, 278, 288, 289, 290, 291, 292, 293, 294, 304, 305, 306, 307, 308, 309, 310, 320, 321, 322, 323, 324, 325, 326, 336, 337, 338, 339, 340, 341, 342, 352, 353, 354, 355, 356, 357, 358, 368, 369, 370, 371, 372, 373, 374, 384, 385, 386, 387, 388, 389, 390, 400, 401, 402, 403, 404, 405, 406, 416, 417, 418, 419, 420, 421, 422, 432, 433, 434, 435, 436, 437, 438, 448, 449, 450, 451, 452, 453, 454, 464, 465, 466, 467, 468, 469, 470, 480, 481, 482, 483, 484, 485, 486, 496, 497, 498, 499, 500, 501, 502, 503]
+        # decode_slots = [7,8,9,10,11,12,13,14,15]
+        # prefetch_slots_to_look_at = [x + 3200*16 for x in slots_to_look_at] 
+        # cpu_slots_to_look_at = [51200, 51201, 51202, 51203, 51204, 51205, 51206, 51216, 51217, 51218, 51219, 51220, 51221, 51222, 51232, 51233, 51234, 51235, 51236, 51237, 51238, 51248, 51249, 51250, 51251, 51252, 51253, 51254, 51264, 51265, 51266, 51267, 51268, 51269, 51270, 51280, 51281, 51282, 51283, 51284, 51285, 51286, 51296, 51297, 51298, 51299, 51300, 51301, 51302, 51312, 51313, 51314, 51315, 51316, 51317, 51318, 51328, 51329, 51330, 51331, 51332, 51333, 51334, 51344, 51345, 51346, 51347, 51348, 51349, 51350, 51360, 51361, 51362, 51363, 51364, 51365, 51366, 51376, 51377, 51378, 51379, 51380, 51381, 51382, 51392, 51393, 51394, 51395, 51396, 51397, 51398, 51408, 51409, 51410, 51411, 51412, 51413, 51414, 51424, 51425, 51426, 51427, 51428, 51429, 51430, 51440, 51441, 51442, 51443, 51444, 51445, 51446, 51456, 51457, 51458, 51459, 51460, 51461, 51462, 51472, 51473, 51474, 51475, 51476, 51477, 51478, 51488, 51489, 51490, 51491, 51492, 51493, 51494, 51504, 51505, 51506, 51507, 51508, 51509, 51510, 51520, 51521, 51522, 51523, 51524, 51525, 51526, 51536, 51537, 51538, 51539, 51540, 51541, 51542, 51552, 51553, 51554, 51555, 51556, 51557, 51558, 51568, 51569, 51570, 51571, 51572, 51573, 51574, 51584, 51585, 51586, 51587, 51588, 51589, 51590, 51600, 51601, 51602, 51603, 51604, 51605, 51606, 51616, 51617, 51618, 51619, 51620, 51621, 51622, 51632, 51633, 51634, 51635, 51636, 51637, 51638, 51648, 51649, 51650, 51651, 51652, 51653, 51654, 51664, 51665, 51666, 51667, 51668, 51669, 51670, 51680, 51681, 51682, 51683, 51684, 51685, 51686, 51696, 51697, 51698, 51699, 51700, 51701, 51702]
+        
+        # key_table = kv_cache_slots_to_string
+        
+        logger.debug(f"resize received block_tables {attn_meta.block_tables}")
+        sid2sgidx_ = sid2sgidx(seq_group_metadata)
+        logger.debug(f"resize received sid2sgidx_ {sid2sgidx_}")
         tic = time.time()
-        logger.info(f"resize_with_fixed_ratio_per_req, target_distance: {prefetch_distance}")
+        logger.debug(f"resize_with_fixed_ratio_per_req, target_distance: {prefetch_distance}")
 
         mapping = self.mapping          # shorthand
         bm       = self.block_manager    # block manager helper
+        sid2row = {sid: idx for idx, sid in enumerate(mapping.active_gpu_seqs)}
+        
+        is_prefill = attn_meta.num_prefills > 0
         # Task 1. Compute the objective mapping table.  
         """
             prefetch distance: how far are two cpu-only KV layers. 0 means all layers are on CPU only. 1 means every other layer is on CPU-only
@@ -1040,11 +1238,18 @@ class FlattenedCacheEngine(CacheEngineBase):
             candidates |= set(mapping.paused_gpu_seqs)
 
         #HARDCODE 
-        prefetch_distance = [5,4,3,2]
-        # prefetch_distance = [2,3,4,5]
+        prefetch_distance = torch.randint(0, 5, (len(candidates),)).tolist()
+        # prefetch_distance = {0:2, 1:3}
+        prefetch_distance = [2,3,4,5]
         # prefetch_distance = [2,2,2,2]
-        prefetch_distance = {candidate: dist for candidate, dist in zip(candidates, prefetch_distance)}
-        logger.debug(f"resize, target_distance: {prefetch_distance}")
+        prefetch_distance = {sid: dist for sid, dist in zip(candidates, prefetch_distance)}
+        
+        # prefetch_distance = {0:3, 1:3}
+        # prefetch_distance = {candidate: dist for candidate, dist in prefetch_distance.items() if candidate in candidates}
+        logger.info(f"resize, target_distance: {prefetch_distance}")
+        
+        logger.debug(f"GPU map before resize:{mapping.gpu_map}")
+        logger.debug(f"slot_mapping before resize:{attn_meta.slot_mapping}")
 
         all_seq_ids: Set[int] = set(mapping.all_seqs)
         unknown_ids           = set(prefetch_distance) - all_seq_ids
@@ -1094,7 +1299,7 @@ class FlattenedCacheEngine(CacheEngineBase):
 
             # sanity check: make sure the block-manager really freed what we think
             expected_flat = [bid for bids in expected_freed.values() for bid in bids]
-            logger.info(f"expected_flat: {expected_flat}")
+            logger.debug(f"expected_flat: {expected_flat}")
             
             assert sorted(freed_ids_flat) == sorted(expected_flat), (
                 "Mismatch between expected and actually freed block-ids"
@@ -1102,33 +1307,54 @@ class FlattenedCacheEngine(CacheEngineBase):
 
             # purge mapping
             for sid, layers in dealloc_layers.items():
+                # row = sid2row[sid]
+                row = sid2sgidx_[sid]
                 for layer in layers:
-                    mapping.gpu_map[sid][layer] = None
-
+                    mapping.gpu_map[sid][layer] = []               # global mapping
+                    seq_group_metadata[row].block_tables[sid][layer] = []   # local mapping
+                        
+                        # attn_meta.block_tables[row, layer].fill_(0)           
+                        # logger.info(f"dealloc block table seq {sid}, layer {layer} {attn_meta.block_tables[row, layer]}")
         # -- 2b. ALLOCATE ------------------------------------------------------- #
         for sid, layer, cpu_blocks in alloc_plan:
             n_blocks = len(cpu_blocks)
-            new_gpu_blocks = bm.allocate_seq_by_layer(sid, layer, n_blocks)   # → List[int]
-            logger.info(f"cpu_blocks:{cpu_blocks}")
-            logger.info(f"new_gpu_blocks:{new_gpu_blocks}")
+            new_gpu_blocks = bm.allocate_seq_by_layer(sid, layer, n_blocks)   # → List[int] 
+            logger.debug(f"cpu_blocks:{cpu_blocks}")
+            logger.debug(f"new_gpu_blocks:{new_gpu_blocks}")
             
-            # # copy payload CPU → GPU
-            # for dst, src in zip(new_gpu_blocks, cpu_blocks):
-            #     self.gpu_cache[dst].copy_(self.cpu_cache[src])
-
-            # update mapping
+            # copy payload CPU → GPU
+            for dst, src in zip(new_gpu_blocks, cpu_blocks):
+                logger.info(f"copying CPU[{src}] to GPU[{dst}]")
+                self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][src],non_blocking=False)
+                self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][src],non_blocking=False)
+                assert(torch.allclose(self.gpu_cache[0][0][dst].cpu(), self.cpu_cache[0][0][src]))
+                assert(torch.allclose(self.gpu_cache[0][1][dst].cpu(), self.cpu_cache[0][1][src]))
             mapping.gpu_map.setdefault(sid, {})[layer] = new_gpu_blocks
-        
+
+            if not is_prefill:
+                row = sid2sgidx_[sid]
+                seq_group_metadata[row].block_tables[sid][layer] = [new_gpu_blocks]   # local mapping
+                row = sid2row[sid]
+                tgt = attn_meta.block_tables[row, layer]             # view (2,)
+                tgt.zero_()
+                tgt[:n_blocks] = torch.as_tensor(new_gpu_blocks,
+                                                dtype=tgt.dtype,
+                                                device=tgt.device)
+                logger.info(f"check attn_meta.slot_mapping {attn_meta.slot_mapping}")
+                attn_meta.slot_mapping[layer][row] += new_gpu_blocks[-1]*16
         # Task 3. allocation and deallocation. 
         """ 
         call block_manager.free(List(block_ids)) and block_manager.allocate(# blocks) to perform allocation and deallocation. 
         For allocations, store the allocated block ids back to collected data structure. Then copy the blocks specified by the cpu block ids from the cpu cache, to the newly allocated block ids of the GPU cache. 
         """
         
-        logger.info(f"mapping after resize: {mapping}")
-        logger.info(f"GPU map after resize:{mapping.gpu_map}")
-        logger.info(f"gpu_cpu_cache_map after resize:{mapping.gpu_cpu_cache_map}")
+        logger.debug(f"mapping after resize: {mapping}")
+        logger.debug(f"GPU map after resize:{mapping.gpu_map}")
+        logger.debug(f"gpu_cpu_cache_map after resize:{mapping.gpu_cpu_cache_map}")
         self.cache_config.gpu_cpu_cache_map = self.gpu_cpu_cache_map = self.mapping.gpu_cpu_cache_map
+        # did not change attn_meta!!! 
+        logger.debug(f"attn_meta after resize:{attn_meta.block_tables}")
+        logger.debug(f"slot_mapping after resize:{attn_meta.slot_mapping}")
         bm.cache_config = self.cache_config
 
         return self.cache_config
@@ -1262,8 +1488,10 @@ class MappingTable:
         self.cpu_offset = getattr(attn_meta, "cpu_offset", self.cpu_offset)
         gpu_bt, cpu_bt = self.collect_block_tables(seq_group_metadata)
         for sid, bt in gpu_bt.items():
-            self.gpu_map[sid] = {lyr: bt[lyr] for lyr in range(len(bt))}
-
+            self.gpu_map[sid] = {}
+            for lyr in range(len(bt)):
+                self.gpu_map[sid][lyr] = bt[lyr]
+                self._set_gpu_flag(sid, lyr, True if len(bt[lyr]) > 0 else False)
         for sid, bt in cpu_bt.items():
             self.cpu_map[sid] = {lyr: bt[lyr] for lyr in range(len(bt))}
         current_seq_to_req = {
@@ -1327,10 +1555,7 @@ class MappingTable:
         self.active_gpu_by_req = _group_by_req(self.active_gpu_seqs)
         self.paused_gpu_by_req = _group_by_req(self.paused_gpu_seqs)
         self.paused_cpu_by_req = _group_by_req(self.paused_cpu_seqs)
-
-
-        logger.info(f"update_mapping table {self.__repr__()}")
-
+        logger.debug(f"update_mapping table {self.__repr__()}")
     def _validate_cache(self, gpu_slot_mapping, cpu_slot_mapping, cpu_offset):
         # check if the mapping is valid 
         pass

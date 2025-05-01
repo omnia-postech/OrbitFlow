@@ -959,11 +959,15 @@ class FlashAttentionImpl(AttentionImpl):
                     updated_slot_mapping = attn_metadata.slot_mapping
                     updated_slot_mapping_cpu = attn_metadata.cpu_slot_mapping
 
+                logger.info(f"[Begin attention] slot_mapping {updated_slot_mapping}")
+                logger.info(f"[Begin attention] slot_mapping_cpu {updated_slot_mapping_cpu}")
+
                 # Reshape the input keys and values and store them in the cache.
                 # If kv_cache is not provided, the new key and value tensors are
                 # not cached. This happens during the initial memory
                 # profiling run.
-                logger.debug(f"reshape_and_flash layer {layer} updated_slot_mapping {updated_slot_mapping}")
+                logger.info(f"reshape_and_flash layer {layer} updated_slot_mapping {updated_slot_mapping}")
+                # logger.info(f" {layer} updated_slot_mapping // 16  {updated_slot_mapping//16}")
                 logger.debug(f"k, v shape {key if key is None else key.shape}, {value if value is None else value.shape}")
                 logger.debug(f"k cache, v cache shape {key_cache.shape}, {value_cache.shape}")
                 
@@ -977,12 +981,10 @@ class FlashAttentionImpl(AttentionImpl):
                     k_scale,
                     v_scale,
                 )
-                    
-                # TODO(HONG): Copy only blocks that are updated with newly generated tokens.                
-                if layer != 0:
+
+                # # TODO(HONG): Copy only blocks that are updated with newly generated tokens.                
+                if layer >=0 : # ?
                     # print(f"Writing new KV to CPU at layer{layer}")
-                    # block_mapping = torch.tensor([[i, i] for i in range(len(key_cache))],
-                    #             dtype=torch.bfloat16, device='cpu')
                     if kv_cache_cpu is not None and updated_slot_mapping_cpu.numel()>0:
                         # compute the offsets for the cpu cache, since the cpu cache does not start from block 0 
                         with nvtx.annotate(f"Key Value Writing{layer}"):
@@ -993,7 +995,7 @@ class FlashAttentionImpl(AttentionImpl):
                             PAGE_SIZE = 16 # Is this a parameter or set to match with BLOCK SIZE of paged kv cache? 
                             page_idx = updated_slot_mapping_cpu // PAGE_SIZE      # 각 토큰이 들어갈 페이지 번호
                             page_idx -= attn_metadata.cpu_offset
-                            assert (page_idx >= 0).all()
+                            assert ((page_idx >= 0).all()) ,str( page_idx)
                             offset_idx = updated_slot_mapping_cpu % PAGE_SIZE    # 해당 페이지 내부에서의 위치(0~15)
 
                             num_tokens = updated_slot_mapping_cpu.shape[0]
@@ -1004,15 +1006,13 @@ class FlashAttentionImpl(AttentionImpl):
                                 p = page_idx[i].item()
                                 o = offset_idx[i].item()
                                 logger.info(f"token {i} -> slot {updated_slot_mapping_cpu[i]} = CPUBlock[{p}][{o}]")
-    
+
                                 # copy each token slice                            
                                 kv_cache_cpu[0][p, o, :, :] = key_cpu[i, :, :] # key 
                                 kv_cache_cpu[1][p, o, :, :] = value_cpu[i, :, :] # value
                                 
                                 original_key = key_cpu[i, :, 0] # first element of every head (8 heads)
                                 cached_key = kv_cache_cpu[0][p, o, :, 0] 
-                                logger.info(f"original key {original_key}")
-                                logger.info(f"cached key {cached_key}")
                             
                             # method 2
                             # # (A) Expand block_idx, offset_idx to match [num_tokens, 1, 1]
@@ -1136,7 +1136,7 @@ class FlashAttentionImpl(AttentionImpl):
                     _,
                     block_tables_arg,
                 ) = get_seq_len_block_table_args(decode_meta, False, attn_type)
-                logger.debug(f"flash_attn_with_kvcache: {block_tables_arg.shape}, {seq_lens_arg}")
+                logger.info(f"[Layer {layer}] used block tables: {block_tables_arg}, {seq_lens_arg}")
                 with nvtx.annotate(f"Decoding FA(2) for layer{layer}"):
                     flash_attn_with_kvcache(
                         q=decode_query.unsqueeze(1), 

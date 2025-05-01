@@ -119,6 +119,7 @@ class BlockTable:
                          token_ids: List[int],
                          num_lookahead_slots: int = 0,
                          num_computed_slots: Optional[int] = None,
+                         device: Device = Device.GPU,
                          extra_hash: Optional[int] = None) -> None:
         """Appends a sequence of token IDs to the existing blocks in the
         BlockTable.
@@ -164,6 +165,7 @@ class BlockTable:
         # lookahead slots
         self.ensure_num_empty_slots(num_empty_slots=len(token_ids) +
                                     num_lookahead_slots,
+                                    device=device,
                                     extra_hash=extra_hash)
 
         # Update the blocks with the new tokens
@@ -176,6 +178,7 @@ class BlockTable:
 
     def ensure_num_empty_slots(self,
                                num_empty_slots: int,
+                               device: Device = Device.GPU,
                                extra_hash: Optional[int] = None) -> None:
         """Ensures that the BlockTable has at least the specified number of
         empty slots available.
@@ -191,9 +194,6 @@ class BlockTable:
                 factors such as adapters that influence the block, apart
                 from the token_ids.
         """
-        # Currently the block table only supports
-        # appending tokens to GPU blocks.
-        device = Device.GPU
         assert self._is_allocated
 
         if self._num_empty_slots >= num_empty_slots:

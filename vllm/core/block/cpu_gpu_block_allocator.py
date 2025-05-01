@@ -119,10 +119,10 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
         self._allocators[Device.GPU].update_by_cache_config(cache_config)
         self._allocators[Device.CPU].update_by_cache_config(cache_config)
         
-        self._block_ids_to_allocator: Dict[int, BlockAllocator] = {}
-        for _, allocator in self._allocators.items():
-            for block_id in allocator.all_block_ids:
-                self._block_ids_to_allocator[block_id] = allocator
+        # self._block_ids_to_allocator: Dict[int, BlockAllocator] = {}
+        # for _, allocator in self._allocators.items():
+        #     for block_id in allocator.all_block_ids:
+        #         self._block_ids_to_allocator[block_id] = allocator
 
     def __init__(self, cpu_block_allocator: BlockAllocator,
                  gpu_block_allocator: BlockAllocator):

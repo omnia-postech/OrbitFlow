@@ -9,6 +9,45 @@ import json
 import warnings
 import re 
 import math
+
+from pathlib import Path
+import numpy as np
+from transformers import AutoTokenizer
+import tqdm, json, argparse
+
+
+def build_token_bank(
+    text_path: str,
+    tokenizer_name: str = "gpt2",
+    out_path: str | None = None,
+    dtype=np.uint32,
+):
+    """
+    Read raw text, tokenize with `tokenizer_name`, and store a flat numpy
+    array of token ids (uint32 by default) plus a small JSON side-car.
+
+    >>> build_token_bank("war_and_peace.txt", "gpt2")
+    """
+    text = Path(text_path).read_text(encoding="utf-8")
+    tok = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=True)
+    tokens = tok(text, add_special_tokens=False)["input_ids"]
+    tokens_np = np.asarray(tokens, dtype=dtype)
+
+    out_path = out_path or (Path(text_path).with_suffix(".npy"))
+    np.save(out_path, tokens_np)
+
+    meta = {
+        "tokenizer": tokenizer_name,
+        "num_tokens": int(tokens_np.shape[0]),
+        "source": str(text_path),
+        "dtype": str(dtype),
+    }
+    with open(Path(out_path).with_suffix(".json"), "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+
+    print(f"Saved {meta['num_tokens']:,} tokens ➜ {out_path}")
+
+
 # -------------------------------------------------------
 # Request + RequestType
 # -------------------------------------------------------
@@ -250,8 +289,11 @@ class RequestType:
     def generate_request(
         self,
         arrival_time: float = 0.0,
-        vocab: Tuple[int, int] = (200, 30000),
-        trace_limit: int = None
+        vocab: Tuple[int, int] = (200, 30_000),
+        trace_limit: Optional[int] = None,
+        token_bank_path: Optional[str] = None,
+        contiguous: bool = True,
+        mmap: bool = True,
     ):
         """
         Creates a single `Request` object using the configured sampler method
@@ -265,9 +307,22 @@ class RequestType:
                     continue  # re-sample
             break
 
-        # 2) Build dummy token IDs
-        token_ids = [random.randint(vocab[0], vocab[1]) for _ in range(input_length)]
+        # 2) get the token source
+        if token_bank_path is None:
+            token_ids = [random.randint(*vocab) for _ in range(input_length)]
 
+        else:
+            bank = np.load(token_bank_path, mmap_mode="r" if mmap else None)
+            bank_size = bank.shape[0]
+            if bank_size < input_length:
+                raise ValueError("token bank shorter than requested input")
+
+            if contiguous:
+                start = random.randint(0, bank_size - input_length)
+                token_ids = bank[start : start + input_length].tolist()
+            else:
+                idx = np.random.randint(0, bank_size, size=input_length)
+                token_ids = bank[idx].tolist()
         return Request(
             category=self.category_name,
             input_length=input_length,
