@@ -54,28 +54,26 @@ class DelaySimulator:
 
         logger.info(f"[Simulator __init__] v_tps={self.v:.3f} tokens/sec")
 
-    def on_token(self, rid: str):
+    def on_token(self, rid: str, step_time: float):
         before = self.deposit[rid]
         self.deposit[rid] += 1
         after = self.deposit[rid]
-        now = time.time()
         
         if rid not in self.last_time: 
-            self.last_time[rid] = now
-            logger.info(f"[on_token] first token for {rid}, setting last_time[{rid}] = {now:.6f}")
+            self.last_time[rid] = step_time
+            logger.info(f"[on_token] first token for {rid}, setting last_time[{rid}] = {step_time:.6f}")
 
-        logger.info(f"[on_token] rid={rid} @ {now:.6f}: deposit {before} -> {after}")
+        logger.info(f"[on_token] rid={rid} @ {step_time:.6f}: deposit {before} -> {after}")
 
 
-    def pop(self):
-        now= time.time()
-        logger.info(f"[pop] called @ {now:.6f}; current deposits: {dict(self.deposit)}")
+    def pop(self, step_time: float):
+        logger.info(f"[pop] called @ {step_time:.6f}; current deposits: {dict(self.deposit)}")
         pops = []
 
         for rid, dep in list(self.deposit.items()):
-            last = self.last_time.get(rid, now)
+            last = self.last_time.get(rid, step_time)
             # dt: time since last pop
-            dt = now - last
+            dt = step_time - last
             # n: number of tokens to release
             n = int(dt * self.v)
 
@@ -87,7 +85,7 @@ class DelaySimulator:
 
             # release n tokens, but not more than deposit
             if dep < n:
-                logger.info(f"SLO violation for request {rid} at {now}, have {dep}, need {n}")
+                logger.info(f"SLO violation for request {rid} at {step_time}, have {dep}, need {n}")
             to_rel = min(n, dep)
             # deposit 차감
             self.deposit[rid] -= to_rel
@@ -264,7 +262,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
             # Enqueue with the engine
             engine.add_request(req_id, prompt_obj, sampling_params)
 
-    SLO_THRESHOLD = 0.2
+    SLO_THRESHOLD = 0.5 # TBT SLO (seconds per token)
     sim = DelaySimulator(v_tps=1/SLO_THRESHOLD)
 
     # The main simulation loop
@@ -281,16 +279,19 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
                      if req_obj.arrival_time > cumulative_steps]
 
         # TODO(Heelim): need to send metadata to scheduler to make decision of which request and when to pause and resume
-        deposit_map = sim.stats()        
-        # engine.schedule[0].deposit_map = deposit_map
-        # engine.schedule[0].slo = SLO_THRESHOLD
+        deposit_map = sim.stats()  
+        engine.scheduler[0].deposit_map = deposit_map
+        # NOTE(HONG): use below for pipelining parallelism
+        # for sched in engine.scheduler:
+        #     sched.deposit_map = deposit_map
 
         # 5) Perform one engine step
         step_outputs = engine.step()
         # If no outputs come back, we still increment steps
         cumulative_steps += 1
         
-        tokens_to_release = sim.pop()
+        # NOTE(HONG): neet to use step_time to unify the time for all events at step-level
+        step_time = time.time()
 
         # 6) Process each output
         for output in step_outputs:
@@ -310,12 +311,12 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
             else:
                 # Another token
                 logger.info(f"Decoding for request {rid} at step {cumulative_steps}")
-                now = time.time()
+                # now = time.time()
 
-                sim.on_token(rid)
+                sim.on_token(rid, step_time)
 
-                # FIXME(HONG): no need to use token_timestamps, rather use output.metrics.last_token_time
-                request_metadata[rid]["token_timestamps"].append(now)
+                # NOTE(HONG): not useing output.metrics.last_token_time since we are using step_time
+                request_metadata[rid]["token_timestamps"].append(step_time)
                 request_metadata[rid]["decode_length"] += 1
                 finished_tokens += 1
                 finished_decode_tokens += 1
@@ -383,6 +384,8 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
 
                 sim.finish(rid)
 
+        tokens_to_release = sim.pop(step_time)
+        
         # We'll sleep a bit
         time.sleep(0.01)
 
