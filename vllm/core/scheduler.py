@@ -1641,6 +1641,8 @@ class Scheduler:
                 preemption_mode = PreemptionMode.SWAP
         elif self.user_specified_preemption_mode == "swap":
             preemption_mode = PreemptionMode.SWAP
+        elif self.user_specified_preemption_mode == "pause":
+            preemption_mode = PreemptionMode.PAUSE
         else:
             preemption_mode = PreemptionMode.RECOMPUTE
 
