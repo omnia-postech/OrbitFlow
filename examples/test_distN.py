@@ -488,12 +488,14 @@ def main(configs):
         gpu_memory_utilization=gpu_memory_utilization,
         enforce_eager=True,
         num_gpu_blocks_override=num_gpu_blocks_override*32 if flattened_cache else num_gpu_blocks_override,
+        preemption_mode="swap",
         is_monolithic_distn=is_monolithic_distn, 
         prefetch_mode = prefetch_mode,
         prefetch_distance = prefetch_distance,
         enable_chunked_prefill=False,
         flattened_cache=flattened_cache,
         merge_prefetch_buffer=merge_prefetch_buffer,
+        
         # No prefetch, (N=1,static), (N=dynamic,mono), (N=dynamic,dyn), the last two version, N only decreases 
         # multi-request version (might decrease, or increase)
         # num_gpu_blocks_override: Optional[int] = None

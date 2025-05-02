@@ -416,7 +416,8 @@ class CacheEngine(CacheEngineBase):
             cached_tokens : Dict[str, Any],
             attn_meta,
             seq_group_metadata,
-            finished_requests=None
+            finished_requests=[],
+            paused_cpu_seq_groups=[],
         ):
         if self.prefetch_mode == "none":
             return self.cache_config.num_gpu_blocks
@@ -1044,9 +1045,11 @@ class FlattenedCacheEngine(CacheEngineBase):
             cached_tokens : Dict[str, Any],
             attn_meta,
             seq_group_metadata,
-            finished_requests=None
+            finished_requests=[],
+            paused_cpu_seq_groups=[],
+
         ):
-        self.mapping.update_mapping_table(attn_meta,seq_group_metadata,finished_requests)
+        self.mapping.update_mapping_table(attn_meta,seq_group_metadata,finished_requests, paused_cpu_seq_groups=paused_cpu_seq_groups)
         self.cache_config.gpu_cpu_cache_map = self.gpu_cpu_cache_map = self.mapping.gpu_cpu_cache_map
         logger.info(f"gpu_cpu_cache_map: {self.cache_config.gpu_cpu_cache_map}")
         
@@ -1607,12 +1610,12 @@ class MappingTable:
 
     num_layers: int = 0
     cpu_offset: int = 0 
-    def update_mapping_table(self, attn_meta, seq_group_metadata, finished_requests: Optional[List[str]] = None):
+    def update_mapping_table(self, attn_meta, seq_group_metadata, finished_requests: List[str], paused_cpu_seq_groups:List=[] ):
         """ update seq dicts and maps; Ignore prefetch map for now"""
         logger.info(f"===== start update_mapping_table =====")
         logger.debug(f"update_mapping_table {seq_group_metadata}")
 
-        if finished_requests is not None:
+        if len(finished_requests) > 0:
             finished_requests = set(finished_requests)
 
             # seq-ids that belong to the finished requests
@@ -1643,6 +1646,14 @@ class MappingTable:
                 self.paused_gpu_by_req.pop(rid, None)
                 self.paused_cpu_by_req.pop(rid, None)
         self.cpu_offset = getattr(attn_meta, "cpu_offset", self.cpu_offset)
+
+        if len(paused_cpu_seq_groups) > 0:
+            for group in paused_cpu_seq_groups:
+                for seq in group.seqs: 
+                    for lyr in range(len(self.num_layers)):
+                        self.gpu_map[seq.seq_id][lyr] = []
+                        self._set_gpu_flag(sid, lyr, False) 
+                logger.info(f"cache_engine update by paused_cpu_seq_groups {self.gpu_map}")
         gpu_bt, cpu_bt = self.collect_block_tables(seq_group_metadata)
         for sid, bt in gpu_bt.items():
             self.gpu_map[sid] = {}

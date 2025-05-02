@@ -1257,6 +1257,8 @@ class ExecuteModelRequest(
     # The sequence group metadata list.
     seq_group_metadata_list: List[Union[SequenceGroupMetadata,
                                         SequenceGroupMetadataDelta]]
+    paused_cpu_seq_groups: List[SequenceGroup]
+    
     # Blocks to swap in. List of CPU -> GPU block number.
     blocks_to_swap_in: List[Tuple[int,
                                   int]] = msgspec.field(default_factory=list)
@@ -1265,6 +1267,9 @@ class ExecuteModelRequest(
                                    int]] = msgspec.field(default_factory=list)
     # Blocks to copy. Source to dest block.
     blocks_to_copy: List[Tuple[int, int]] = msgspec.field(default_factory=list)
+    
+    # Paused sequence groups whose gpu blocks are immediately dropped.
+    
     # Virtual engine ID for pipeline parallel.
     virtual_engine: int = 0
     # The number of slots for lookahead decoding.

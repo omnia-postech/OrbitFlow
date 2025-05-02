@@ -371,10 +371,10 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             For each offloaded layer i, kv_caches[i] is assigned to None. 
             The next offloaded layer is always stored at kv_caches[-1], if prefetch is not done yet, it is None. 
         """
-        blocks_to_swap_out = worker_input.blocks_to_swap_out
-        if blocks_to_swap_out is not None and blocks_to_swap_out.numel() > 0:
-            logger.info(f"blocks_to_swap_out: {blocks_to_swap_out}")
-        self.cache_config = self.cache_engine[worker_input.virtual_engine].may_resize_gpu_cache(cached_tokens=cached_all_token_ids, attn_meta=model_input.attn_metadata, seq_group_metadata=execute_model_req.seq_group_metadata_list, finished_requests = execute_model_req.finished_requests_ids)
+        paused_cpu_seq_groups = execute_model_req.paused_cpu_seq_groups
+        if len(paused_cpu_seq_groups) > 0:
+            logger.info(f"paused_cpu_seq_groups: {paused_cpu_seq_groups}")
+        self.cache_config = self.cache_engine[worker_input.virtual_engine].may_resize_gpu_cache(cached_tokens=cached_all_token_ids, attn_meta=model_input.attn_metadata, seq_group_metadata=execute_model_req.seq_group_metadata_list, finished_requests = execute_model_req.finished_requests_ids, paused_cpu_seq_groups=paused_cpu_seq_groups)
         
         kv_caches=self.kv_cache[worker_input.virtual_engine] if self.kv_cache is not None else None,
         kv_caches_cpu=self.kv_cache_cpu[worker_input.virtual_engine] if self.kv_cache_cpu is not None else None,
