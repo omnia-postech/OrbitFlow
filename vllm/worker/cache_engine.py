@@ -740,7 +740,8 @@ class FlattenedCacheEngine(CacheEngineBase):
         self.is_monolithic_distn = cache_config.is_monolithic_distn
         self.prefetch_mode = cache_config.prefetch_mode
         self.prefetch_distance = cache_config.prefetch_distance 
-        self.merge_prefetch_buffer = cache_config.merge_prefetch_buffer 
+        self.merge_prefetch_buffer = cache_config.merge_prefetch_buffer     
+        self.pause_and_resume = cache_config.pause_and_resume
         # prefetch_enabled = True 
         # Initialize the cache.
         self.gpu_cache = self._allocate_kv_cache_gpu(
@@ -1055,7 +1056,8 @@ class FlattenedCacheEngine(CacheEngineBase):
         
 
         # TODO(HONG): implementing pause/resume cache_update feature here -> move or apply this part to proper place later.
-        self.pause_resume_cache_update()
+        if self.pause_and_resume:
+            self.pause_resume_cache_update()
 
         if self.should_reconfigure_offload(attn_meta, cached_tokens):
             self.cache_config = self.reconfigure_offload(self.prefetch_distance, configure_paused=False, attn_meta=attn_meta, seq_group_metadata=seq_group_metadata)
