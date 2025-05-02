@@ -959,8 +959,8 @@ class FlashAttentionImpl(AttentionImpl):
                     updated_slot_mapping = attn_metadata.slot_mapping
                     updated_slot_mapping_cpu = attn_metadata.cpu_slot_mapping
 
-                logger.info(f"[Begin attention] slot_mapping {updated_slot_mapping}")
-                logger.info(f"[Begin attention] slot_mapping_cpu {updated_slot_mapping_cpu}")
+                logger.info(f"[Layer {layer}][Begin attention] slot_mapping {updated_slot_mapping}")
+                logger.info(f"[Layer {layer}][Begin attention] slot_mapping_cpu {updated_slot_mapping_cpu}")
 
                 # Reshape the input keys and values and store them in the cache.
                 # If kv_cache is not provided, the new key and value tensors are

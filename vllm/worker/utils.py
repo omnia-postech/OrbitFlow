@@ -94,88 +94,54 @@ def compute_inds_for_prefetch(
     prefetch_offset: int = 3200,
     cpu_offset: int = 3200,
 ) -> Tuple[Tensor, Tensor, Tensor]:
-    
     """
-    cpu_tables : 2-D tensor [Seq_id, Blocks]  – block-ids on CPU, starts from cpu_offset 
-    gpu_tables : 2-D tensor [Seq_id, Blocks]  – current block-ids 
-    
-    There may be one or two GPU caches. 
-    Case 1: one gpu cache. prefetch_offset != 0
-        [Block 0... ... Block prefetch_offset |... ... ... ... ... ...Last Block]
-        |<----- KV Cache already on GPU  ---->|<- KV Cache on-loaded from CPU ->|
-         
-    Case 2: two gpu caches. prefetch_offset = 0
-        KV Cache [Block 0... ... Block prefetch_offset |
-                 |<----- KV Cache already on GPU  ---->|
-        
-        Prefetch Cache  |Block 0 ... ... ... ... ...num prefetch blocks]
-                        |<-        KV Cache on-loaded from CPU       ->| 
-    
-    Block tables contain blocks for multiple sequences. 
-    If any sequence has anything NOT on gpu, this function will be called to figure out where on CPU we need to fetch data from, 
-    and where to store them to in the GPU cache, and how down stream can get correct data by providing correct indices. The actual fetching 
-    function will use these indices to get the data.
-    
-    "seq_ids" are the sequence ids whose blocks are not on GPU. 
-    1.  read from cpu_tables the cpu_block_ids for "seq_ids", and flatten into a 1D list of block ids. 
-        minus cpu_offset to get the correct id for the physical cache. 
-    2.  KV cache for the seq_ids should be unloaded to the same region in the on-load part. That is, even if seq_0 is on the GPU when 
-        this function is called, we dedicate an area for seq_0 anyway. We add prefetch_offset to the block ids.  
-    e.g. seq_num_blocks = [20, 16, 40], seq_ids = [1, 2], cpu_offset = 3200, prefetch_offset = 3200, and  
-    cpu_blocks = [
-                    [3200, 3201, 3202, ...],  # 20 blocks
-                    [3345, 3346, 3347, ...],  # 16 blocks
-                    [3639, ... ,          ],  # 40 blocks
-                ]
-    and gpu_blocks = [
-                    [0, 1, 2, ...],  # 20 blocks
-                    [dont care since we dont load from here],  # 16 blocks
-                    [dont care since we dont load from here],  # 40 blocks
-                ]
-    blocks_to_copy should be [145, 146, 147, ... 439, ..., ] # seq 1 and seq 2, cpu_offset = 3200 
-    blocks_to_write should be [3345, 3346, 3347, ..., 3639, ..., ...] # prefetch_offset happens to be the same as the cpu_offset 
-    prefetch_tables should be [
-                    [0, 1, 2, ...],  # 20 blocks
-                    [3345, 3346, 3347, ...],  # 16 blocks
-                    [3639, ... ,          ],  # 40 blocks
-                ]
+    Parameters
+    ----------
+    cpu_tables     : [S, B]  – block-ids for every seq *on CPU*  (offset by `cpu_offset`)
+    gpu_tables     : [S, B]  – current block-ids resident in *GPU* cache
+    seq_ids        : iterable of sequence indices whose next blocks are still on CPU
+    seq_num_blocks : length-B vector – number of blocks per sequence that will be fetched
+    prefetch_offset: first block-id in the GPU region reserved for on-loading
+                     (==0 means “two-cache” mode; otherwise “single-cache” mode)
     Returns
     -------
-    prefetch_tables : 2-D tensor [Seq_id, Blocks]  
-    blocks_to_write : 1-D tensor [N]     – contiguous ids for the GPU dst
-    blocks_to_copy  : 1-D tensor [N]     – original cpu_tables ids (src)
+    prefetch_tables : updated copy of `gpu_tables`
+                      (rows in `seq_ids` rewritten with their future GPU locations)
+    blocks_to_write : 1-D tensor with the **destination** block-ids (GPU side)
+    blocks_to_copy  : 1-D tensor with the **source**    block-ids (CPU side, 0-based)
     """
-    assert len(seq_ids) > 0 
-    total_new_blks = sum(seq_num_blocks[sid] for sid in seq_ids)
+    guard_gap = 1
+    assert len(seq_ids) > 0, "nothing to prefetch"
     device, dtype = cpu_tables.device, cpu_tables.dtype
-    blocks_to_write = arange(total_new_blks,        # 0,1,2,…
-                                device=device,
-                                dtype=dtype) + prefetch_offset
 
-    
-    seq_ids = list(seq_ids)
-    # flatten the target cpu blocks 
-    flattened_src = [] 
-    for sid in seq_ids:
-        n_blk = seq_num_blocks[sid]
-        flattened_src.append(cpu_tables[sid, :n_blk]) 
-    
-    blocks_to_copy_raw = cat([
+    seq_ids_set   = set(seq_ids)  
+    # -----------------------------------------------------------------------
+    # 1) Decide where *every* sequence (whether or not it is in `seq_ids`)
+    #    would live in the destination cache.  This guarantees that the
+    #    layout is stable and there is never an overlap.
+    # -----------------------------------------------------------------------
+    dst_view   = {}             # sid → 1-D tensor of dst block-ids
+    next_ptr   = prefetch_offset
+
+    for sid, n_blk in enumerate(seq_num_blocks):
+        start = next_ptr
+        stop  = start + n_blk                     # exclusive upper bound
+        if sid in seq_ids_set:                    # only keep slices we need now
+            dst_view[sid] = arange(start, stop,
+                                          device=device, dtype=dtype)
+        next_ptr = stop + guard_gap               # leave safety gap
+
+    # -----------------------------------------------------------------------
+    # 2) Build the three return tensors
+    # -----------------------------------------------------------------------
+    blocks_to_write = cat([dst_view[sid] for sid in seq_ids])
+    blocks_to_copy  = cat([
         cpu_tables[sid, :seq_num_blocks[sid]] for sid in seq_ids
-    ])
-    blocks_to_copy = blocks_to_copy_raw - cpu_offset        
-    
-    prefetch_tables = gpu_tables 
-    
-    # keep a view we can slice per-sequence
-    dst_cursor = 0
+    ]) - cpu_offset
+
+    prefetch_tables = gpu_tables.clone()          # do *not* mutate caller’s copy
     for sid in seq_ids:
         n_blk = seq_num_blocks[sid]
-        # contiguous slice in the GPU prefetch region
-        tgt_slice = blocks_to_write[dst_cursor: dst_cursor + n_blk]
-        prefetch_tables[sid, :n_blk] = tgt_slice
-        if (prefetch_tables[:,-1] == 0).all():
-            prefetch_tables = prefetch_tables[:, :-1]
-        dst_cursor += n_blk
-    
+        prefetch_tables[sid, :n_blk] = dst_view[sid]
+
     return prefetch_tables, blocks_to_write, blocks_to_copy

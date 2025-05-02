@@ -16,9 +16,9 @@ from vllm.attention.backends.utils import compute_slot_mapping
 import time
 from dataclasses import dataclass, field
 logger = init_logger(__name__)
-
+from math import ceil
 from typing import Sequence, Literal
-
+PREFETCH_GROW_STEP = 100          # <-- set once, reuse everywhere
 
 def kv_cache_slots_to_string(
     kv: torch.Tensor,
@@ -1204,9 +1204,9 @@ class FlattenedCacheEngine(CacheEngineBase):
         a. seq_id to SequenceGroupMetadata mapping; seq_id 10 was in 3rd SequenceGroupMetadata in the list, then 10 -> 2 
            seq_group_metadata[sid2idx].block_tables[sid][layer_idx] = updated_block_table[sid][layer_idx] 
         """
-        if not hasattr(self,"_counter"): 
-            self._counter = 0 
-        
+        # if not hasattr(self,"_counter"): 
+        # self._counter = 0 
+
         # if self._counter == 0: # prefill of request 0 
         # logger.info(f"GPU KEY at _coutner = {self._counter}")
         # slots_to_look_at = [0, 1, 2, 3, 4, 5, 6, 16, 17, 18, 19, 20, 21, 22, 32, 33, 34, 35, 36, 37, 38, 48, 49, 50, 51, 52, 53, 54, 64, 65, 66, 67, 68, 69, 70, 80, 81, 82, 83, 84, 85, 86, 96, 97, 98, 99, 100, 101, 102, 112, 113, 114, 115, 116, 117, 118, 128, 129, 130, 131, 132, 133, 134, 144, 145, 146, 147, 148, 149, 150, 160, 161, 162, 163, 164, 165, 166, 176, 177, 178, 179, 180, 181, 182, 192, 193, 194, 195, 196, 197, 198, 208, 209, 210, 211, 212, 213, 214, 224, 225, 226, 227, 228, 229, 230, 240, 241, 242, 243, 244, 245, 246, 256, 257, 258, 259, 260, 261, 262, 272, 273, 274, 275, 276, 277, 278, 288, 289, 290, 291, 292, 293, 294, 304, 305, 306, 307, 308, 309, 310, 320, 321, 322, 323, 324, 325, 326, 336, 337, 338, 339, 340, 341, 342, 352, 353, 354, 355, 356, 357, 358, 368, 369, 370, 371, 372, 373, 374, 384, 385, 386, 387, 388, 389, 390, 400, 401, 402, 403, 404, 405, 406, 416, 417, 418, 419, 420, 421, 422, 432, 433, 434, 435, 436, 437, 438, 448, 449, 450, 451, 452, 453, 454, 464, 465, 466, 467, 468, 469, 470, 480, 481, 482, 483, 484, 485, 486, 496, 497, 498, 499, 500, 501, 502, 503]
@@ -1218,9 +1218,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         
         logger.debug(f"resize received block_tables {attn_meta.block_tables}")
         sid2sgidx_ = sid2sgidx(seq_group_metadata)
-        logger.debug(f"resize received sid2sgidx_ {sid2sgidx_}")
         tic = time.time()
-        logger.debug(f"resize_with_fixed_ratio_per_req, target_distance: {prefetch_distance}")
 
         mapping = self.mapping          # shorthand
         bm       = self.block_manager    # block manager helper
@@ -1239,17 +1237,13 @@ class FlattenedCacheEngine(CacheEngineBase):
 
         #HARDCODE 
         prefetch_distance = torch.randint(0, 5, (len(candidates),)).tolist()
-        # prefetch_distance = {0:2, 1:3}
-        prefetch_distance = [2,3,4,5]
         # prefetch_distance = [2,2,2,2]
-        prefetch_distance = {sid: dist for sid, dist in zip(candidates, prefetch_distance)}
-        
+        # prefetch_distance = {sid: dist for sid, dist in zip(candidates, prefetch_distance)}
         # prefetch_distance = {0:3, 1:3}
-        # prefetch_distance = {candidate: dist for candidate, dist in prefetch_distance.items() if candidate in candidates}
+        prefetch_distance = {0:2, 1:3, 2:2, 3:3}
+        prefetch_distance = {candidate: dist for candidate, dist in prefetch_distance.items() if candidate in candidates}
         logger.info(f"resize, target_distance: {prefetch_distance}")
         
-        logger.debug(f"GPU map before resize:{mapping.gpu_map}")
-        logger.debug(f"slot_mapping before resize:{attn_meta.slot_mapping}")
 
         all_seq_ids: Set[int] = set(mapping.all_seqs)
         unknown_ids           = set(prefetch_distance) - all_seq_ids
@@ -1283,6 +1277,49 @@ class FlattenedCacheEngine(CacheEngineBase):
         logger.info(f"dealloc_layers {dealloc_layers}")
         logger.info(f"expected_freed {expected_freed}")
         logger.info(f"alloc_plan {alloc_plan}")
+
+        #### need to resize the prefetch buffer? #### 
+        need_prefetch_blocks = 0
+        for sid in candidates:
+            try:
+                sg  = seq_group_metadata[sid2sgidx_[sid]]
+            except Exception as e: 
+                continue # FIXME seg_meta contains only RUNNING sequence! 
+            tok = sg.seq_data[sid].get_num_computed_tokens()
+            need_prefetch_blocks += ceil(tok / 16) + 1   # +1 gap
+            
+        # -- how many scratch-blocks do we already have? ----------------------
+        key_tensor   = self.gpu_cache[0][0]           # (n_blk, n_head, d_head, blk)
+        cur_gpu_blk  = key_tensor.shape[0]            # total blocks on GPU
+        cur_prefetch = cur_gpu_blk - self.num_gpu_blocks
+        # -- grow in quanta of 100 blocks ------------------------------------
+        missing   = max(0, need_prefetch_blocks - cur_prefetch)
+        grow_by   = ceil(missing / PREFETCH_GROW_STEP) * PREFETCH_GROW_STEP
+        if grow_by == 0:
+            # nothing to do
+            pass
+        else:
+            logger.info(
+                f"Prefetch window resize : have={cur_prefetch} "
+                f"need={need_prefetch_blocks}  →  +{grow_by} blocks"
+            )
+
+            # -------------------------------------------------------------------
+            # allocate NEW K / V tensors **with exactly the same inner shape**
+            new_row_shape = self.attn_backend.get_kv_cache_shape(
+                grow_by,
+                self.block_size,
+                self.num_kv_heads,
+                self.head_size,
+            )
+            new_rows = torch.zeros(new_row_shape, dtype=self.dtype, device=key_tensor.device)
+
+            # keep the tuple-of-tensors layout intact
+            self.gpu_cache[0] = torch.cat([self.gpu_cache[0], new_rows], dim=1)
+            logger.info(
+                f"Resized K-cache → {self.gpu_cache[0][0].shape}, "
+                f"V-cache → {self.gpu_cache[0][1].shape}"
+            )
         # Task 2. Figure out how to modify the caches 
         """
         We will apply the same prefetch distance to all target sequences. 
@@ -1348,7 +1385,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         For allocations, store the allocated block ids back to collected data structure. Then copy the blocks specified by the cpu block ids from the cpu cache, to the newly allocated block ids of the GPU cache. 
         """
         
-        logger.debug(f"mapping after resize: {mapping}")
+        logger.info(f"mapping after resize: {mapping}")
         logger.debug(f"GPU map after resize:{mapping.gpu_map}")
         logger.debug(f"gpu_cpu_cache_map after resize:{mapping.gpu_cpu_cache_map}")
         self.cache_config.gpu_cpu_cache_map = self.gpu_cpu_cache_map = self.mapping.gpu_cpu_cache_map
@@ -1381,13 +1418,11 @@ class FlattenedCacheEngine(CacheEngineBase):
         return kv_cache
 
     def swap_in(self, src_to_dst: torch.Tensor) -> None:
-        for i in range(self.num_attention_layers):
-            self.attn_backend.swap_blocks(self.cpu_cache[i], self.gpu_cache[i],
-                                          src_to_dst)
+        self.attn_backend.swap_blocks(self.cpu_cache[0], self.gpu_cache[0],
+                                        src_to_dst)
 
     def swap_out(self, src_to_dst: torch.Tensor) -> None:
-        for i in range(self.num_attention_layers):
-            self.attn_backend.swap_blocks(self.gpu_cache[i], self.cpu_cache[i],
+        self.attn_backend.swap_blocks(self.gpu_cache[0], self.cpu_cache[0],
                                           src_to_dst)
 
     def copy(self, src_to_dsts: torch.Tensor) -> None:

@@ -1,5 +1,5 @@
 """A block manager that manages token blocks."""
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 from typing import Sequence as GenericSequence
 from typing import Tuple
 
@@ -799,18 +799,18 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         seq_block_tables = self.block_tables[seq.seq_id]
         for i, block_table in enumerate(seq_block_tables):
             if gpu_cpu_cache_map[seq.seq_id][i]:
-                # try:
-                block_table.append_token_ids(
-                    token_ids=block_table.get_unseen_token_ids(seq.get_token_ids()),
-                    num_lookahead_slots=num_lookahead_slots,
-                    num_computed_slots=seq.data.get_num_computed_tokens(),
-                    extra_hash=seq.extra_hash(),
-                )
-                # except: 
-                #     for i, block_table in enumerate(seq_block_tables):
-                #         logger.info(f"self.block_tables[{seq.seq_id}]: {block_table.physical_block_ids}")
-                #     logger.info(f"gpu_cpu_cache_map[{seq.seq_id}][{i}] {gpu_cpu_cache_map[seq.seq_id][i]}\n full map: {gpu_cpu_cache_map}\n")
-                #     raise RuntimeError("check")
+                try:
+                    block_table.append_token_ids(
+                        token_ids=block_table.get_unseen_token_ids(seq.get_token_ids()),
+                        num_lookahead_slots=num_lookahead_slots,
+                        num_computed_slots=seq.data.get_num_computed_tokens(),
+                        extra_hash=seq.extra_hash(),
+                    )
+                except: 
+                    for i, block_table in enumerate(seq_block_tables):
+                        logger.info(f"self.block_tables[{seq.seq_id}]: {block_table.physical_block_ids}")
+                    logger.info(f"gpu_cpu_cache_map[{seq.seq_id}][{i}] {gpu_cpu_cache_map[seq.seq_id][i]}\n full map: {gpu_cpu_cache_map}\n")
+                    raise RuntimeError("check")
                 
             else: 
                 assert(not block_table._is_allocated)
@@ -821,17 +821,67 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
                 token_ids=block_table.get_unseen_token_ids(seq.get_token_ids()),
                 num_lookahead_slots=num_lookahead_slots,
                 num_computed_slots=seq.data.get_num_computed_tokens(),
-                device=Device.CPU,
                 extra_hash=seq.extra_hash(),
             )
         # Return any new copy-on-writes.
         new_cows = self.block_allocator.clear_copy_on_writes()
         return new_cows
 
-    def free(self, seq: Sequence) -> None:
+    def free(self, seq: Sequence):
         seq_id = seq.seq_id
         if seq_id not in self.block_tables:
-            return
+            return None 
+        if isinstance(self.block_tables[seq_id],list):
+            # all physical blocks for all layers
+            all_phys_ids = list(chain.from_iterable(
+                blk_meta.physical_block_ids for blk_meta in self.block_tables[seq_id]
+            ))
+            self._last_access_blocks_tracker.update_seq_blocks_last_access(
+                seq_id, all_phys_ids)
+            
+            # Free all tables / blocks for this seq --------------------------
+            for tbl in self.block_tables[seq_id]:  
+                tbl.free()                         
+            del self.block_tables[seq_id]           
+        else:
+            # Update seq block ids with the latest access time
+            self._last_access_blocks_tracker.update_seq_blocks_last_access(
+                seq_id, self.block_tables[seq_id].physical_block_ids)
+
+            # Free table/blocks
+            self.block_tables[seq_id].free()
+            del self.block_tables[seq_id]
+        if isinstance(self.cpu_block_tables[seq_id],list):
+            # all physical blocks for all layers
+            all_phys_ids = list(chain.from_iterable(
+                blk_meta.physical_block_ids for blk_meta in self.cpu_block_tables[seq_id]
+            ))
+            self._last_access_blocks_tracker.update_seq_blocks_last_access(
+                seq_id, all_phys_ids)
+            # Untrack seq
+            self._last_access_blocks_tracker.remove_seq(seq_id)
+            self._computed_blocks_tracker.remove_seq(seq_id)
+            # Free all tables / blocks for this seq --------------------------
+            for tbl in self.cpu_block_tables[seq_id]:  
+                tbl.free()                         
+            del self.cpu_block_tables[seq_id]           
+        else:
+            # Update seq block ids with the latest access time
+            self._last_access_blocks_tracker.update_seq_blocks_last_access(
+                seq_id, self.cpu_block_tables[seq.seq_id].physical_block_ids)
+            # Untrack seq
+            self._last_access_blocks_tracker.remove_seq(seq_id)
+            self._computed_blocks_tracker.remove_seq(seq_id)
+
+            # Free table/blocks
+            self.cpu_block_tables[seq_id].free()
+            del self.cpu_block_tables[seq_id]
+
+    def free_gpu(self, seq: Sequence) -> List[int]:
+        # free only gpu blocks, 
+        seq_id = seq.seq_id
+        if seq_id not in self.block_tables:
+            return [] 
         if isinstance(self.block_tables[seq.seq_id],list):
             # all physical blocks for all layers
             all_phys_ids = list(chain.from_iterable(
@@ -840,14 +890,17 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
             self._last_access_blocks_tracker.update_seq_blocks_last_access(
                 seq_id, all_phys_ids)
             
-            # Untrack seq
-            self._last_access_blocks_tracker.remove_seq(seq_id)
-            self._computed_blocks_tracker.remove_seq(seq_id)
+            # (xinyue) still track it since its states are kept  
+            # self._last_access_blocks_tracker.remove_seq(seq_id)
+            # self._computed_blocks_tracker.remove_seq(seq_id)
+            
             # Free all tables / blocks for this seq --------------------------
             for tbl in self.block_tables[seq_id]:  
                 tbl.free()                         
-            del self.block_tables[seq_id]           
+            del self.block_tables[seq_id]          
+            return all_phys_ids 
         else:
+            all_phys_ids = self.block_tables[seq_id].physical_block_ids
             # Update seq block ids with the latest access time
             self._last_access_blocks_tracker.update_seq_blocks_last_access(
                 seq_id, self.block_tables[seq.seq_id].physical_block_ids)
@@ -858,6 +911,8 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
             # Free table/blocks
             self.block_tables[seq_id].free()
             del self.block_tables[seq_id]
+            return all_phys_ids
+
 
     def free_seq_by_layer(self, seq_blocks): 
         freed_blocks = []
@@ -1110,6 +1165,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
                   seq_group: SequenceGroup,
                   device: Device,
                   status: SequenceStatus,
+                  prefetch_distance = -1, 
                   num_lookahead_slots: int = 0) -> AllocStatus:
         """Returns the AllocStatus for swapping in/out the given sequence_group 
         on to the 'device'.
@@ -1126,22 +1182,25 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
             AllocStatus: The AllocStatus for swapping in/out the given 
                 sequence_group on to the 'device'.
         """
-        # First determine the number of blocks that will be touched by this
-        # swap. Then verify if there are available blocks in the device
-        # to perform the swap.
+        # with flattened cache, cpu cache should contain all the relavant info
+        # this function is only called for SWAP_IN in flatten cache, since 
+        # we simply drop the gpu block tables for swap out 
+        # TODO: add consideration when prefetch distance is not -1 
+        assert device == Device.GPU, "flattened cache only supports swap in on GPU"
         num_blocks_touched = 0
         blocks: List[Block] = []
         for seq in seq_group.get_seqs(status=status):
-            block_table = self.block_tables[seq.seq_id]
-            if block_table.blocks is not None:
-                # Compute the number blocks to touch for the tokens to be
-                # appended. This does NOT include the full blocks that need
-                # to be touched for the swap.
-                num_blocks_touched += \
-                    block_table.get_num_blocks_touched_by_append_slots(
-                        block_table.get_unseen_token_ids(seq.get_token_ids()),
-                        num_lookahead_slots=num_lookahead_slots)
-                blocks.extend(block_table.blocks)
+            cpu_block_tables = self.cpu_block_tables[seq.seq_id]
+            for cpu_block_table in cpu_block_table:
+                if cpu_block_table.blocks is not None:
+                    # Compute the number blocks to touch for the tokens to be
+                    # appended. This does NOT include the full blocks that need
+                    # to be touched for the swap.
+                    num_blocks_touched += \
+                        cpu_block_table.get_num_blocks_touched_by_append_slots(
+                            cpu_block_table.get_unseen_token_ids(seq.get_token_ids()),
+                            num_lookahead_slots=num_lookahead_slots)
+                    blocks.extend(cpu_block_table.blocks)
         # Compute the number of full blocks to touch and add it to the
         # existing count of blocks to touch.
         num_blocks_touched += self.block_allocator.get_num_full_blocks_touched(
@@ -1151,15 +1210,17 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         if device == Device.GPU:
             watermark_blocks = self.watermark_blocks
 
-        if self.block_allocator.get_num_total_blocks(
-                device) < num_blocks_touched:
-            return AllocStatus.NEVER
-        elif self.block_allocator.get_num_free_blocks(
-                device) - num_blocks_touched >= watermark_blocks:
-            return AllocStatus.OK
-        else:
-            return AllocStatus.LATER
-
+        if prefetch_distance == -1:
+            if self.block_allocator.get_num_total_blocks(
+                    device) < num_blocks_touched:
+                return AllocStatus.NEVER
+            elif self.block_allocator.get_num_free_blocks(
+                    device) - num_blocks_touched >= watermark_blocks:
+                return AllocStatus.OK
+            else:
+                return AllocStatus.LATER
+        else: 
+            raise NotImplementedError("swapping in dropped request with a prefetch distance")
     def get_num_cached_tokens(self, seq: Sequence) -> int:
         """Get the number of tokens in blocks that are already computed and
         cached in the block manager for the sequence.

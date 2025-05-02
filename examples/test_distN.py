@@ -17,7 +17,8 @@ import logging
 import pandas as pd 
 import torch 
 import bisect
-
+import torch
+torch.set_printoptions(edgeitems=2, linewidth=120, sci_mode=True)
 # --- Config ---
 MODEL = "/home/jongseop/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"
 PROMPT_DIR = "./prompts"

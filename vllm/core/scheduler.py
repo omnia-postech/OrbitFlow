@@ -39,6 +39,7 @@ class PreemptionMode(enum.Enum):
     """
     SWAP = enum.auto()
     RECOMPUTE = enum.auto()
+    PAUSE = enum.auto()
 
 
 @dataclass
@@ -1578,20 +1579,18 @@ class Scheduler:
                 preemption_mode = PreemptionMode.RECOMPUTE
             else:
                 preemption_mode = PreemptionMode.SWAP
-
         elif self.user_specified_preemption_mode == "swap":
             preemption_mode = PreemptionMode.SWAP
         else:
             preemption_mode = PreemptionMode.RECOMPUTE
 
-        if self.num_cumulative_preemption % 50 == 0:
-            logger.warning(
-                "Sequence group %s is preempted by %s mode because there is "
-                "not enough KV cache space. This can affect the end-to-end "
-                "performance. Increase gpu_memory_utilization or "
-                "tensor_parallel_size to provide more KV cache memory. "
-                "total_num_cumulative_preemption=%d", seq_group.request_id,
-                preemption_mode, self.num_cumulative_preemption + 1)
+        logger.warning(
+            "Sequence group %s is preempted by %s mode because there is "
+            "not enough KV cache space. This can affect the end-to-end "
+            "performance. Increase gpu_memory_utilization or "
+            "tensor_parallel_size to provide more KV cache memory. "
+            "total_num_cumulative_preemption=%d", seq_group.request_id,
+            preemption_mode, self.num_cumulative_preemption + 1)
         self.num_cumulative_preemption += 1
 
         if preemption_mode == PreemptionMode.RECOMPUTE:
@@ -1620,6 +1619,18 @@ class Scheduler:
     ) -> None:
         self._swap_out(seq_group, blocks_to_swap_out)
 
+    def _preempt_by_drop(
+        self,
+        seq_group: SequenceGroup,
+        blocks_to_drop:  List[Tuple[int, int]],
+    ) -> None:
+        for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
+            seq.status = SequenceStatus.SWAPPED
+        gpu_bids = self.block_manager.free_gpu(seq_group) 
+        cpu_bids = [-1]*len(gpu_bids) 
+        # to reuse blocks_to_swap_out 
+        blocks_to_drop.extend([(gpu_bid, cpu_bid) for gpu_bid, cpu_bid in zip(gpu_bids, cpu_bids)])
+        
     def _swap_in(
         self,
         seq_group: SequenceGroup,
