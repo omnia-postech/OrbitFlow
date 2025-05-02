@@ -592,32 +592,33 @@ class Scheduler:
         preempted: List[SequenceGroup] = ret.preempted
         swapped_out: List[SequenceGroup] = ret.swapped_out
 
-        # NOTE(HONG): resume
-        for seq_group in list(self.paused):
-            if self.deposit_map.get(seq_group.request_id, 0) == 0:
-                logger.info(f"RESUME: request {seq_group.request_id} moved from PAUSED -> RUNNING; "
-                            f"paused_queue_size={len(self.paused)-1}, running_queue_size={len(self.running)+1}")
-                self.paused.remove(seq_group)
-                self.running.append(seq_group)
+        if self.cache_config.pause_and_resume:
+            # NOTE(HONG): resume
+            for seq_group in list(self.paused):
+                if self.deposit_map.get(seq_group.request_id, 0) == 0:
+                    logger.info(f"RESUME: request {seq_group.request_id} moved from PAUSED -> RUNNING; "
+                                f"paused_queue_size={len(self.paused)-1}, running_queue_size={len(self.running)+1}")
+                    self.paused.remove(seq_group)
+                    self.running.append(seq_group)
 
-            # TODO(HONG): need to load KV cache from CPU memory to GPU memory
+                # TODO(HONG): need to load KV cache from CPU memory to GPU memory
 
-        # NOTE(HONG): pause
-        if not self.paused and self.running and len(self.running) > 1:
-            candidates = [
-                g for g in self.running 
-                if self.deposit_map.get(g.request_id, 0) > 0
-                and any(seq.status == SequenceStatus.RUNNING for seq in g.get_seqs())
-            ]
-            logger.info(f"PAUSE candidates: {candidates}")
-            if candidates: 
-                # candidates[1].get_seqs()[0].get_output_len()
-                pause_victim = max(candidates, key=lambda g: g.get_seqs()[0].get_output_len())
-                logger.info(f"PAUSE: request {pause_victim.request_id} moved from RUNNING -> PAUSED; "
-                            f"running_queue_size={len(self.running)-1}, paused_queue_size={len(self.paused)+1}")
+            # NOTE(HONG): pause
+            if not self.paused and self.running and len(self.running) > 1:
+                candidates = [
+                    g for g in self.running 
+                    if self.deposit_map.get(g.request_id, 0) > 0
+                    and any(seq.status == SequenceStatus.RUNNING for seq in g.get_seqs())
+                ]
+                logger.info(f"PAUSE candidates: {candidates}")
+                if candidates: 
+                    # candidates[1].get_seqs()[0].get_output_len()
+                    pause_victim = max(candidates, key=lambda g: g.get_seqs()[0].get_output_len())
+                    logger.info(f"PAUSE: request {pause_victim.request_id} moved from RUNNING -> PAUSED; "
+                                f"running_queue_size={len(self.running)-1}, paused_queue_size={len(self.paused)+1}")
 
-                self.running.remove(pause_victim)
-                self.paused.append(pause_victim)
+                    self.running.remove(pause_victim)
+                    self.paused.append(pause_victim)
 
         running_queue = self.running
         assert len(self._async_stopped) == 0

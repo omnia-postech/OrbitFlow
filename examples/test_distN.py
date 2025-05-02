@@ -467,6 +467,7 @@ def main(configs):
     
     flattened_cache = configs.flattened_cache if hasattr(configs, "flattened_cache") else False
     merge_prefetch_buffer = configs.merge_prefetch_buffer if hasattr(configs, "merge_prefetch_buffer") else True
+    pause_and_resume = configs.pause_and_resume if hasattr(configs, "pause_and_resume") else False
     batch_size = trace.batch_size if hasattr(trace, "batch_size") else BATCH_SIZE
     # prompts = trace.requests if hasattr(trace, "requests") else trace.samples
     
@@ -477,6 +478,7 @@ def main(configs):
     print(f"gpu_memory_utilization: {gpu_memory_utilization}")
     print(f"num_gpu_blocks_override: {num_gpu_blocks_override}")
     print(f"merge_prefetch_buffer: {merge_prefetch_buffer}")
+    print(f"pause_and_resume: {pause_and_resume}")
     
     args = EngineArgs(
         model=MODEL,
@@ -494,6 +496,7 @@ def main(configs):
         enable_chunked_prefill=False,
         flattened_cache=flattened_cache,
         merge_prefetch_buffer=merge_prefetch_buffer,
+        pause_and_resume=pause_and_resume,
         # No prefetch, (N=1,static), (N=dynamic,mono), (N=dynamic,dyn), the last two version, N only decreases 
         # multi-request version (might decrease, or increase)
         # num_gpu_blocks_override: Optional[int] = None
@@ -536,6 +539,10 @@ if __name__ == "__main__":
                         type=bool,
                         default=False,
                         help="whether the prefetch buffer is merged")
+    parser.add_argument("--pause-and-resume",
+                        type=bool,
+                        default=False,
+                        help="whether to use pause and resume")
     args = parser.parse_args()    
     print(args)
     # --- Setup Logging ---
