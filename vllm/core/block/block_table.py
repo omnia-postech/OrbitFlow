@@ -175,7 +175,7 @@ class BlockTable:
             self._blocks.append_token_ids(first_block_idx + i, token_block)
 
         self._num_full_slots += len(token_ids)
-
+        self.token_ids.extend(token_ids)
     def ensure_num_empty_slots(self,
                                num_empty_slots: int,
                                device: Device = Device.GPU,

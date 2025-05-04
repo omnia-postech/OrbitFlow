@@ -538,8 +538,6 @@ class FlashAttentionMetadataBuilder(
                     cpu_layer_block_tables,        # wrap for signature
                 )
                 self.cpu_slot_mapping[layer_idx].extend(layer_map)  
-                
-                
                 layer_block_tables = {
                     seq_id: inter_data.block_tables[seq_id][layer_idx]          # bt_seq = [[...], [...], ...]
                 }
@@ -734,12 +732,6 @@ class FlashAttentionMetadataBuilder(
                         device=device,
                     )
             elif sm_dim == 2: 
-                block_tables = make_tensor_with_pad_3d(
-                    self.block_tables,
-                    pad=0,
-                    dtype=torch.int,
-                    device=device,
-                )
                 if self.cpu_block_tables is not None: 
                     cpu_block_tables = make_tensor_with_pad_3d(
                         self.cpu_block_tables,
@@ -747,6 +739,21 @@ class FlashAttentionMetadataBuilder(
                         dtype=torch.int,
                         device=device,
                     )
+                    block_tables = make_tensor_with_pad_3d(
+                        self.block_tables,
+                        pad=0,
+                        dtype=torch.int,
+                        device=device,
+                        max_len = cpu_block_tables.shape[-1],
+                    )
+                else:
+                    block_tables = make_tensor_with_pad_3d(
+                        self.block_tables,
+                        pad=0,
+                        dtype=torch.int,
+                        device=device,
+                    )
+
                 cpu_offset = self.input_builder.inter_data_list[0].cpu_offset
         sm_dim = _bt_dim(self.slot_mapping)  # 1 or 2
         if cuda_graph_pad_size != -1:
@@ -899,6 +906,7 @@ class FlashAttentionImpl(AttentionImpl):
         attn_type: str = AttentionType.DECODER,
         output: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        
         """Forward pass with FlashAttention.
 
         Args:
@@ -959,17 +967,13 @@ class FlashAttentionImpl(AttentionImpl):
                     updated_slot_mapping = attn_metadata.slot_mapping
                     updated_slot_mapping_cpu = attn_metadata.cpu_slot_mapping
 
-                logger.info(f"[Layer {layer}][Begin attention] slot_mapping {updated_slot_mapping}")
-                logger.info(f"[Layer {layer}][Begin attention] slot_mapping_cpu {updated_slot_mapping_cpu}")
+                logger.debug(f"[Layer {layer}][Begin attention] slot_mapping[:50] {updated_slot_mapping[:50]}")
+                logger.debug(f"slot_mapping_cpu[:50] {updated_slot_mapping_cpu[:50]}")
 
                 # Reshape the input keys and values and store them in the cache.
                 # If kv_cache is not provided, the new key and value tensors are
                 # not cached. This happens during the initial memory
                 # profiling run.
-                logger.info(f"reshape_and_flash layer {layer} updated_slot_mapping {updated_slot_mapping}")
-                # logger.info(f" {layer} updated_slot_mapping // 16  {updated_slot_mapping//16}")
-                logger.debug(f"k, v shape {key if key is None else key.shape}, {value if value is None else value.shape}")
-                logger.debug(f"k cache, v cache shape {key_cache.shape}, {value_cache.shape}")
                 
                 torch.ops._C_cache_ops.reshape_and_cache_flash(
                     key,
@@ -981,6 +985,7 @@ class FlashAttentionImpl(AttentionImpl):
                     k_scale,
                     v_scale,
                 )
+                torch.cuda.synchronize()
 
                 # # TODO(HONG): Copy only blocks that are updated with newly generated tokens.                
                 if layer >=0 : # ?
@@ -995,17 +1000,15 @@ class FlashAttentionImpl(AttentionImpl):
                             PAGE_SIZE = 16 # Is this a parameter or set to match with BLOCK SIZE of paged kv cache? 
                             page_idx = updated_slot_mapping_cpu // PAGE_SIZE      # 각 토큰이 들어갈 페이지 번호
                             page_idx -= attn_metadata.cpu_offset
-                            assert ((page_idx >= 0).all()) ,str( page_idx)
+                            assert ((page_idx >= 0).all()), f"slots {updated_slot_mapping_cpu}, offset {attn_metadata.cpu_offset}"
                             offset_idx = updated_slot_mapping_cpu % PAGE_SIZE    # 해당 페이지 내부에서의 위치(0~15)
 
                             num_tokens = updated_slot_mapping_cpu.shape[0]
-                            logger.debug(f"updated_slot_mapping_cpu shape {updated_slot_mapping_cpu.shape}")
-                            # num_tokens = updated_slot_mapping_cpu.size(0)
-                            
                             for i in range(num_tokens):
                                 p = page_idx[i].item()
                                 o = offset_idx[i].item()
-                                logger.info(f"token {i} -> slot {updated_slot_mapping_cpu[i]} = CPUBlock[{p}][{o}]")
+                                if i%50==0:
+                                    logger.debug(f"tok{i}->slot{updated_slot_mapping_cpu[i]}=CPU[{p}][{o}]")
 
                                 # copy each token slice                            
                                 kv_cache_cpu[0][p, o, :, :] = key_cpu[i, :, :] # key 
@@ -1014,27 +1017,6 @@ class FlashAttentionImpl(AttentionImpl):
                                 original_key = key_cpu[i, :, 0] # first element of every head (8 heads)
                                 cached_key = kv_cache_cpu[0][p, o, :, 0] 
                             
-                            # method 2
-                            # # (A) Expand block_idx, offset_idx to match [num_tokens, 1, 1]
-                            # page_idx_exp = page_idx[:, None, None]   # [num_tokens,1,1]
-                            # offset_idx_exp = offset_idx[:, None, None] # [num_tokens,1,1]
-                            # # (B) Expand key_states shape to [num_tokens, num_kv_heads, head_size]                                        
-                            # kv_cache_cpu[0][page_idx_exp, offset_idx_exp] = key_cpu
-                            # kv_cache_cpu[1][page_idx_exp, offset_idx_exp] = value_cpu            
-                        # # verify writes 
-                        # num_tokens = key.shape[0]
-                        # for tid, slot in enumerate(updated_slot_mapping):
-                        #     cpu_slot = updated_slot_mapping_cpu[tid] 
-                        #     block_idx = slot // 16 
-                        #     block_offset = slot % 16
-                        #     cpu_block_idx = cpu_slot // 16 - attn_metadata.cpu_offset
-                            
-                        #     logger.info(f"[L{layer}] token {tid} -> slot {slot} = GPUBlock[{block_idx}][{block_offset}] -> CPUBlock[{cpu_block_idx}({cpu_slot // 16})][{block_offset}]")
-                        #     gpu_cache_key = key_cache[block_idx, block_offset, :, 0] 
-                        #     cpu_cache_key = kv_cache_cpu[0][cpu_block_idx, block_offset, :, 0] 
-                        #     logger.info(f"original key {gpu_cache_key}")
-                        #     logger.info(f"cached key {cpu_cache_key}")
-        logger.debug(f"flash_attn forward received {attn_metadata.block_tables.shape if attn_metadata.block_tables is not None else None}")
         # FIXME Xinyue 
         (num_prefill_query_tokens, num_prefill_kv_tokens,
         num_decode_query_tokens) = \
@@ -1136,7 +1118,6 @@ class FlashAttentionImpl(AttentionImpl):
                     _,
                     block_tables_arg,
                 ) = get_seq_len_block_table_args(decode_meta, False, attn_type)
-                logger.info(f"[Layer {layer}] used block tables: {block_tables_arg}, {seq_lens_arg}")
                 with nvtx.annotate(f"Decoding FA(2) for layer{layer}"):
                     flash_attn_with_kvcache(
                         q=decode_query.unsqueeze(1), 
@@ -1151,8 +1132,6 @@ class FlashAttentionImpl(AttentionImpl):
                         softcap=logits_soft_cap,
                         out=decode_output.unsqueeze(1),
                     )
-
-            # print(f"decoding interval: {time.time() - start}")
         return output
 
 

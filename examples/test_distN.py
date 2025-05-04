@@ -62,31 +62,28 @@ class DelaySimulator:
         
         if rid not in self.last_time: 
             self.last_time[rid] = step_time
-            logger.info(f"[on_token] first token for {rid}, setting last_time[{rid}] = {step_time:.6f}")
+            logger.debug(f"[on_token] first token for {rid}, setting last_time[{rid}] = {step_time:.6f}")
 
-        logger.info(f"[on_token] rid={rid} @ {step_time:.6f}: deposit {before} -> {after}")
+        logger.debug(f"[on_token] rid={rid} @ {step_time:.6f}: deposit {before} -> {after}")
 
 
     def pop(self, step_time: float):
-        logger.info(f"[pop] called @ {step_time:.6f}; current deposits: {dict(self.deposit)}")
-        pops = []
+        deposits_snapshot = {k: int(v) for k, v in self.deposit.items()}
+        pops: list[tuple[str, int]] = []
+        rid_log: list[str] = []
 
         for rid, dep in list(self.deposit.items()):
-            last = self.last_time.get(rid, step_time)
-            # dt: time since last pop
-            dt = step_time - last
-            # n: number of tokens to release
-            n = int(dt * self.v)
-
-            logger.info(f"[pop] rid={rid}: time since last pop dt={dt:.6f}s, "
-                        f"raw_to_release={n}, deposit={dep}")
-
+            last   = self.last_time.get(rid, step_time)
+            dt     = step_time - last             
+            n      = int(dt * self.v)             
             if n <= 0:
                 continue
 
             # release n tokens, but not more than deposit
             if dep < n:
-                logger.info(f"SLO violation for request {rid} at {step_time}, have {dep}, need {n}")
+                rid_log.append(f"{rid}(SLO {dep}/{n})")
+            else:
+                rid_log.append(f"{rid}({n})")
             to_rel = min(n, dep)
             # deposit 차감
             self.deposit[rid] -= to_rel
@@ -97,10 +94,13 @@ class DelaySimulator:
             advance = to_rel / self.v
             self.last_time[rid] = last + advance
 
-            logger.info(f"[pop] rid={rid}: releasing {to_rel} tokens, "
-                        f"new deposit={self.deposit[rid]}, "
-                        f"advancing last_time by {advance:.6f}s -> {self.last_time[rid]:.6f}")
-
+        # single-line summary
+        if rid_log:
+            logger.info(
+                "[pop] deposits=%s | released: %s",
+                deposits_snapshot,
+                " | ".join(rid_log),
+            )
         return pops
     
     def finish(self, rid: str):
@@ -295,14 +295,18 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
         step_time = time.time()
 
         # 6) Process each output
+        # gather rids so we can log them in one line
+        prefill_rids: list[str] = []
+        decode_rids:  list[str] = []
+
         for output in step_outputs:
             rid = output.request_id
-            logger.info(f"Processing request {rid} at step {cumulative_steps}")
+            logger.debug("step %d  rid=%s", cumulative_steps, rid)
             # Prefill
             if rid not in received_requests:
                 # This is the first token for that request
                 received_requests.append(rid)
-                logger.info(f"Prefill for request {rid} at step {cumulative_steps}")
+                prefill_rids.append(rid)
                 # We'll treat the entire prompt as prefill
                 # i.e., output.prompt_token_ids is the input
                 finished_tokens += len(output.prompt_token_ids)
@@ -311,7 +315,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
             # Decoding
             else:
                 # Another token
-                logger.info(f"Decoding for request {rid} at step {cumulative_steps}")
+                decode_rids.append(rid)
                 # now = time.time()
 
                 sim.on_token(rid, step_time)
@@ -325,13 +329,10 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
 
             # If the request is finished:
             if output.finished:
-                logger.info(f"Finished request {rid} at step {cumulative_steps}")
-                # logger.info(f"{rid} prompt: {output.prompt_token_ids[:5]}")
-                # logger.info(f"{rid} output: {output.outputs[0].token_ids[:5]}")
-                # logger.info(f"{rid} output: {output.outputs[0].text[:5]}")
-                logger.info(f"{rid} prompt: {output.prompt_token_ids}")
-                logger.info(f"{rid} output: {output.outputs[0].token_ids}")
-                logger.info(f"{rid} output: {output.outputs[0].text}")
+                logger.info(f"Finished request {rid} at step {cumulative_steps}, finish_reason={output.outputs[0].finish_reason}")
+                logger.info(f"{rid} prompt: {len(output.prompt_token_ids)} tokens; {output.prompt_token_ids[:20]}")
+                logger.info(f"{rid} output: {len(output.prompt_token_ids)} {output.outputs[0].token_ids[:20]}")
+                logger.info(f"{rid} text: {output.outputs[0].text[:20]}")
                 running_requests.remove(rid)
                 m = output.metrics
 
@@ -384,7 +385,12 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
                 logger.info(f"Finished request {rid} with {decode_length} decode tokens")
 
                 sim.finish(rid)
-
+        if prefill_rids:
+            logger.info("Prefill step %d: %s",
+                        cumulative_steps, ", ".join(map(str, prefill_rids)))
+        if decode_rids:
+            logger.info("Decode  step %d: %s",
+                        cumulative_steps, ", ".join(map(str, decode_rids)))
         tokens_to_release = sim.pop(step_time)
         
         # We'll sleep a bit
@@ -490,7 +496,7 @@ def main(configs):
         gpu_memory_utilization=gpu_memory_utilization,
         enforce_eager=True,
         num_gpu_blocks_override=num_gpu_blocks_override*32 if flattened_cache else num_gpu_blocks_override,
-        preemption_mode="swap",
+        preemption_mode="pause",
         is_monolithic_distn=is_monolithic_distn, 
         prefetch_mode = prefetch_mode,
         prefetch_distance = prefetch_distance,

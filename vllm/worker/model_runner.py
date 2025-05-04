@@ -797,7 +797,6 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             encoder_seq_len=encoder_seq_len)
 
         self.inter_data_list.append(inter_data)
-
         for seq_idx in range(n_seqs):
             for per_seq_fn in self.per_seq_compute_fns:
                 per_seq_fn(inter_data, seq_idx, seq_group_metadata)

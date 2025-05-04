@@ -221,8 +221,6 @@ class SchedulerRunningOutputs:
     # The blocks to copy.
     blocks_to_copy: List[Tuple[int, int]]
     
-    # The blocks to drop 
-    blocks_to_drop: List[int]
     # The number of slots for lookahead decoding.
     num_lookahead_slots: int
 
@@ -240,7 +238,6 @@ class SchedulerRunningOutputs:
             paused=[],
             blocks_to_swap_out=[],
             blocks_to_copy=[],
-            blocks_to_drop=[],
             num_lookahead_slots=0,
             decode_seq_groups_list=[],
             prefill_seq_groups_list=[],
@@ -317,6 +314,7 @@ def scheduler_running_outputs_builder():
                                    prefill_seq_groups=[],
                                    preempted=[],
                                    swapped_out=[],
+                                   paused=[],
                                    blocks_to_swap_out=[],
                                    blocks_to_copy=[],
                                    num_lookahead_slots=0,
@@ -383,9 +381,10 @@ class Scheduler:
         # Sequence groups in the SWAPPED state.
         # Contain decode requests that are swapped out.
         self.swapped: Deque[SequenceGroup] = deque()
-        # Sequence groups in the PAUSED state.
         # Contain decode requests that are paused.
         self.paused: Deque[SequenceGroup] = deque()
+        # Contain decode requests that are paused due to preemptions. 
+        self.paused_cpu: Deque[SequenceGroup] = deque()
         # deposit_map: request_id -> available output tokens
         self.deposit_map: Dict[str, int] = {}
         
@@ -594,7 +593,6 @@ class Scheduler:
         # Blocks that need to be swapped or copied before model execution.
         blocks_to_swap_out: List[Tuple[int, int]] = ret.blocks_to_swap_out
         blocks_to_copy: List[Tuple[int, int]] = ret.blocks_to_copy
-        blocks_to_drop: List[int] = ret.blocks_to_drop 
         decode_seq_groups: List[ScheduledSequenceGroup] = ret.decode_seq_groups
         prefill_seq_groups: List[
             ScheduledSequenceGroup] = ret.prefill_seq_groups
@@ -649,7 +647,6 @@ class Scheduler:
             # TODO(xinyue): for flattened kv, we treated preemption as a special form of pausing 
             # where the gpu blocks are dropped immediately 
             while not self._can_append_slots(seq_group, enable_chunking): 
-                logger.info(f"num_running_tokens: {num_running_tokens}, num_cached_tokens: {num_cached_tokens}")
                 budget.subtract_num_batched_tokens(seq_group.request_id,
                                                    num_running_tokens)
                 
@@ -696,6 +693,7 @@ class Scheduler:
                         preempted.append(victim_seq_group)
                     elif preempted_mode == PreemptionMode.PAUSE:
                         paused.append(victim_seq_group)
+                        self.paused_cpu.append(victim_seq_group)
                     else:
                         swapped_out.append(victim_seq_group)
 
@@ -732,21 +730,12 @@ class Scheduler:
         # NOTE(HONG): pause
         # if not self.paused and self.running and len(self.running) > 1:
         if self.running and len(self.running) > 1: # whats the purpose of this check
-            if paused: 
-                # PAUSED is preemption by pause, gpu blocks needs to be dropped immediately 
-                for seq_group in paused: # should be only one
-                    for seq in seq_group.seqs: 
-                        seq_id = seq.seq_id
-                        seq_layers_to_drop = {seq_id:list(range(self.block_manager.num_attention_layers))}
-                        freed_gpu_blocks = self.block_manager.free_seq_by_layers(seq_layers_to_drop)
-                        logger.info(f"Preemption by PAUSE: request {seq_group.request_id}, freed {freed_gpu_blocks} ")
             candidates = [
                 g for g in self.running 
                 if self.deposit_map.get(g.request_id, 0) > 0
                 and any(seq.status == SequenceStatus.RUNNING for seq in g.get_seqs())
             ]
             candidates.extend(paused) 
-            logger.info(f"PAUSE candidates: {candidates}")
             if candidates: 
                 # candidates[1].get_seqs()[0].get_output_len()
                 pause_victim = max(candidates, key=lambda g: g.get_seqs()[0].get_output_len())
@@ -868,6 +857,130 @@ class Scheduler:
             budget.add_num_seqs(seq_group.request_id, num_new_seqs)
 
         swapped_queue.extendleft(leftover_swapped)
+
+        return SchedulerSwappedInOutputs(
+            decode_seq_groups=decode_seq_groups,
+            prefill_seq_groups=prefill_seq_groups,
+            blocks_to_swap_in=blocks_to_swap_in,
+            blocks_to_copy=blocks_to_copy,
+            num_lookahead_slots=self._get_num_lookahead_slots(
+                is_prefill=False, enable_chunking=enable_chunking),
+            infeasible_seq_groups=infeasible_seq_groups,
+        )
+
+    def _schedule_paused(
+        self,
+        budget: SchedulingBudget,
+        curr_loras: Optional[Set[int]],
+        enable_chunking: bool = False,
+    ) -> SchedulerSwappedInOutputs: # reuse this for now
+        """Schedule sequence groups that are paused due to preemption. Sequence groups 
+        that are proactively paused are not scheduld here, but resumed in _schedule_running. 
+
+        paused requests are treated like swaped out requests for budget computation. 
+        It schedules swapped requests as long as it fits `budget` and
+        curr_loras <= max_lora from the scheduling config. The input arguments
+        `budget` and `curr_loras` are updated based on scheduled seq_groups.
+
+        Args:
+            budget: The scheduling budget. The argument is in-place updated
+                when any requests are swapped in.
+            curr_loras: Currently batched lora request ids. The argument is
+                in-place updated when any requests are swapped in.
+            enable_chunking: If True, seq group can be chunked and only a
+                chunked number of tokens are scheduled  if
+                `budget.num_batched_tokens` has not enough capacity to schedule
+                all tokens.
+
+        Returns:
+            SchedulerSwappedInOutputs.
+        """
+        # Blocks that need to be swapped or copied before model execution.
+        blocks_to_swap_in: List[Tuple[int, int]] = []
+        blocks_to_copy: List[Tuple[int, int]] = []
+        decode_seq_groups: List[ScheduledSequenceGroup] = []
+        prefill_seq_groups: List[ScheduledSequenceGroup] = []
+        infeasible_seq_groups: List[SequenceGroup] = []
+
+        paused_queue = self.paused_cpu # HERE! 
+
+        leftover_swapped: Deque[SequenceGroup] = deque()
+        total_touched_blocks = 0
+        while paused_queue:
+            seq_group = paused_queue[0]
+            # If the sequence group cannot be swapped in, stop.
+            is_prefill = seq_group.is_prefill()
+            touched_blocks, alloc_status = self.block_manager.can_resume(
+                seq_group,
+                self._get_num_lookahead_slots(is_prefill, enable_chunking),
+                num_blocks_touched=total_touched_blocks)
+            if alloc_status == AllocStatus.LATER:
+                break
+            elif alloc_status == AllocStatus.NEVER:
+                logger.warning(
+                    "Failing the request %s because there's not enough kv "
+                    "cache blocks to run the entire sequence.",
+                    seq_group.request_id)
+                for seq in seq_group.get_seqs():
+                    seq.status = SequenceStatus.FINISHED_IGNORED
+                infeasible_seq_groups.append(seq_group)
+                paused_queue.popleft()
+                continue
+            else: 
+                total_touched_blocks += touched_blocks
+            lora_int_id = 0
+            if self.lora_enabled:
+                lora_int_id = seq_group.lora_int_id
+                assert curr_loras is not None
+                assert self.lora_config is not None
+                if (lora_int_id > 0 and (lora_int_id not in curr_loras)
+                        and len(curr_loras) >= self.lora_config.max_loras):
+                    # We don't have a space for another LoRA, so
+                    # we ignore this request for now.
+                    leftover_swapped.appendleft(seq_group)
+                    paused_queue.popleft()
+                    continue
+
+            # The total number of sequences in the RUNNING state should not
+            # exceed the maximum number of sequences.
+            num_new_seqs = seq_group.get_max_num_running_seqs()
+            num_new_tokens_uncached, num_new_tokens_cached = (
+                self._get_num_new_uncached_and_cached_tokens(
+                    seq_group, SequenceStatus.SWAPPED, enable_chunking,
+                    budget))
+
+            if num_new_tokens_uncached == 0 or not budget.can_schedule(
+                    num_new_tokens=num_new_tokens_uncached,
+                    num_new_seqs=num_new_seqs,
+            ):
+                break
+
+            if lora_int_id > 0 and curr_loras is not None:
+                curr_loras.add(lora_int_id)
+            paused_queue.popleft()
+            
+            self._reuse(seq_group)
+            self._append_slots(seq_group, [], enable_chunking)
+            logger.info(f"RESUME: {seq_group}")
+            is_prefill = seq_group.is_prefill()
+            if is_prefill:
+                prefill_seq_groups.append(
+                    ScheduledSequenceGroup(
+                        seq_group,
+                        token_chunk_size=num_new_tokens_uncached +
+                        num_new_tokens_cached,
+                    ))
+            else:
+                decode_seq_groups.append(
+                    ScheduledSequenceGroup(seq_group, token_chunk_size=1))
+            budget.add_num_batched_tokens(
+                seq_group.request_id,
+                num_batched_tokens=num_new_tokens_uncached,
+                num_cached_tokens=num_new_tokens_cached,
+            )
+            budget.add_num_seqs(seq_group.request_id, num_new_seqs)
+
+        paused_queue.extendleft(leftover_swapped)
 
         return SchedulerSwappedInOutputs(
             decode_seq_groups=decode_seq_groups,
@@ -1173,10 +1286,17 @@ class Scheduler:
 
             # If any sequence group is preempted, do not swap in any sequence
             # group. because it means there's no slot for new running requests.
-            if len(running_scheduled.preempted) + len(
+            cond1 = len(running_scheduled.preempted) + len(
                     running_scheduled.swapped_out) + len(
-                running_scheduled.paused)== 0:
-                swapped_in = self._schedule_swapped(budget, curr_loras)
+                    running_scheduled.paused) == 0
+            # if there are no scheduled requests, we can swap in 
+            cond2 = len(running_scheduled.decode_seq_groups) + len(running_scheduled.decode_seq_groups) == 0
+            if cond1 or cond2: 
+                swapped_in = self._schedule_paused(budget, curr_loras)
+                # prioritize swapped requests over preempted requests. 
+                # TODO resume and swap in cannot happend at the same time
+                if len(swapped_in.decode_seq_groups) == 0 and len(swapped_in.prefill_seq_groups) == 0:
+                    swapped_in = self._schedule_swapped(budget, curr_loras)
 
         assert (budget.num_batched_tokens <=
                 self.scheduler_config.max_num_batched_tokens)
@@ -1645,20 +1765,22 @@ class Scheduler:
             preemption_mode = PreemptionMode.PAUSE
         else:
             preemption_mode = PreemptionMode.RECOMPUTE
-
-        logger.warning(
-            "Sequence group %s is preempted by %s mode because there is "
-            "not enough KV cache space. This can affect the end-to-end "
-            "performance. Increase gpu_memory_utilization or "
-            "tensor_parallel_size to provide more KV cache memory. "
-            "total_num_cumulative_preemption=%d", seq_group.request_id,
-            preemption_mode, self.num_cumulative_preemption + 1)
+        if self.num_cumulative_preemption % 20 ==0: 
+            logger.warning(
+                "Sequence group %s is preempted by %s mode because there is "
+                "not enough KV cache space. This can affect the end-to-end "
+                "performance. Increase gpu_memory_utilization or "
+                "tensor_parallel_size to provide more KV cache memory. "
+                "total_num_cumulative_preemption=%d", seq_group.request_id,
+                preemption_mode, self.num_cumulative_preemption + 1)
         self.num_cumulative_preemption += 1
 
         if preemption_mode == PreemptionMode.RECOMPUTE:
             self._preempt_by_recompute(seq_group)
         elif preemption_mode == PreemptionMode.SWAP:
             self._preempt_by_swap(seq_group, blocks_to_swap_out)
+        elif preemption_mode == PreemptionMode.PAUSE:
+            self._preempt_by_pause(seq_group)
         else:
             raise AssertionError("Invalid preemption mode.")
         return preemption_mode
@@ -1681,18 +1803,17 @@ class Scheduler:
     ) -> None:
         self._swap_out(seq_group, blocks_to_swap_out)
 
-    def _preempt_by_drop(
+    def _preempt_by_pause(
         self,
         seq_group: SequenceGroup,
-        blocks_to_drop:  List[Tuple[int, int]],
-    ) -> None:
+    ) -> List[int]:
         for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
             seq.status = SequenceStatus.SWAPPED
-        gpu_bids = self.block_manager.free_gpu(seq_group) 
-        cpu_bids = [-1]*len(gpu_bids) 
-        # to reuse blocks_to_swap_out 
-        blocks_to_drop.extend([(gpu_bid, cpu_bid) for gpu_bid, cpu_bid in zip(gpu_bids, cpu_bids)])
-        
+        seq_id = seq.seq_id
+        seq_layers_to_drop = {seq_id:list(range(self.block_manager.num_attention_layers))}
+        freed_gpu_blocks = self.block_manager.free_seq_by_layer(seq_layers_to_drop)
+        logger.info(f"Preemption by PAUSE: request {seq_group.request_id}, freed {freed_gpu_blocks} ")
+        return freed_gpu_blocks
     def _swap_in(
         self,
         seq_group: SequenceGroup,
@@ -1700,6 +1821,12 @@ class Scheduler:
     ) -> None:
         mapping = self.block_manager.swap_in(seq_group)
         blocks_to_swap_in.extend(mapping)
+        for seq in seq_group.get_seqs(status=SequenceStatus.SWAPPED):
+            seq.status = SequenceStatus.RUNNING
+    def _reuse(self,
+        seq_group: SequenceGroup
+    ):
+        # only used for requests paused by preemption
         for seq in seq_group.get_seqs(status=SequenceStatus.SWAPPED):
             seq.status = SequenceStatus.RUNNING
 

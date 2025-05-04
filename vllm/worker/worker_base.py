@@ -385,7 +385,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             if self.kv_cache is not None else None,
             kv_caches_cpu=self.kv_cache_cpu[worker_input.virtual_engine]
             if self.kv_cache_cpu is not None else None,
-            gpu_cpu_cache_map=self.cache_engine[worker_input.virtual_engine].gpu_cpu_cache_map,
+            gpu_cpu_cache_map=self.cache_engine[worker_input.virtual_engine].active_gpu_cpu_cache_map,
             intermediate_tensors=intermediate_tensors,
             num_steps=num_steps,
             **kwargs,
