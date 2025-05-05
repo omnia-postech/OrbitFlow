@@ -1876,6 +1876,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             self.pause_resume_cache_update()
 
         snap = self._snapshot_and_log(configure_paused=False, seq_group_metadata=seq_group_metadata) # FIXME (xinyue) do we need configure_paused true? 
+        # HONG: do not change mapping while using below two functions
         dist_dict, meta = self._select_prefetch_distance(snap,
                                                         self.prefetch_distance)
         plan = self._plan_cache_delta(snap, dist_dict)

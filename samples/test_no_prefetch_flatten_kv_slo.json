@@ -1,0 +1,12 @@
+{
+    "arrival_pattern":{"type":"DiscretePoissonArrival","params":{"lambda_per_step":0.01,"max_steps":4000}},
+    "batch_size":2,
+    "request_type_probs":[["Legal Contract Analysis",1.0]],
+    "num_gpu_blocks_override":100,
+    "vocab":[200,30000],
+    "requests":{
+      "request_0":{"category":"Legal Contract Analysis","input_length":5,"output_length":5,"arrival_time":0,"sched_time":0,"wait_time":0},
+      "request_1":{"category":"Legal Contract Analysis","input_length":7,"output_length":10,"arrival_time":1,"sched_time":1,"wait_time":0}
+    }
+}
+  

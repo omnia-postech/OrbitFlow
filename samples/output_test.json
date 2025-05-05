@@ -1,0 +1,27 @@
+{
+  "arrival_pattern": {
+    "type": "DiscretePoissonArrival",
+    "params": {
+      "lambda_per_step": 0.01,
+      "max_steps": 4000
+    }
+  },
+  "batch_size": 2,
+  "num_gpu_blocks_override": 100,
+  "request_type_probs": [
+    ["Creative Generation", 0.4],
+    ["Proofreading", 0.6]
+  ],
+  "vocab": [200, 30000],
+  "requests": {
+    "request_0": {
+      "category": "Proofreading",
+      "input_length": 6,
+      "output_length": 10,
+      "arrival_time": 0,
+      "sched_time": 0,
+      "wait_time": 0,
+      "input_text": "The company has since rapidly grown"
+    }
+  }
+}
