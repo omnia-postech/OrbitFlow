@@ -247,16 +247,88 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         assert not self.is_driver_worker
         broadcast_data = broadcast_tensor_dict(src=0)
         if not broadcast_data:
+            logger.info("[worker] received empty broadcast data")
             return None
-
+        
+        logger.info(f"[worker][broadcast_data keys] {list(broadcast_data.keys())}")
         worker_input = WorkerInput.from_broadcasted_tensor_dict(broadcast_data)
+    
+        pause_layers = broadcast_data.pop('pause_layers')
+        resume_layers = broadcast_data.pop('resume_layers')
+        cache_plan = broadcast_data.pop('cache_plan')
+        dist_dict = broadcast_data.pop('dist_dict')
+        sid2row = broadcast_data.pop('sid2row')
+        bm = broadcast_data.pop('bm')
+        cached_all_token_ids  = broadcast_data.pop('cached_all_token_ids')
+
+        logger.info(f"[worker][pause_layers ] {pause_layers}")
+        logger.info(f"[worker][resume_layers] {resume_layers}")
+        logger.info(f"[worker][cache_plan   ] dealloc={cache_plan.dealloc_layers}, alloc={cache_plan.alloc_layers}, resize={cache_plan.prefetch_resize}")
+        logger.info(f"[worker][dist_dict    ] {dist_dict}")
+        logger.info(f"[worker][sid2row      ] {sid2row}")
+        logger.info(f"[worker][bm           ] {bm}")
+        logger.info(f"[worker][cached_ids   ] {cached_all_token_ids['mappings'].keys()} -> token count {len(cached_all_token_ids['token_ids'])}")
+
         model_input = (
             self.model_runner.make_model_input_from_broadcasted_tensor_dict(
                 broadcast_data))
 
         kwargs = extract_previous_hidden_states(broadcast_data)
 
-        return model_input, worker_input, kwargs
+        cache_engine = self.cache_engine[worker_input.virtual_engine]
+
+        logger.info(f"[worker] registering block_manager to cache_engine#{worker_input.virtual_engine}")
+        cache_engine.register_bm(bm)
+
+        if cache_engine.pause_and_resume:
+            if pause_layers or resume_layers:
+                logger.info(f"[worker] executing pause/resume on engine#{worker_input.virtual_engine}")
+                cache_engine.execute_pause_resume(
+                    pause_layers, resume_layers
+                )
+
+        if cache_plan.dealloc_layers or cache_plan.alloc_layers or cache_plan.prefetch_resize:
+            logger.info(f"[worker] executing cache_plan on engine#{worker_input.virtual_engine}")
+            cache_engine.execute_cache_plan(cache_plan, model_input.attn_metadata, sid2row)
+        
+        return model_input, worker_input, kwargs, cached_all_token_ids
+
+    def prepare_cache_plan(
+        self,
+        cache_engine,
+        attn_meta,
+        seq_group_metadata,
+        finished_requests,
+        paused_cpu_seq_groups
+    ):  # called only on driver
+        # 1. update mapping
+        cache_engine.update_mapping(attn_meta, seq_group_metadata,
+                                    finished_requests, paused_cpu_seq_groups)
+        # 2. build pause/resume plan
+        if cache_engine.pause_and_resume:
+            pause_plan, resume_plan = cache_engine.build_pause_resume_plan()
+        else:
+            pause_plan = resume_plan = None
+        # 3. build cache plan
+        cache_plan, dist = cache_engine.build_cache_plan(seq_group_metadata)
+        # pack into broadcastable structure
+        plan_data = {
+            'pause_layers': pause_plan,
+            'resume_layers': resume_plan,
+            'cache_plan': cache_plan,
+            'dist_dict': dist,
+            'sid2row': cache_engine.mapping.sid2row,
+        }
+        if cache_plan.dealloc_layers or cache_plan.alloc_layers or cache_plan.prefetch_resize:
+            cache_engine._execute_plan(cache_plan, seq_group_metadata, attn_meta)
+            cache_engine.mapping.prev_dist_dict = dist
+
+        cache_engine._sync_active_gpu_cpu_map(cache_engine.mapping.seq_row_order)
+
+        bm = cache_engine._get_bm()
+        plan_data['bm'] = bm
+
+        return plan_data
 
     def _get_driver_input_and_broadcast(
         self, execute_model_req: ExecuteModelRequest
@@ -274,10 +346,45 @@ class LocalOrDistributedWorkerBase(WorkerBase):
 
         kwargs = extract_previous_hidden_states(execute_model_req)
 
+        req_ids = [seq_group_metadata.request_id for seq_group_metadata in execute_model_req.seq_group_metadata_list]
+        req_to_seq_ids = model_input.request_ids_to_seq_ids
+        
+        cached_all_token_ids = []
+        cached_all_position_ids = []
+        req_to_seq_mapping = {}
+        for i, request_id in enumerate(req_ids):
+            seq_ids = req_to_seq_ids[request_id]
+            for seq_id in seq_ids:
+                st = len(cached_all_token_ids)
+                token_ids = execute_model_req.seq_group_metadata_list[i].seq_data[seq_id]._cached_all_token_ids
+                cached_all_token_ids.extend(token_ids)
+                cached_all_position_ids.extend(range(len(token_ids)))
+                en = len(cached_all_token_ids)
+                req_to_seq_mapping[(request_id, seq_id)] = (st, en)
+        cached_all_token_ids = {'token_ids': cached_all_token_ids,'positions':torch.tensor(cached_all_position_ids), 'mappings': req_to_seq_mapping}
+        
+        step = 500
+        if cached_all_token_ids is not None and len(cached_all_token_ids['token_ids']) % step == 0:
+            msg = (f"cached_all_token_ids: {len(cached_all_token_ids['token_ids'])}")
+            logger.info(msg)
+        if len(execute_model_req.paused_cpu_seq_groups) > 0:
+            logger.info(f"paused_cpu_seq_groups: {execute_model_req.paused_cpu_seq_groups}")
+        
+        # build & broadcast plans
+        plan_data = self.prepare_cache_plan(
+            self.cache_engine[worker_input.virtual_engine],            
+            model_input.attn_metadata,
+            execute_model_req.seq_group_metadata_list,
+            execute_model_req.finished_requests_ids,
+            execute_model_req.paused_cpu_seq_groups
+        )
+
         if self.do_metadata_broadcast:
             broadcast_data = worker_input.as_broadcastable_tensor_dict()
             broadcast_data.update(model_input.as_broadcastable_tensor_dict())
             broadcast_data.update(kwargs)
+            broadcast_data.update(plan_data)
+            broadcast_data['cached_all_token_ids'] = cached_all_token_ids
             broadcast_tensor_dict(broadcast_data, src=0)
 
         if execute_model_req.async_callback:
@@ -285,7 +392,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                 model_input,
                 async_callback=execute_model_req.async_callback)
 
-        return model_input, worker_input, kwargs
+        return model_input, worker_input, kwargs, cached_all_token_ids
 
     def prepare_input(
         self,
@@ -322,7 +429,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         if inputs is None:
             return None
 
-        model_input, worker_input, kwargs = inputs
+        model_input, worker_input, kwargs, cached_all_token_ids = inputs
         num_steps = worker_input.num_steps
 
         self.execute_worker(worker_input)
@@ -341,42 +448,15 @@ class LocalOrDistributedWorkerBase(WorkerBase):
                     and self.observability_config.collect_model_execute_time):
                 orig_model_execute_time = intermediate_tensors.tensors.get(
                     "model_execute_time", torch.tensor(0)).item()
-        # attn_meta = model_input.attn_metadata
-        # num_prefills = attn_meta.num_prefills 
-        
-        req_ids = [seq_group_metadata.request_id for seq_group_metadata in execute_model_req.seq_group_metadata_list]
-        req_to_seq_ids = model_input.request_ids_to_seq_ids
-        
-        cached_all_token_ids = []
-        cached_all_position_ids = []
-        req_to_seq_mapping = {}
-        for i, request_id in enumerate(req_ids):
-            seq_ids = req_to_seq_ids[request_id]
-            for seq_id in seq_ids:
-                st = len(cached_all_token_ids)
-                token_ids = execute_model_req.seq_group_metadata_list[i].seq_data[seq_id]._cached_all_token_ids
-                cached_all_token_ids.extend(token_ids)
-                cached_all_position_ids.extend(range(len(token_ids)))
-                en = len(cached_all_token_ids)
-                req_to_seq_mapping[(request_id, seq_id)] = (st, en)
-        cached_all_token_ids = {'token_ids': cached_all_token_ids,'positions':torch.tensor(cached_all_position_ids), 'mappings': req_to_seq_mapping}
-        
-        step = 500
-        if cached_all_token_ids is not None and len(cached_all_token_ids['token_ids']) % step == 0:
-            msg = (f"cached_all_token_ids: {len(cached_all_token_ids['token_ids'])}")
-            logger.info(msg)
             
         """ 
             kv_caches layout: [|<-        32 GPU layers        ->|<-next offloaded layer->|]
             For each offloaded layer i, kv_caches[i] is assigned to None. 
             The next offloaded layer is always stored at kv_caches[-1], if prefetch is not done yet, it is None. 
         """
-        paused_cpu_seq_groups = execute_model_req.paused_cpu_seq_groups
-        if len(paused_cpu_seq_groups) > 0:
-            logger.info(f"paused_cpu_seq_groups: {paused_cpu_seq_groups}")
-            
-        self.cache_config = self.cache_engine[worker_input.virtual_engine].may_resize_gpu_cache(cached_tokens=cached_all_token_ids, attn_meta=model_input.attn_metadata, seq_group_metadata=execute_model_req.seq_group_metadata_list, finished_requests = execute_model_req.finished_requests_ids, paused_cpu_seq_groups=paused_cpu_seq_groups)
         
+        # self.cache_config = self.cache_engine[worker_input.virtual_engine].may_resize_gpu_cache(cached_all_position_ids, attn_metadata=model_input.attn_metadata), seq_group_metadata_list=execute_model_req.seq_group_metadata_list, finished_requests_ids=execute_model_req.finished_requests_ids, paused_cpu_seq_groups=execute_model_req.paused_cpu_seq_groups)
+
         kv_caches=self.kv_cache[worker_input.virtual_engine] if self.kv_cache is not None else None,
         kv_caches_cpu=self.kv_cache_cpu[worker_input.virtual_engine] if self.kv_cache_cpu is not None else None,
         output = self.model_runner.execute_model(
@@ -495,6 +575,11 @@ class WorkerWrapperBase:
             self.vllm_config.parallel_config.worker_cls)
         self.worker = worker_class(*args, **kwargs)
         assert self.worker is not None
+
+        # from vllm.llm_engine import LLMEngine
+        # engine = LLMEngine._instance  
+        # for v_id in range(engine.parallel_config.pipeline_parallel_size):
+        #     self.worker.cache_engine[v_id].register_bm(engine.scheduler[v_id].block_manager)
 
     def execute_method(self, method: str, *args, **kwargs):
         try:

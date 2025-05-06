@@ -1,0 +1,20 @@
+{
+  "arrival_pattern": {
+    "type": "DiscretePoissonArrival",
+    "params": {
+      "lambda_per_step": 0.01,
+      "max_steps": 4000
+    }
+  },
+  "batch_size": 2,
+  "request_type_probs": [
+    ["ChatBot Q&A", 0.7],
+    ["Creative Generation", 0.3]
+  ],
+  "num_gpu_blocks_override": 1000,
+  "vocab": [200, 30000],
+  "requests": {
+    "request_0":  {"category":"ChatBot Q&A","input_length":7,"output_length":3,"arrival_time":0,"sched_time":0,"wait_time":0, "token_ids":[128000, 791, 2883, 706, 2533, 19019, 15042]},
+    "request_1":  {"category":"ChatBot Q&A","input_length":7,"output_length":3,"arrival_time":0,"sched_time":0,"wait_time":0, "token_ids":[128000, 791, 2883, 706, 2533, 19019, 15042]}
+  }
+}

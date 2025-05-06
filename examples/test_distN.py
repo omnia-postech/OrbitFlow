@@ -489,7 +489,8 @@ def main(configs):
     args = EngineArgs(
         model=MODEL,
         max_model_len=max_model_len,
-        tensor_parallel_size=1,
+        tensor_parallel_size=2,
+        pipeline_parallel_size = 1,
         max_num_seqs=batch_size,  # Updated batch size for serving
         max_num_batched_tokens=max_model_len,
         disable_log_stats=True,

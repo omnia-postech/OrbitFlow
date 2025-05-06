@@ -13,7 +13,7 @@
         "class": "logging.FileHandler",
         "formatter": "vllm",
         "level": "INFO",
-        "filename": "../outputs/baseline_vllm/vllm_msg.log"
+        "filename": "../outputs/TP_no_offload/vllm_msg.log"
       }
     },
     "loggers": {

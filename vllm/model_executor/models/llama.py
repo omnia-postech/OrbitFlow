@@ -855,7 +855,7 @@ class LlamaModel(nn.Module):
                                 cpu_offset=attn_metadata.cpu_offset, 
                                 prefetch_offset=attn_metadata.cpu_offset
                             )                       
-                            logger.debug(f"[Layer {layer_num}][Init Prefetch for Layer{tgt_layer} (seq{seqs_to_prefetch})] old slot_mapping {layer_metas[tgt_layer].slot_mapping}")
+                            logger.info(f"[Layer {layer_num}][Init Prefetch for Layer{tgt_layer} (seq{seqs_to_prefetch})] old slot_mapping {layer_metas[tgt_layer].slot_mapping}")
                             slot_mapping = layer_metas[tgt_layer].slot_mapping
                             _seqs = list(seqs_to_prefetch)
                             rows = torch.tensor(
