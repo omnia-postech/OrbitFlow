@@ -202,7 +202,6 @@ class EngineArgs:
     prefetch_mode: Optional[str] = None
     prefetch_distance: Optional[int] = None
     is_monolithic_distn: bool = False
-    is_selectn:bool = False
     flattened_cache: bool = False
     merge_prefetch_buffer: bool = True
     pause_and_resume: bool = False
@@ -1078,7 +1077,6 @@ class EngineArgs:
             enable_prefix_caching=self.enable_prefix_caching,
             cpu_offload_gb=self.cpu_offload_gb,
             is_monolithic_distn=self.is_monolithic_distn,
-            is_selectn=self.is_selectn,
             prefetch_mode=self.prefetch_mode,
             prefetch_distance=self.prefetch_distance,
             flattened_cache=self.flattened_cache,   

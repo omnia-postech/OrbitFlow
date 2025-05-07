@@ -990,7 +990,6 @@ class CacheConfig:
         
         # dist-n configs
         is_monolithic_distn: bool = False,
-        is_selectn: bool = False,
         prefetch_mode: str = "none",
         prefetch_distance: Optional[int] = None,
         merge_prefetch_buffer: bool = True,
@@ -1009,7 +1008,6 @@ class CacheConfig:
         self.cpu_offload_gb = cpu_offload_gb
         # dist-n configs 
         self.is_monolithic_distn = is_monolithic_distn
-        self.is_selectn = is_selectn
         self.prefetch_mode = prefetch_mode
         self.prefetch_distance = prefetch_distance
         self.flattened_cache = flattened_cache 

@@ -21,6 +21,7 @@ from typing import Sequence, Literal
 PREFETCH_GROW_STEP = 100          # <-- set once, reuse everywhere
 import json 
 import copy
+import math
 from itertools import chain
 
 
@@ -54,7 +55,6 @@ class CacheEngine(CacheEngineBase):
         self.cpu_cache = self._allocate_kv_cache_cpu(self.num_cpu_blocks, "cpu")
         
         self.is_monolithic_distn = cache_config.is_monolithic_distn
-        self.is_selectn = cache_config.is_selectn
         self.prefetch_mode = cache_config.prefetch_mode
         self.prefetch_distance = cache_config.prefetch_distance 
         
@@ -623,7 +623,6 @@ class FlattenedCacheEngine(CacheEngineBase):
         # self.cpu_cache_num, self.gpu_cache_num = self.determine_cache_num_with_map(self.gpu_cpu_cache_map)
         self.is_monolithic_distn = cache_config.is_monolithic_distn
         self.prefetch_mode = cache_config.prefetch_mode
-        self.is_selectn = cache_config.is_selectn
         self.prefetch_distance = cache_config.prefetch_distance 
         self.merge_prefetch_buffer = cache_config.merge_prefetch_buffer     
         self.pause_and_resume = cache_config.pause_and_resume
@@ -1109,10 +1108,54 @@ class FlattenedCacheEngine(CacheEngineBase):
         logger.info("KV-snapshot: seqs=%d gpu_free=%d",
                     len(candidates), snap.free_gpu_blocks)
         return snap
+    
+    def _compute_comm_time_per_block(self) -> float:
+        """
+        한 블록(block) 전송에 걸리는 시간(초).
+        - bandwidth: 25.19 GB/s
+        - per-token KV size = 2 (key+value) × 2 bytes (fp16) × head_size × num_kv_heads
+        - tokens per block  = self.block_size
+        """
+        bandwidth = 25.19 * 1024**3  # B/s
+        per_token_bytes = 2 * 2 * self.block_manager.head_size * self.block_manager.num_kv_heads
+        block_bytes      = per_token_bytes * self.block_size
+        return block_bytes / bandwidth
+
+    def compute_comm_time_for_requests(self, seq_group_metadata: List) -> float:
+        """
+        현재 스냅샷에 있는 모든 요청들의 KV 블록 전송 시간을 합산하여 반환.
+
+        Args:
+          seq_group_metadata: List of SequenceGroupMetadata,
+            각 객체에 .token_chunk_size(처리할 토큰 수) 필드가 있다고 가정.
+
+        Returns:
+          전체 통신 시간(초)
+        """
+        # 블록당 전송 시간
+        t_per_block = self._compute_comm_time_per_block()
+
+        # 각 요청별 블록 수 계산
+        total_blocks = 0
+        for group in seq_group_metadata:
+            # 토큰 수를 block_size로 나누고 올림
+            blocks = math.ceil(group.token_chunk_size / self.block_size)
+            total_blocks += blocks
+
+        # 전체 통신 시간
+        return total_blocks * t_per_block
+
+    def prefetch_distance_for_seletcn(self):
+        return None
+
     def _select_prefetch_distance(self, snapshot, prefetch_distance):
         if self.prefetch_mode == "none":
             dist = [-1] * len(snapshot.candidates) 
         elif self.prefetch_mode  == "static":
+            dist = [prefetch_distance] * len(snapshot.candidates)
+        elif self.prefetch_mode == "selectn":
+            place = self.prefetch_distance_for_seletcn()
+            communication = self.compute_comm_time_for_requests(snapshot.seq_group_metadata)
             dist = [prefetch_distance] * len(snapshot.candidates)
         elif self.prefetch_mode == "static_req_wise": 
             dist = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10][:len(snapshot.candidates)] # FIXME Xinyue hard code

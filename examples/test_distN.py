@@ -485,7 +485,6 @@ def main(configs):
     print(f"num_gpu_blocks_override: {num_gpu_blocks_override}")
     print(f"merge_prefetch_buffer: {merge_prefetch_buffer}")
     print(f"pause_and_resume: {pause_and_resume}")
-    print(f"is_seletn: {configs.is_selectn}")
     
     args = EngineArgs(
         model=MODEL,
@@ -500,7 +499,6 @@ def main(configs):
         num_gpu_blocks_override=num_gpu_blocks_override*32 if flattened_cache else num_gpu_blocks_override,
         preemption_mode="pause",
         is_monolithic_distn=is_monolithic_distn,
-        is_selectn=configs.is_selectn,
         prefetch_mode = prefetch_mode,
         prefetch_distance = prefetch_distance,
         enable_chunked_prefill=False,
@@ -528,7 +526,7 @@ if __name__ == "__main__":
     parser.add_argument("--prefetch-mode",
                         type=str,
                         default="none",
-                        help="prefetch method: none, static, distn, static_req_wise")
+                        help="prefetch method: none, static, distn, static_req_wise, selectn")
     parser.add_argument("--is-monolithic-distn",
                         type=bool,
                         default=True,
@@ -553,10 +551,6 @@ if __name__ == "__main__":
                         action="store_true",
                         default=False,
                         help="whether to use pause and resume")
-    parser.add_argument("--is-selectn",
-                        type=bool,
-                        default=False,
-                        help="baseline run for selectn")
     args = parser.parse_args()    
     print(args)
     # --- Setup Logging ---

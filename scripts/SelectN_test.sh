@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 export VLLM_CONFIGURE_LOGGING=1
 
 EXP="SelectN" # <---- Change this to the experiment name 
@@ -31,11 +31,10 @@ for T in "${CFG_LIST[@]}"; do
 
     python ../examples/test_distN.py \
         --config_file="${CFG_DIR}/${T}.json" \
-        --prefetch_mode=static \
-        --prefetch_distance=2 \
+        --prefetch_mode=selectn \
+        --prefetch_distance=1 \
         --flattened_cache=true \
         --merge-prefetch-buffer=true \
         --pause-and-resume=false \
-        --is-selectn=true \
         --output_log=../outputs/${EXP}/${T}/output.log
 done
