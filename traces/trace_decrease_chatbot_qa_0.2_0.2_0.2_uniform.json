@@ -1,0 +1,30 @@
+{
+  "arrival_pattern":{"type":"DiscreteUniformArrival","params":{"max_step":4000}},
+  "batch_size":4,
+  "max_model_len":10000,
+  "num_gpu_blocks_override":625,
+  "request_type_probs":[["Creative Generation",0.2],["Proofreading",0.2],["Legal Contract Analysis",0.2],["ChatBot Q&A",0.4]],
+  "vocab":[200,30000],
+  "requests":{
+    "request_0":{"category":"Legal Contract Analysis","input_length":5509,"output_length":6829,"arrival_time":0,"sched_time":0,"wait_time":0,"total_length":12338},
+    "request_1":{"category":"Legal Contract Analysis","input_length":7041,"output_length":3733,"arrival_time":0,"sched_time":6830,"wait_time":6830,"total_length":10774},
+    "request_2":{"category":"Legal Contract Analysis","input_length":7374,"output_length":2976,"arrival_time":0,"sched_time":10564,"wait_time":10564,"total_length":10350},
+    "request_3":{"category":"Legal Contract Analysis","input_length":5138,"output_length":4802,"arrival_time":0,"sched_time":13541,"wait_time":13541,"total_length":9940},
+    "request_4":{"category":"Creative Generation","input_length":82,"output_length":9525,"arrival_time":14,"sched_time":13541,"wait_time":13527,"total_length":9607},
+    "request_5":{"category":"Legal Contract Analysis","input_length":2360,"output_length":7032,"arrival_time":145,"sched_time":13541,"wait_time":13396,"total_length":9392},
+    "request_6":{"category":"Creative Generation","input_length":70,"output_length":8608,"arrival_time":810,"sched_time":13541,"wait_time":12731,"total_length":8678},
+    "request_7":{"category":"Creative Generation","input_length":42,"output_length":7951,"arrival_time":885,"sched_time":18344,"wait_time":17459,"total_length":7993},
+    "request_8":{"category":"Creative Generation","input_length":100,"output_length":6976,"arrival_time":910,"sched_time":20574,"wait_time":19664,"total_length":7076},
+    "request_9":{"category":"Creative Generation","input_length":99,"output_length":5724,"arrival_time":1285,"sched_time":22150,"wait_time":20865,"total_length":5823},
+    "request_10":{"category":"Legal Contract Analysis","input_length":2850,"output_length":2408,"arrival_time":1787,"sched_time":23067,"wait_time":21280,"total_length":5258},
+    "request_11":{"category":"Creative Generation","input_length":26,"output_length":3909,"arrival_time":1929,"sched_time":25476,"wait_time":23547,"total_length":3935},
+    "request_12":{"category":"Creative Generation","input_length":29,"output_length":3462,"arrival_time":1969,"sched_time":26296,"wait_time":24327,"total_length":3491},
+    "request_13":{"category":"ChatBot Q&A","input_length":148,"output_length":242,"arrival_time":1984,"sched_time":27551,"wait_time":25567,"total_length":390},
+    "request_14":{"category":"ChatBot Q&A","input_length":65,"output_length":193,"arrival_time":2202,"sched_time":27794,"wait_time":25592,"total_length":258},
+    "request_15":{"category":"ChatBot Q&A","input_length":107,"output_length":126,"arrival_time":2397,"sched_time":27875,"wait_time":25478,"total_length":233},
+    "request_16":{"category":"ChatBot Q&A","input_length":160,"output_length":64,"arrival_time":2525,"sched_time":27988,"wait_time":25463,"total_length":224},
+    "request_17":{"category":"ChatBot Q&A","input_length":149,"output_length":74,"arrival_time":2525,"sched_time":28002,"wait_time":25477,"total_length":223},
+    "request_18":{"category":"ChatBot Q&A","input_length":83,"output_length":45,"arrival_time":2601,"sched_time":28053,"wait_time":25452,"total_length":128},
+    "request_19":{"category":"ChatBot Q&A","input_length":32,"output_length":64,"arrival_time":2648,"sched_time":28077,"wait_time":25429,"total_length":96}
+  }
+}

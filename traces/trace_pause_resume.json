@@ -1,0 +1,18 @@
+{
+  "arrival_pattern":{"type":"DiscreteUniformArrival","params":{"max_step":4000}},
+  "batch_size":4,
+  "max_model_len":30000,
+  "num_gpu_blocks_override":1875,
+  "request_type_probs":[["ChatBot Q&A",0.75],["Creative Generation",0.25]],
+  "vocab":[200,30000],
+  "requests":{
+    "request_0":{"category":"Creative Generation","input_length":54,"output_length":9849,"arrival_time":0,"sched_time":0,"wait_time":0,"total_length":9903},
+    "request_1":{"category":"ChatBot Q&A","input_length":85,"output_length":374,"arrival_time":400,"sched_time":400,"wait_time":0,"total_length":459},
+    "request_2":{"category":"ChatBot Q&A","input_length":44,"output_length":479,"arrival_time":500,"sched_time":500,"wait_time":0,"total_length":523},
+    "request_3":{"category":"ChatBot Q&A","input_length":92,"output_length":495,"arrival_time":550,"sched_time":550,"wait_time":0,"total_length":587},
+    "request_4":{"category":"Creative Generation","input_length":41,"output_length":8997,"arrival_time":1000,"sched_time":1000,"wait_time":0,"total_length":9038},
+    "request_5":{"category":"ChatBot Q&A","input_length":91,"output_length":332,"arrival_time":1450,"sched_time":1450,"wait_time":0,"total_length":423},
+    "request_6":{"category":"ChatBot Q&A","input_length":46,"output_length":374,"arrival_time":1500,"sched_time":1500,"wait_time":0,"total_length":420},
+    "request_7":{"category":"ChatBot Q&A","input_length":56,"output_length":575,"arrival_time":1600,"sched_time":1783,"wait_time":183,"total_length":631}
+  }
+}

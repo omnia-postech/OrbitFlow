@@ -602,8 +602,8 @@ class Scheduler:
         
         # NOTE(HONG): resume
         for seq_group in list(self.paused):
-            if self.deposit_map.get(seq_group.request_id, 0) == 0:
-                logger.info(f"RESUME: request {seq_group.request_id} moved from PAUSED -> RUNNING; "
+            if self.deposit_map.get(seq_group.request_id, 0) == 20: # threshold, hard coded 
+                logger.info(f"RESUME-PROACTIVE: request {seq_group.request_id} moved from PAUSED -> RUNNING; "
                             f"paused_queue_size={len(self.paused)-1}, running_queue_size={len(self.running)+1}")
                 self.paused.remove(seq_group)
                 self.running.append(seq_group)
@@ -732,7 +732,7 @@ class Scheduler:
         if self.running and len(self.running) > 1: # whats the purpose of this check
             candidates = [
                 g for g in self.running 
-                if self.deposit_map.get(g.request_id, 0) > 0
+                if self.deposit_map.get(g.request_id, 0) > 50 # threshold, hard coded
                 and any(seq.status == SequenceStatus.RUNNING for seq in g.get_seqs())
             ]
             candidates.extend(paused) 

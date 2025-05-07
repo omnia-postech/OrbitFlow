@@ -1114,6 +1114,9 @@ class FlattenedCacheEngine(CacheEngineBase):
             dist = [prefetch_distance] * len(snapshot.candidates)
         elif self.prefetch_mode == "static_req_wise": 
             dist = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10][:len(snapshot.candidates)] # FIXME Xinyue hard code
+        elif self.prefetch_mode == "distn_single": 
+            dist = [-1] * len(snapshot.candidates) 
+            # replace with a function here
         else:
             raise ValueError(f"unknown policy {self.prefetch_mode}")
         dist = self._normalise_prefetch_distance(spec=dist, candidates=snapshot.candidates)
