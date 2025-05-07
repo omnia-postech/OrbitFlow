@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=0
 export VLLM_CONFIGURE_LOGGING=1
 export VLLM_LOGGING_CONFIG_PATH=../configs/TP_no_offload.json
 config_file=../samples/TP_test.json

@@ -258,7 +258,8 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         cache_plan = broadcast_data.pop('cache_plan')
         dist_dict = broadcast_data.pop('dist_dict')
         sid2row = broadcast_data.pop('sid2row')
-        bm = broadcast_data.pop('bm')
+        # bm = broadcast_data.pop('bm')
+        new_gpu_blocks = broadcast_data.pop('new_gpu_blocks')
         cached_all_token_ids  = broadcast_data.pop('cached_all_token_ids')
 
         logger.info(f"[worker][pause_layers ] {pause_layers}")
@@ -266,7 +267,8 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         logger.info(f"[worker][cache_plan   ] dealloc={cache_plan.dealloc_layers}, alloc={cache_plan.alloc_layers}, resize={cache_plan.prefetch_resize}")
         logger.info(f"[worker][dist_dict    ] {dist_dict}")
         logger.info(f"[worker][sid2row      ] {sid2row}")
-        logger.info(f"[worker][bm           ] {bm}")
+        # logger.info(f"[worker][bm           ] {bm}")
+        logger.info(f"[worker][new_gpu_blocks] {new_gpu_blocks}")
         logger.info(f"[worker][cached_ids   ] {cached_all_token_ids['mappings'].keys()} -> token count {len(cached_all_token_ids['token_ids'])}")
 
         model_input = (
@@ -277,19 +279,19 @@ class LocalOrDistributedWorkerBase(WorkerBase):
 
         cache_engine = self.cache_engine[worker_input.virtual_engine]
 
-        logger.info(f"[worker] registering block_manager to cache_engine#{worker_input.virtual_engine}")
-        cache_engine.register_bm(bm)
+        # logger.info(f"[worker] registering block_manager to cache_engine#{worker_input.virtual_engine}")
+        # cache_engine.register_bm(bm)
 
         if cache_engine.pause_and_resume:
             if pause_layers or resume_layers:
-                logger.info(f"[worker] executing pause/resume on engine#{worker_input.virtual_engine}")
+                logger.info(f"[worker] executing pause/resume on engine")
                 cache_engine.execute_pause_resume(
                     pause_layers, resume_layers
                 )
 
         if cache_plan.dealloc_layers or cache_plan.alloc_layers or cache_plan.prefetch_resize:
             logger.info(f"[worker] executing cache_plan on engine#{worker_input.virtual_engine}")
-            cache_engine.execute_cache_plan(cache_plan, model_input.attn_metadata, sid2row)
+            cache_engine.execute_cache_plan(cache_plan, model_input.attn_metadata, sid2row, new_gpu_blocks)
         
         return model_input, worker_input, kwargs, cached_all_token_ids
 
@@ -319,14 +321,16 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             'dist_dict': dist,
             'sid2row': cache_engine.mapping.sid2row,
         }
+        new_gpu_blocks = []
         if cache_plan.dealloc_layers or cache_plan.alloc_layers or cache_plan.prefetch_resize:
-            cache_engine._execute_plan(cache_plan, seq_group_metadata, attn_meta)
+            new_gpu_blocks=cache_engine._execute_plan(cache_plan, seq_group_metadata, attn_meta)
             cache_engine.mapping.prev_dist_dict = dist
+        plan_data['new_gpu_blocks'] = new_gpu_blocks
 
         cache_engine._sync_active_gpu_cpu_map(cache_engine.mapping.seq_row_order)
 
-        bm = cache_engine._get_bm()
-        plan_data['bm'] = bm
+        # bm = cache_engine._get_bm()
+        # plan_data['bm'] = bm
 
         return plan_data
 

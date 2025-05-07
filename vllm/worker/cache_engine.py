@@ -801,7 +801,7 @@ class FlattenedCacheEngine(CacheEngineBase):
     # --- Pause/Resume Plan Generation ---
     def build_pause_resume_plan(
         self,
-    ) -> Tuple[Dict[int, List[int]], List[Tuple[int, int, List[int]]]]:
+    ) -> Tuple[Dict[int, List[int]], List[Tuple[int, int, List[int], List[int]]]]:
         """
         Step 2: Build pause and resume layer plans.
         """
@@ -865,7 +865,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             
         logger.info(f"[pause_resume_cache_update] resume_ids: {resume_ids}")
 
-        resume_plan: List[Tuple[int, int, List[int]]] = []
+        resume_plan: List[Tuple[int, int, List[int], List[int]]] = []
 
         for seq_id in resume_ids:
             layers_to_restore = self._paused_layers_freed.pop(seq_id)
@@ -878,9 +878,9 @@ class FlattenedCacheEngine(CacheEngineBase):
                     continue
 
                 # Allocate new GPU blocks -> execution
-                resume_plan.append((seq_id, layer, cpu_blocks.copy()))
                 new_gpu_blocks = self.block_manager.allocate_seq_by_layer(seq_id, layer, len(cpu_blocks))
-                logger.info(f"[RESUME] seq_id={seq_id} layer={layer} re-allocated gpu_blocks={new_gpu_blocks}")
+                logger.info(f"[RESUME] seq_id={seq_id} layer={layer}, cpu_blocks={cpu_blocks}, re-allocated gpu_blocks={new_gpu_blocks}")
+                resume_plan.append(seq_id, layer, cpu_blocks.copy(), new_gpu_blocks.copy())
 
                 # Update mapping
                 self.mapping.gpu_map.setdefault(seq_id, {})[layer] = new_gpu_blocks
@@ -934,20 +934,20 @@ class FlattenedCacheEngine(CacheEngineBase):
     def execute_pause_resume(
             self,
             pause_layers: Dict[int, List[int]],
-            resume_plan: List[Tuple[int, int, List[int]]], 
+            resume_plan: List[Tuple[int, int, List[int], List[int]]], 
         ) -> None:
         logger.info("[worker] ===== pause_resume_cache_update START =====")
 
         # ----------------- PAUSE -----------------
         # keep the same row order the attention kernel uses
-        for seq_id, last_layer in pause_layers.items():
-            freed_block_ids = self.block_manager.free_seq_by_layer({seq_id: [last_layer]})
-            logger.info(f"[worker][PAUSE] seq_id={seq_id} freed_block_ids={freed_block_ids}")
+        # for seq_id, last_layer in pause_layers.items():
+            # freed_block_ids = self.block_manager.free_seq_by_layer({seq_id: [last_layer]})
+            # logger.info(f"[worker][PAUSE] seq_id={seq_id} freed_block_ids={freed_block_ids}")
 
         # ----------------- RESUME -----------------
-        for seq_id, layer, cpu_blocks in resume_plan:
-            new_gpu_blocks = self.block_manager.allocate_seq_by_layer(seq_id, layer, len(cpu_blocks))
-            logger.info(f"[worker][RESUME] seq_id={seq_id} layer={layer} re-allocated gpu_blocks={new_gpu_blocks}")
+        for seq_id, layer, cpu_blocks, new_gpu_blocks in resume_plan:
+        #     new_gpu_blocks = self.block_manager.allocate_seq_by_layer(seq_id, layer, len(cpu_blocks))
+        #     logger.info(f"[worker][RESUME] seq_id={seq_id} layer={layer} re-allocated gpu_blocks={new_gpu_blocks}")
 
             for src, dst in zip(cpu_blocks, new_gpu_blocks):
                     # key
@@ -964,47 +964,63 @@ class FlattenedCacheEngine(CacheEngineBase):
         plan: "Plan",
         attn_meta,
         sid2row: Dict[int, int],
+        new_gpu_blocks,
     ) -> None:
         """
         Step 5: Execute cache reconfiguration plan.
         """
-        bm = self.block_manager 
+        # bm = self.block_manager 
+
+        # 새로 받은 GPU 블록 매핑을 (sid, layer) -> new_blocks 로 lookup 할 dict 생성
+        blocks_map: Dict[Tuple[int,int], List[int]] = {
+            (sid, layer): blocks for sid, layer, blocks in new_gpu_blocks
+        }
+        logger.info(f"[worker][execute_cache_plan] received new_gpu_blocks map keys: {list(blocks_map.keys())}")
 
         logger.info(f"[worker][execute_cache_plan] START plan: dealloc={plan.dealloc_layers}, alloc={plan.alloc_layers}, prefetch_resize={plan.prefetch_resize}")
-        logger.info(f"[worker][execute_cache_plan] Current free GPU blocks before dealloc: {bm.get_num_free_gpu_blocks()}")
+        # logger.info(f"[worker][execute_cache_plan] Current free GPU blocks before dealloc: {bm.get_num_free_gpu_blocks()}")
         
         
-        freed = bm.free_seq_by_layer(plan.dealloc_layers)
-        expected = list(chain.from_iterable(plan.expected_freed.values()))
-        logger.info(f"[worker][execute_cache_plan] Freed blocks: {freed}, Expected to free: {expected}")
-        if set(freed) != set(expected):
-            logger.warning(f"[worker] Mismatch freeing blocks: freed={freed}, expected={expected}")
-        logger.info(f"[worker][execute_cache_plan] Free GPU blocks after dealloc: {bm.get_num_free_gpu_blocks()}")
+        # freed = bm.free_seq_by_layer(plan.dealloc_layers)
+        # expected = list(chain.from_iterable(plan.expected_freed.values()))
+        # logger.info(f"[worker][execute_cache_plan] Freed blocks: {freed}, Expected to free: {expected}")
+        # if set(freed) != set(expected):
+        #     logger.warning(f"[worker] Mismatch freeing blocks: freed={freed}, expected={expected}")
+        # logger.info(f"[worker][execute_cache_plan] Free GPU blocks after dealloc: {bm.get_num_free_gpu_blocks()}")
 
         logger.info(f"[worker][execute_cache_plan] prefetch_resize={plan.prefetch_resize}")
         if plan.prefetch_resize:
-            logger.info(f"[worker][execute_cache_plan] Before resize window: {bm.prefetch_window if hasattr(bm, 'prefetch_window') else 'N/A'}")
+            # logger.info(f"[worker][execute_cache_plan] Before resize window: {bm.prefetch_window if hasattr(bm, 'prefetch_window') else 'N/A'}")
             self._maybe_resize_prefetch_window(plan.prefetch_resize)
-            logger.info(f"[worker][execute_cache_plan] After resize window: {bm.prefetch_window if hasattr(bm, 'prefetch_window') else 'N/A'}")
+            # logger.info(f"[worker][execute_cache_plan] After resize window: {bm.prefetch_window if hasattr(bm, 'prefetch_window') else 'N/A'}")
         
         # -- 2b. ALLOCATE ------------------------------------------------------- #
         is_prefill = attn_meta.num_prefills > 0
         logger.info(f"[worker][execute_cache_plan] is_prefill={is_prefill}, num_prefills={attn_meta.num_prefills}")
         for sid, layer, cpu_blocks in plan.alloc_layers:
             logger.info(f"[worker][execute_cache_plan] alloc_layers={plan.alloc_layers}")
-            n_blocks = len(cpu_blocks)
-            before_free = bm.get_num_free_gpu_blocks()
-            new_gpu_blocks = bm.allocate_seq_by_layer(sid, layer, n_blocks)   # → List[int] 
-            after_free = bm.get_num_free_gpu_blocks()
 
-            logger.info(f"[worker][execute_cache_plan]   before allocation free={before_free}, after allocation free={after_free}")
-            logger.info(f"[worker][execute_cache_plan]   new_gpu_blocks={new_gpu_blocks}")
-            logger.info(f"[worker][execute_cache_plan] free_blocks: {bm.get_num_free_gpu_blocks()}")
+            key = (sid, layer)
+            if key not in blocks_map:
+                logger.error(f"[worker][execute_cache_plan] no new_gpu_blocks entry for sid={sid}, layer={layer}")
+                continue
+
+            new_blocks = blocks_map[key]
+
+            n_blocks = len(cpu_blocks)
+            logger.info(f"[worker][execute_cache_plan] alloc seq={sid}, layer={layer}: cpu_blocks={cpu_blocks} → new_gpu_blocks={new_blocks}")
+            # before_free = bm.get_num_free_gpu_blocks()
+            # new_gpu_blocks = bm.allocate_seq_by_layer(sid, layer, n_blocks)   # → List[int] 
+            # after_free = bm.get_num_free_gpu_blocks()
+
+            # logger.info(f"[worker][execute_cache_plan]   before allocation free={before_free}, after allocation free={after_free}")
+            # logger.info(f"[worker][execute_cache_plan]   new_gpu_blocks={new_gpu_blocks}")
+            # logger.info(f"[worker][execute_cache_plan] free_blocks: {bm.get_num_free_gpu_blocks()}")
             logger.info(f"[worker][execute_cache_plan] cpu_blocks:{cpu_blocks}")
             logger.info(f"[worker][execute_cache_plan] new_gpu_blocks:{new_gpu_blocks}")
             
             # copy payload CPU → GPU
-            for dst, src in zip(new_gpu_blocks, cpu_blocks):
+            for dst, src in zip(new_blocks, cpu_blocks):
                 logger.info(f"[worker][execute_cache_plan] copying CPU[{src}]→GPU[{dst}] for seq={sid}, layer={layer}")
                 self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][src],non_blocking=False)
                 self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][src],non_blocking=False)
@@ -1018,20 +1034,19 @@ class FlattenedCacheEngine(CacheEngineBase):
                 logger.info(f"[worker][execute_cache_plan]   Zeroing target block_tables at row={row}, layer={layer}, shape={tgt.shape}")
                 tgt.zero_()
                 logger.info(f"[worker][execute_cache_plan] alloc assign block table seq {sid}, layer {layer}, len(blt) {tgt.shape} cpu_blocks {cpu_blocks} -> gpu_blocks {new_gpu_blocks}")
-                tgt[:n_blocks] = torch.as_tensor(new_gpu_blocks,
+                tgt[:n_blocks] = torch.as_tensor(new_blocks,
                                             dtype=tgt.dtype,
                                             device=tgt.device)
                 # for resumed requests... they may came with their old slot mappings... 
                 temp_mapping = attn_meta.slot_mapping[layer][row] % 16                
-                attn_meta.slot_mapping[layer][row] = temp_mapping + new_gpu_blocks[-1]*16
+                attn_meta.slot_mapping[layer][row] = temp_mapping + new_blocks[-1]*16
         
         # ---------------- sync ordered view -----------
-        # self._sync_active_gpu_cpu_map(seq_row_order)
-        logger.info(f"[worker][execute_cache_plan] Final free GPU blocks: {bm.get_num_free_gpu_blocks()}")
+        # self._sync_active_gpu_cpu_map(seq_row_order)        
         logger.info(f"[worker] Final attn_meta.block_tables: {attn_meta.block_tables}")
         logger.info(f"[worker] Final attn_meta.slot_mapping: {attn_meta.slot_mapping}")
 
-        bm.cache_config = self.cache_config
+        # bm.cache_config = self.cache_config
         logger.info(f"[worker][execute_cache_plan] END")
         return self.cache_config
 
@@ -1164,6 +1179,8 @@ class FlattenedCacheEngine(CacheEngineBase):
         sid2row: dict[int, int]  = mapping.sid2row        # {sid: row}
         logger.info(f"[driver] Sequence row order: {seq_row_order}")
         logger.info(f"[driver] SID to row mapping: {sid2row}")
+
+        to_worker_new_gpu_blocks: List[Tuple[int, int, List[int]]] = []
         
         freed = bm.free_seq_by_layer(plan.dealloc_layers)
         logger.info(f"[driver] Blocks freed by layer: {plan.dealloc_layers}")
@@ -1192,7 +1209,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         is_prefill = attn_meta.num_prefills > 0
         for sid, layer, cpu_blocks in plan.alloc_layers:
             n_blocks = len(cpu_blocks)
-            new_gpu_blocks = bm.allocate_seq_by_layer(sid, layer, n_blocks)   # → List[int] 
+            new_gpu_blocks = bm.allocate_seq_by_layer(sid, layer, n_blocks)   # → List[int]             
             logger.info(f"[driver] free_blocks: {bm.get_num_free_gpu_blocks()}")
             logger.info(f"[driver] cpu_blocks:{cpu_blocks}")
             logger.info(f"[driver] new_gpu_blocks:{new_gpu_blocks}")
@@ -1205,6 +1222,8 @@ class FlattenedCacheEngine(CacheEngineBase):
                 logger.info(f"Copy complete for dst={dst}, src={src}")
             
             mapping.gpu_map.setdefault(sid, {})[layer] = new_gpu_blocks
+            to_worker_new_gpu_blocks.append((sid, layer, new_gpu_blocks.copy()))
+
             # keep the 1/0 bitmap in sync
             mapping._set_gpu_flag(sid, layer, True)
             logger.info(f"[driver] Updated mapping.gpu_map[{sid}][{layer}] = {new_gpu_blocks}")
@@ -1234,7 +1253,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         logger.info(f"[driver] Final attn_meta.slot_mapping: {attn_meta.slot_mapping}")
         bm.cache_config = self.cache_config
         logger.info("[driver] _execute_plan completed")
-        return self.cache_config
+        return to_worker_new_gpu_blocks
      
     def pause_resume_cache_update(self) -> None:
         """

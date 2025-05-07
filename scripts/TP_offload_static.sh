@@ -9,7 +9,7 @@ mkdir -p ../outputs/TP_offload_static
 python ../examples/test_distN.py \
     --config_file=$config_file \
     --prefetch_mode=static \
-    --prefetch-distance=1 \
+    --prefetch-distance=4 \
     --flattened_cache=true \
     --merge-prefetch-buffer=true \
     --pause-and-resume=false  \
