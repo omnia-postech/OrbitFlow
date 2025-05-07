@@ -310,6 +310,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         if cache_engine.pause_and_resume:
             pause_plan, resume_plan = cache_engine.build_pause_resume_plan()
         else:
+            logger.info(f"[driver] pause and resume feature => false")
             pause_plan = resume_plan = None
         # 3. build cache plan
         cache_plan, dist = cache_engine.build_cache_plan(seq_group_metadata)

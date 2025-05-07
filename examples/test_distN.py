@@ -456,7 +456,7 @@ def main(configs):
 
     prefetch_mode = "none"
     is_monolithic_distn = True 
-    prefetch_distance = 0 
+    prefetch_distance = 0
 
     if hasattr(configs, "prefetch_mode"):
         prefetch_mode = configs.prefetch_mode
@@ -485,11 +485,12 @@ def main(configs):
     print(f"num_gpu_blocks_override: {num_gpu_blocks_override}")
     print(f"merge_prefetch_buffer: {merge_prefetch_buffer}")
     print(f"pause_and_resume: {pause_and_resume}")
+    print(f"is_seletn: {configs.is_selectn}")
     
     args = EngineArgs(
         model=MODEL,
         max_model_len=max_model_len,
-        tensor_parallel_size=2,
+        tensor_parallel_size=1,
         pipeline_parallel_size = 1,
         max_num_seqs=batch_size,  # Updated batch size for serving
         max_num_batched_tokens=max_model_len,
@@ -498,7 +499,8 @@ def main(configs):
         enforce_eager=True,
         num_gpu_blocks_override=num_gpu_blocks_override*32 if flattened_cache else num_gpu_blocks_override,
         preemption_mode="pause",
-        is_monolithic_distn=is_monolithic_distn, 
+        is_monolithic_distn=is_monolithic_distn,
+        is_selectn=configs.is_selectn,
         prefetch_mode = prefetch_mode,
         prefetch_distance = prefetch_distance,
         enable_chunked_prefill=False,
@@ -548,9 +550,13 @@ if __name__ == "__main__":
                         default=False,
                         help="whether the prefetch buffer is merged")
     parser.add_argument("--pause-and-resume",
-                        type=bool,
+                        action="store_true",
                         default=False,
                         help="whether to use pause and resume")
+    parser.add_argument("--is-selectn",
+                        type=bool,
+                        default=False,
+                        help="baseline run for selectn")
     args = parser.parse_args()    
     print(args)
     # --- Setup Logging ---

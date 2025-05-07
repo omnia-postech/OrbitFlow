@@ -54,6 +54,7 @@ class CacheEngine(CacheEngineBase):
         self.cpu_cache = self._allocate_kv_cache_cpu(self.num_cpu_blocks, "cpu")
         
         self.is_monolithic_distn = cache_config.is_monolithic_distn
+        self.is_selectn = cache_config.is_selectn
         self.prefetch_mode = cache_config.prefetch_mode
         self.prefetch_distance = cache_config.prefetch_distance 
         
@@ -622,6 +623,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         # self.cpu_cache_num, self.gpu_cache_num = self.determine_cache_num_with_map(self.gpu_cpu_cache_map)
         self.is_monolithic_distn = cache_config.is_monolithic_distn
         self.prefetch_mode = cache_config.prefetch_mode
+        self.is_selectn = cache_config.is_selectn
         self.prefetch_distance = cache_config.prefetch_distance 
         self.merge_prefetch_buffer = cache_config.merge_prefetch_buffer     
         self.pause_and_resume = cache_config.pause_and_resume
