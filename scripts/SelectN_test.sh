@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=0
 export VLLM_CONFIGURE_LOGGING=1
 
 EXP="SelectN" # <---- Change this to the experiment name 
@@ -12,7 +12,8 @@ OUT_DIR="${ROOT}/outputs/benchmark/${EXP}"
 OUT_DIR="${ROOT}/outputs/${EXP}"
 mkdir -p "${OUT_DIR}"
 
-CFG_DIR="${ROOT}/scripts/benchmark/test_traces"
+# CFG_DIR="${ROOT}/scripts/benchmark/test_traces"
+# CFG_LIST=(S04)
 CFG_DIR="${ROOT}/samples"
 CFG_LIST=(TP_test)
 
@@ -21,7 +22,6 @@ for T in "${CFG_LIST[@]}"; do
     mkdir -p "${RUN_DIR}"
 
     # regenerate logging config for this run
-    # sed '16s#"filename":.*#"filename": "../outputs/benchmark/'"${EXP}/${T}"'/vllm_msg.log"#' \
     sed '16s#"filename":.*#"filename": "../outputs/'"${EXP}/${T}"'/vllm_msg.log"#' \
         "${BASE_LOG}" > "${NEW_LOG}"
     export VLLM_LOGGING_CONFIG_PATH="${NEW_LOG}"
@@ -30,11 +30,10 @@ for T in "${CFG_LIST[@]}"; do
     # Change option below to match with the experiment name
 
     python ../examples/test_distN.py \
-        --config_file="${CFG_DIR}/${T}.json" \
-        --prefetch_mode=selectn \
-        --prefetch_distance=1 \
-        --flattened_cache=true \
-        --merge-prefetch-buffer=true \
-        --pause-and-resume=false \
-        --output_log=../outputs/${EXP}/${T}/output.log
+        --config-file "${CFG_DIR}/${T}.json" \
+        --prefetch-mode selectn \
+        --prefetch-distance 1 \
+        --flattened-cache true \
+        --merge-prefetch-buffer true \
+        --output-log ../outputs/${EXP}/${T}/output.log
 done
