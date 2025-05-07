@@ -32,5 +32,6 @@ for T in "${CFG_LIST[@]}"; do
         --prefetch_distance=2 \
         --flattened_cache=true \
         --merge-prefetch-buffer=true \
+        --pause-and-resume=true \
         --output_log=../outputs/TP_no_offload/output.log
 done

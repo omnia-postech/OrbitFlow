@@ -2,13 +2,13 @@
   "description":"batch_size=2, 2 request type, uniform, overlap arrival, with preemption",
   "arrival_pattern":{"type":"DiscretePoissonArrival","params":{"lambda_per_step":0.01,"max_steps":4000}},
   "batch_size":2,
-  "num_gpu_blocks_override":30,
+  "num_gpu_blocks_override":300,
   "request_type_probs":[["ChatBot Q&A",0.5],["Creative Writing",0.5]],
   "vocab":[200,30000],
   "requests":{
-    "request_0":{"category":"Creative Writing","input_length":200,"output_length":300,"arrival_time":0,"sched_time":0,"wait_time":0},
-    "request_1":{"category":"Creative Writing","input_length":200,"output_length":300,"arrival_time":0,"sched_time":0,"wait_time":0},
-    "request_2":{"category":"ChatBot Q&A","input_length":50,"output_length":30,"arrival_time":50,"sched_time":0,"wait_time":0},
-    "request_3":{"category":"Creative Writing","input_length":50,"output_length":350,"arrival_time":300,"sched_time":0,"wait_time":0}
+    "request_0":{"category":"Creative Writing","input_length":2000,"output_length":3000,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_1":{"category":"Creative Writing","input_length":2000,"output_length":3000,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_2":{"category":"ChatBot Q&A","input_length":500,"output_length":300,"arrival_time":50,"sched_time":0,"wait_time":0},
+    "request_3":{"category":"Creative Writing","input_length":500,"output_length":3500,"arrival_time":300,"sched_time":0,"wait_time":0}
   }
 }

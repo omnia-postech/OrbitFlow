@@ -1161,7 +1161,7 @@ class FlattenedCacheEngine(CacheEngineBase):
                             snapshot.sid2sgidx,
                             snapshot.candidates)
         current_prefetch = self.prefetch_blocks
-        prefetch_resize = max(0, need_prefetch - current_prefetch)
+        prefetch_resize = max(0, need_prefetch)
 
         return Plan(dict(dealloc_layers),
                     dict(expected_freed),
