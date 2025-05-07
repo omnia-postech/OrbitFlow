@@ -313,7 +313,10 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             logger.info(f"[driver] pause and resume feature => false")
             pause_plan = resume_plan = None
         # 3. build cache plan
-        cache_plan, dist = cache_engine.build_cache_plan(seq_group_metadata)
+        total_context_lens = attn_meta.seq_lens
+        is_decoding = attn_meta.decode_metadata is not None
+        logger.debug(f"[driver] is_decoding: {is_decoding}")
+        cache_plan, dist = cache_engine.build_cache_plan(seq_group_metadata, total_context_lens, is_decoding)
         # pack into broadcastable structure
         plan_data = {
             'pause_layers': pause_plan,

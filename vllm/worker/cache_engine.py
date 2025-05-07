@@ -633,6 +633,10 @@ class FlattenedCacheEngine(CacheEngineBase):
             # self.num_gpu_blocks, self.device_config.device_type, cache_config.prefetch_mode!="none")
         self.cpu_cache = self._allocate_kv_cache_cpu(self.num_cpu_blocks, "cpu")
         
+        # NOTE(HONG): this is for first prefill distance, we use preceding decoding's distance for other prefill steps
+        self.prev_selectn_distance = -1
+        # NOTE(HONG): flag that refers first decoding step -> update distance and fix it until new prefill
+        self.need_update_selectn = False
         
         msg = f"Prefetch mode: {self.prefetch_mode}, prefetch distance: {self.prefetch_distance}"
         msg = f"Merge prefetch buffer: {self.merge_prefetch_buffer}"
@@ -919,6 +923,8 @@ class FlattenedCacheEngine(CacheEngineBase):
     def build_cache_plan(
         self,
         seq_group_metadata,
+        total_context_lens,
+        is_decoding,
     ) -> Tuple["Plan", Dict[int, int]]:
         """
         Step 4: Snapshot and build cache allocation/deallocation plan.
@@ -927,7 +933,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             configure_paused=False,
             seq_group_metadata=seq_group_metadata,
         )
-        dist_dict, _ = self._select_prefetch_distance(snap, self.prefetch_distance)
+        dist_dict, _ = self._select_prefetch_distance(snap, self.prefetch_distance, total_context_lens, is_decoding)
         plan = self._plan_cache_delta(snap, dist_dict)
 
         return plan, dist_dict
@@ -1113,50 +1119,82 @@ class FlattenedCacheEngine(CacheEngineBase):
         """
         한 블록(block) 전송에 걸리는 시간(초).
         - bandwidth: 25.19 GB/s
-        - per-token KV size = 2 (key+value) × 2 bytes (fp16) × head_size × num_kv_heads
+        - per-token KV size per layer = 2 (key+value) × 2 bytes (fp16) × head_size × num_kv_heads
         - tokens per block  = self.block_size
         """
         bandwidth = 25.19 * 1024**3  # B/s
-        per_token_bytes = 2 * 2 * self.block_manager.head_size * self.block_manager.num_kv_heads
+        per_token_bytes = 2 * 2 * self.head_size * self.num_kv_heads
         block_bytes      = per_token_bytes * self.block_size
         return block_bytes / bandwidth
 
-    def compute_comm_time_for_requests(self, seq_group_metadata: List) -> float:
-        """
-        현재 스냅샷에 있는 모든 요청들의 KV 블록 전송 시간을 합산하여 반환.
-
-        Args:
-          seq_group_metadata: List of SequenceGroupMetadata,
-            각 객체에 .token_chunk_size(처리할 토큰 수) 필드가 있다고 가정.
-
-        Returns:
-          전체 통신 시간(초)
-        """
+    def compute_comm_time_for_requests(self, total_context_lens) -> float:
         # 블록당 전송 시간
         t_per_block = self._compute_comm_time_per_block()
 
         # 각 요청별 블록 수 계산
         total_blocks = 0
-        for group in seq_group_metadata:
+        for tokens in total_context_lens:
             # 토큰 수를 block_size로 나누고 올림
-            blocks = math.ceil(group.token_chunk_size / self.block_size)
+            # TODO(HONG): need to change below part when modifying selectn to reconfigure at every in and out
+            # TODO(HONG): need to rethink how to get number of tokens -> is token_chunk_size correct at decoding phase?
+            blocks = math.ceil(tokens / self.block_size)
             total_blocks += blocks
 
-        # 전체 통신 시간
         return total_blocks * t_per_block
 
-    def prefetch_distance_for_seletcn(self):
-        return None
+    def compute_comp_time_for_requests(self, slo_allowed: float) -> float:
+        """
+        SelectN 공식 기반의 분자 계산:
+          numerator = t_layer * (1 + δ)
+        여기서
+          - t_layer: 전체 naive 실행(total_compute) 시간을 레이어 수(num_layers)로 나눈 값
+          - δ: (slo_allowed - total_compute) / total_compute
 
-    def _select_prefetch_distance(self, snapshot, prefetch_distance):
+        Args:
+            slo_allowed (float): 설정된 SLO 시간 (초)
+            total_compute (float): naive 모드 전체 토큰 처리 시간 (초)
+        Returns:
+            float: numerator 값 (초)
+        """
+        # TODO(HONG): need to change from getting proper compute time of batched reqeusts from profiled record  
+        total_compute = 0.12047052383422852
+        num_layers = self.block_manager.num_attention_layers
+        t_layer = total_compute / num_layers
+
+        # δ 계산: (SLO - naive) / naive
+        delta = (slo_allowed - total_compute) / total_compute
+        delta = max(delta, 0.0)
+
+        # numerator = t_layer * (1 + δ)
+        return t_layer * (1 + delta)
+
+    def prefetch_distance_for_seletcn(self, comm_time: float, comp_time: float):
+        num_layers_to_offload = int(comp_time / comm_time)
+        selectn_prefetch_distance = math.floor(self.block_manager.num_attention_layers / num_layers_to_offload)
+        selectn_prefetch_distance = max(0, selectn_prefetch_distance)
+        return selectn_prefetch_distance
+
+    def _select_prefetch_distance(self, snapshot, prefetch_distance, total_context_lens, is_decoding):
         if self.prefetch_mode == "none":
             dist = [-1] * len(snapshot.candidates) 
         elif self.prefetch_mode  == "static":
             dist = [prefetch_distance] * len(snapshot.candidates)
         elif self.prefetch_mode == "selectn":
-            place = self.prefetch_distance_for_seletcn()
-            communication = self.compute_comm_time_for_requests(snapshot.seq_group_metadata)
-            dist = [prefetch_distance] * len(snapshot.candidates)
+            # NOTE(HONG): flag that refers first decoding step -> update distance and fix it until new prefill
+            if not is_decoding:
+                logger.info(f"[driver] Prefill going on")
+                self.need_update_selectn = True
+
+            # NOTE(HONG): -1 for first prefill step and use preceding decoding step's distance for other prefill steps
+            if is_decoding and self.need_update_selectn: 
+                logger.info(f"[driver] First decoding going on")                     
+                comm_time = self.compute_comm_time_for_requests(total_context_lens)
+                slo_allowed = 0.005 # TTFT: 0.05s TPOT: 0.005s
+                comp_time = self.compute_comp_time_for_requests(slo_allowed)
+                self.prev_selectn_distance = self.prefetch_distance_for_seletcn(comm_time, comp_time)
+                self.need_update_selectn = False
+
+            dist = [self.prev_selectn_distance] * len(snapshot.candidates)
         elif self.prefetch_mode == "static_req_wise": 
             dist = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10][:len(snapshot.candidates)] # FIXME Xinyue hard code
         elif self.prefetch_mode == "distn_single": 
@@ -1165,6 +1203,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         else:
             raise ValueError(f"unknown policy {self.prefetch_mode}")
         dist = self._normalise_prefetch_distance(spec=dist, candidates=snapshot.candidates)
+        logger.info(f"[driver] prefetch distance: {dist}")
         return dist, {"policy": self.prefetch_mode}
     def _plan_cache_delta(self,
                         snapshot,                 # ← the read-only view
