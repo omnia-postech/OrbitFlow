@@ -638,8 +638,9 @@ class FlattenedCacheEngine(CacheEngineBase):
         # NOTE(HONG): flag that refers first decoding step -> update distance and fix it until new prefill
         self.need_update_selectn = False
         # NOTE(HONG): to save memroy left with model weight
-        # self.free_mem_at_first_prefill_step: Optional[int] = None
+        self.free_mem_at_first_prefill_step: Optional[int] = None
         self.prev_flexgen_distance: Optional[int] = None
+        self.flexgen_dist = None
         
         msg = f"Prefetch mode: {self.prefetch_mode}, prefetch distance: {self.prefetch_distance}"
         msg = f"Merge prefetch buffer: {self.merge_prefetch_buffer}"
@@ -1177,7 +1178,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         selectn_prefetch_distance = max(0, selectn_prefetch_distance)
         return selectn_prefetch_distance
 
-    def get_KV_cache_size_for_all_layers(self, total_context_lens):
+    def get_KV_cache_size_for_single_layers(self, total_context_lens):
         # 각 요청별 블록 수 계산
         total_blocks = 0
         for tokens in total_context_lens:
@@ -1204,21 +1205,32 @@ class FlattenedCacheEngine(CacheEngineBase):
             msg = f"Total Memory: {total_mem / 1024 / 1024} MB"
             logger.info(msg)
 
-            if not is_decoding:
-                free_mem = int(free_mem * 0.8)
-                logger.info(f"[flexgen] free_mem set to {free_mem / 1024 / 1024:.2f} MB")
-                KV_cache_size = self.get_KV_cache_size_for_all_layers(total_context_lens)
-                num_layers_on_GPU = math.floor(free_mem / KV_cache_size)
+            if not is_decoding and self.free_mem_at_first_prefill_step is None:
+                self.free_mem_at_first_prefill_step = int(free_mem * 0.8)
+                logger.info(f"[flexgen] first prefill step free_mem: {self.free_mem_at_first_prefill_step / 1024 / 1024:.2f} MB")
+                self.flexgen_dist = -1
+            
+            # if not is_decoding:
+            #     self.prev_flexgen_distance = None
+
+            if is_decoding and self.prev_flexgen_distance is None:
+                KV_cache_size = self.get_KV_cache_size_for_single_layers(total_context_lens)
+                num_layers_on_GPU = math.floor(self.free_mem_at_first_prefill_step / KV_cache_size)
                 num_layers_on_GPU = min(32, num_layers_on_GPU)
                 num_layers_to_offload = 32 - num_layers_on_GPU
                 if num_layers_to_offload == 0:
                     self.prev_flexgen_distance = -1
                 else:
-                    self.prev_flexgen_distance = int(self.block_manager.num_attention_layers / num_layers_to_offload)
+                    self.prev_flexgen_distance = math.floor(self.block_manager.num_attention_layers / num_layers_to_offload)
                     self.prev_flexgen_distance = max(0, self.prev_flexgen_distance)
                 logger.info(f"[flexgen] prefill → distance set to {self.prev_flexgen_distance}")
+                self.flexgen_dist = self.prev_flexgen_distance
             
-            dist = [self.prev_flexgen_distance] * len(snapshot.candidates)
+            # distance = self.prev_flexgen_distance
+            dist = [self.flexgen_dist] * len(snapshot.candidates)
+            
+            if not is_decoding:
+                self.prev_flexgen_distance = None
 
         elif self.prefetch_mode == "selectn":
             # NOTE(HONG): flag that refers first decoding step -> update distance and fix it until new prefill
