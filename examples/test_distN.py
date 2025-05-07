@@ -526,7 +526,7 @@ if __name__ == "__main__":
     parser.add_argument("--prefetch-mode",
                         type=str,
                         default="none",
-                        help="prefetch method: none, static, distn, static_req_wise, selectn")
+                        help="prefetch method: none, static, distn, static_req_wise, selectn, flexgen")
     parser.add_argument("--is-monolithic-distn",
                         type=bool,
                         default=True,
