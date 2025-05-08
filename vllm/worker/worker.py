@@ -423,7 +423,6 @@ class Worker(LocalOrDistributedWorkerBase):
         execute_model_req: ExecuteModelRequest,
         intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> Optional[List[SamplerOutput]]:
-        logger.info(f"cpu_block_tables{execute_model_req.seq_group_metadata_list[0].cpu_block_tables}")
         
         if execute_model_req is not None:
             new_seq_group_metadata_list = self._get_cached_seq_group_metadata(

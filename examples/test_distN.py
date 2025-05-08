@@ -49,6 +49,7 @@ class DelaySimulator:
         # v_tps: tokens per second
         self.v = v_tps
         self.last_time = {}
+        self.last_decode_time = 0.0
         # self.interval = 1.0 / v_tps       # 토큰 하나가 배출되어야 하는 간격(초)
         # self.next_deadline = self.interval
         self.deposit = defaultdict(int)   # request_id → 누적된 토큰 수
@@ -63,7 +64,6 @@ class DelaySimulator:
         if rid not in self.last_time: 
             self.last_time[rid] = step_time
             logger.debug(f"[on_token] first token for {rid}, setting last_time[{rid}] = {step_time:.6f}")
-
         logger.debug(f"[on_token] rid={rid} @ {step_time:.6f}: deposit {before} -> {after}")
 
 
@@ -93,7 +93,6 @@ class DelaySimulator:
             # 즉, to_rel tokens / v_tps 만큼 경과시킨 것처럼
             advance = to_rel / self.v
             self.last_time[rid] = last + advance
-
         # single-line summary
         if rid_log:
             logger.info(
@@ -158,7 +157,7 @@ def enqueue_batch(engine, batch, request_metadata):
             max_tokens=prompt['max_tokens'],
             stop=[],
             stop_token_ids=[],
-            ignore_eos=True
+            ignore_eos=True,
         )
         engine.add_request(req_id, prompt_obj, sampling_params)
 
@@ -209,6 +208,9 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
     # In the original, we track times / tokens / steps
     start_time = None
     end_time = None
+    overall_wall    = 0.0     # s
+    prefill_wall    = 0.0     # s (non-overlapping)
+    decode_wall     = 0.0     # s (non-overlapping)
     cumulative_tokens = 0
     cumulative_steps = 0
     finished_tokens = 0
@@ -232,6 +234,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
                 "stall_times": [],
                 "stall_durations": [],
                 "stall_duration": 0,
+                "prompt_length": req_obj.input_length,
             }
 
             # Build the random input tokens:
@@ -283,15 +286,15 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
         deposit_map = sim.stats()  
         engine.scheduler[0].deposit_map = deposit_map
         # NOTE(HONG): use below for pipelining parallelism
-        # for sched in engine.scheduler:
-        #     sched.deposit_map = deposit_map
-
-        # 5) Perform one engine step
+        step_start = time.time()
         step_outputs = engine.step()
+        step_end = time.time()
+        overall_wall += step_end - step_start
         # If no outputs come back, we still increment steps
         cumulative_steps += 1
         
         # NOTE(HONG): neet to use step_time to unify the time for all events at step-level
+        torch.cuda.synchronize()
         step_time = time.time()
 
         # 6) Process each output
@@ -299,6 +302,13 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
         prefill_rids: list[str] = []
         decode_rids:  list[str] = []
 
+        step_tokens = 0
+        # to test whether it was decode 
+        if len(step_outputs) > 0:
+            if step_outputs[0].request_id in received_requests:
+                decode_wall += step_end - step_start
+            else: 
+                prefill_wall += step_end - step_start
         for output in step_outputs:
             rid = output.request_id
             logger.debug("step %d  rid=%s", cumulative_steps, rid)
@@ -326,6 +336,8 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
                 finished_tokens += 1
                 finished_decode_tokens += 1
                 request_output[rid].append(output)
+            step_tokens += request_metadata[rid]["prompt_length"]
+            step_tokens += request_metadata[rid]["decode_length"]
 
             # If the request is finished:
             if output.finished:
@@ -334,56 +346,53 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
                 logger.info(f"{rid} output: {len(output.prompt_token_ids)} {output.outputs[0].token_ids[:20]}")
                 logger.info(f"{rid} text: {output.outputs[0].text[:20]}")
                 running_requests.remove(rid)
+
+                # ------------------------------------------------------------------
+                # LOCAL WALL‑CLOCK MEASUREMENTS (no out.metrics)
+                # ------------------------------------------------------------------
+                arrival_time_local = request_metadata[rid]["arrival_time"]
+                finished_time_local = step_time
                 m = output.metrics
 
-                # Per-token latencies
                 token_ts = request_metadata[rid]["token_timestamps"]
-                if len(token_ts) < 2:
+                if token_ts:
+                    first_token_time_local = token_ts[0]
+                    per_token_latencies = [j - i for i, j in zip(token_ts[:-1], token_ts[1:])]
+                    avg_token_latency = sum(per_token_latencies) / len(per_token_latencies) if per_token_latencies else 0.0
+                else:
+                    first_token_time_local = finished_time_local
                     per_token_latencies = []
                     avg_token_latency = 0.0
-                else:
-                    per_token_latencies = [
-                        j - i for i, j in zip(token_ts[:-1], token_ts[1:])
-                    ]
-                    avg_token_latency = sum(per_token_latencies) / len(per_token_latencies)
 
                 decode_length = request_metadata[rid]["decode_length"]
-                # finished_tokens += decode_length
-                # finished_decode_tokens += decode_length
 
-                # Track global start/end times
-                if start_time is None or (m.arrival_time and m.arrival_time < start_time):
-                    start_time = m.arrival_time
-                if end_time is None or (m.finished_time and m.finished_time > end_time):
-                    end_time = m.finished_time
+                if start_time is None or arrival_time_local < start_time:
+                    start_time = arrival_time_local
+                if end_time is None or finished_time_local > end_time:
+                    end_time = finished_time_local
 
-                # Collect row of metrics
                 row = {
                     "request_id": rid,
-                    "arrival_time": m.arrival_time - (start_time or 0),
-                    "first_scheduled_time": m.first_scheduled_time - (start_time or 0),
-                    "finished_time": m.finished_time - (start_time or 0),
+                    "arrival_time": arrival_time_local - (start_time or 0),
+                    "first_scheduled_time": 0,                 # not available locally
+                    "finished_time": finished_time_local - (start_time or 0),
                     "stall_times": json.dumps(request_metadata[rid]["stall_times"]),
-                    "wait_duration": m.time_in_queue,
-                    "time_to_first_token": m.first_token_time - m.first_scheduled_time,
-                    "scheduler_overehad": m.scheduler_time,
+                    "wait_duration": 0.0,                       # not measured here
+                    "time_to_first_token": first_token_time_local - arrival_time_local,
+                    "model_execute_time": 0.0,                 # not measured here
+                    "scheduler_overehad": 0.0,                 # not measured here
                     "stall_duration": request_metadata[rid]["stall_duration"],
                     "decode_length": decode_length,
-                    "end_to_end_time": (
-                        m.finished_time - m.arrival_time
-                        if m.finished_time and m.arrival_time
-                        else None
-                    ),
+                    "end_to_end_time": finished_time_local - arrival_time_local,
+                    "decode_time": finished_time_local - first_token_time_local,
                     "time_per_output_token": avg_token_latency,
                     "time_between_tokens": json.dumps(per_token_latencies),
                     "stall_durations": json.dumps(request_metadata[rid]["stall_durations"]),
                 }
                 metrics_data.append(row)
 
-                # done with this request
                 request_metadata.pop(rid)
                 logger.info(f"Finished request {rid} with {decode_length} decode tokens")
-
                 sim.finish(rid)
         if prefill_rids:
             logger.info("Prefill step %d: %s",
@@ -391,10 +400,11 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
         if decode_rids:
             logger.info("Decode  step %d: %s",
                         cumulative_steps, ", ".join(map(str, decode_rids)))
+        engine.scheduler[0].last_decode_time = sim.last_decode_time
+        engine.scheduler[0].step_tokens = step_tokens
+       
         tokens_to_release = sim.pop(step_time)
         
-        # We'll sleep a bit
-        time.sleep(0.01)
 
     # 7) After all requests are done, save to CSV
     print("All requests completed. Now saving CSV...")
@@ -413,28 +423,12 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
 
     # 8) Compute overall throughput
     if start_time and end_time and (end_time > start_time):
-        total_runtime = end_time - start_time
-        throughput = finished_tokens / total_runtime
-        print("------Overall------")
-        print(f"Finished tokens: {finished_tokens} over {total_runtime:.3f} s")
-        print(f"System throughput: {throughput:.3f} tokens/s")
-        logger.info(f"System throughput: {throughput:.3f} tokens/s")
-
-        # Summation for time_to_first_token
-        time_to_first_token_sum = df["time_to_first_token"].sum()
-        print("------Prefill------")
-        print(f"Finished prefill tokens: {finished_prefill_tokens} over {time_to_first_token_sum:.3f} s")
-        prefill_throughput = finished_prefill_tokens / time_to_first_token_sum if time_to_first_token_sum > 0 else 0
-        print(f"Prefill throughput: {prefill_throughput:.3f} tokens/s")
-        logger.info(f"prefill throughput: {prefill_throughput:.3f} tokens/s")
-
-        # Summation for decode latencies
-        time_per_output_token_sum = (df["time_per_output_token"] * df["decode_length"]).sum()
-        print("------Decode------")
-        print(f"Finished decode tokens: {finished_decode_tokens} over {time_per_output_token_sum:.3f} s")
-        decode_throughput = (finished_decode_tokens / time_per_output_token_sum) if time_per_output_token_sum > 0 else 0
-        print(f"Decode throughput: {decode_throughput:.3f} tokens/s")
-        logger.info(f"decode throughput: {decode_throughput:.3f} tokens/s")
+        print("------Wall-clock stats (non-overlapping)------")
+        print(f"Overall runtime  : {overall_wall:.3f} s")
+        print(f"Prefill time     : {finished_prefill_tokens} tokens over {prefill_wall:.3f} s "
+            f"({finished_prefill_tokens / prefill_wall: .2f} t/s)")
+        print(f"Decode  time     : {finished_decode_tokens } tokens over {decode_wall:.3f} s "
+            f"({finished_decode_tokens / decode_wall: .2f} t/s)")
     else:
         print("No valid start/end time for throughput calculation.")
 def main(configs):
@@ -505,9 +499,7 @@ def main(configs):
         flattened_cache=flattened_cache,
         merge_prefetch_buffer=merge_prefetch_buffer,
         pause_and_resume=pause_and_resume,
-        # No prefetch, (N=1,static), (N=dynamic,mono), (N=dynamic,dyn), the last two version, N only decreases 
-        # multi-request version (might decrease, or increase)
-        # num_gpu_blocks_override: Optional[int] = None
+        disable_sliding_window=True,
     )
     print(f"Logging to {configs.output_log}")
     import sys 

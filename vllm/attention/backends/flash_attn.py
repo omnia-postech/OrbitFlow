@@ -25,9 +25,6 @@ if TYPE_CHECKING:
 
 from vllm.vllm_flash_attn import (flash_attn_varlen_func,
                                   flash_attn_with_kvcache)
-from vllm.logger import init_logger
-
-logger = init_logger(__name__)
 
 import nvtx 
 import time
@@ -285,13 +282,11 @@ class FlashAttentionMetadata(AttentionMetadata):
 
     @property
     def decode_metadata(self) -> Optional["FlashAttentionMetadata"]:
-        logger.debug(f"decode_metadata called, block_tables {self.block_tables.shape if self.block_tables is not None else None}")
         if self.num_decode_tokens == 0:
             return None
 
 
         if self._cached_decode_metadata is not None:
-            logger.debug(f"return cached decode meta")
             self._cached_decode_metadata.block_tables = self.block_tables
             return self._cached_decode_metadata
         assert ((self.seq_lens_tensor is not None)
@@ -310,8 +305,6 @@ class FlashAttentionMetadata(AttentionMetadata):
                         self.cpu_slot_mapping[self.num_prefill_tokens:])
         cpu_offset = self.cpu_offset
         
-        logger.debug(f"decode_metadata called, block_tables 2 {self.block_tables.shape if self.block_tables is not None else None}")
-
         self._cached_decode_metadata = FlashAttentionMetadata(
             num_prefills=0,
             num_prefill_tokens=0,
@@ -345,7 +338,6 @@ class FlashAttentionMetadata(AttentionMetadata):
             max_encoder_seq_len=self.max_encoder_seq_len,
             cross_slot_mapping=self.cross_slot_mapping,
             cross_block_tables=self.cross_block_tables)
-        logger.debug(f"decode_metadata called, block_tables 3 {self._cached_decode_metadata.block_tables.shape if self._cached_decode_metadata.block_tables is not None else None}")
         return self._cached_decode_metadata
 
     def select_block_table(self, layer:int) -> "FlashAttentionMetadata":
@@ -462,7 +454,6 @@ class FlashAttentionMetadataBuilder(
                         inter_data,
                         chunked_prefill_enabled: bool,
                         prefix_cache_hit: bool):
-        logger.debug(f"_add_seq_group_3d received {inter_data.block_tables  }")
         is_prompt     = inter_data.is_prompt
         block_tables  = inter_data.block_tables             # 3-D
         seq_ids       = inter_data.seq_ids
@@ -553,8 +544,6 @@ class FlashAttentionMetadataBuilder(
                         n = len(blk_list)
                         layer_block_tables[seq_id] = list(range(next_id, next_id + n))
                         next_id += n
-                    logger.debug(f"seq[{seq_id}]inter block layer_block_tables, {inter_data.block_tables[seq_id][layer_idx] }")
-                    logger.debug(f"seq[{seq_id}]prefetch block layer_block_tables, {layer_block_tables}")
                     layer_map = []
                     compute_slot_mapping(
                         is_profile_run,
@@ -567,9 +556,7 @@ class FlashAttentionMetadataBuilder(
                         layer_block_tables,        # wrap for signature
                     )
                     self.slot_mapping[layer_idx].extend(layer_map) 
-                    logger.debug(f"[L{layer_idx}]self.slot_mapping, {self.slot_mapping[layer_idx]}")
                 else:
-                    logger.debug(f"seq[{seq_id}]gpu block layer_block_tables, {layer_block_tables}")
                     layer_map = []
                     compute_slot_mapping(
                         is_profile_run,
@@ -582,7 +569,6 @@ class FlashAttentionMetadataBuilder(
                         layer_block_tables,        # wrap for signature
                     )
                     self.slot_mapping[layer_idx].extend(layer_map) 
-                    logger.debug(f"seq[{seq_id}][L{layer_idx}]self.slot_mapping, {self.slot_mapping[layer_idx]}")
     def _add_seq_group(
             self, inter_data: "ModelInputForGPUBuilder.InterDataForSeqGroup",
             chunked_prefill_enabled: bool, prefix_cache_hit: bool):
@@ -780,7 +766,6 @@ class FlashAttentionMetadataBuilder(
                 pad=PAD_SLOT_ID,
                 dtype=torch.long,
                 device=device)
-        # logger.debug(f"build returns block_tables: {block_tables}")
         assert max_query_len > 0, ("query_lens: {}".format(query_lens))
 
         assert device is not None
@@ -803,7 +788,6 @@ class FlashAttentionMetadataBuilder(
         # patch continuity
         block_tables = block_tables.contiguous()
         slot_mapping_tensor = slot_mapping_tensor.contiguous()
-        logger.debug(f"build returns block table {block_tables.shape}, slot mapping {slot_mapping_tensor.shape}")
         return FlashAttentionMetadata(
             num_prefills=self.num_prefills,
             slot_mapping=slot_mapping_tensor,
@@ -941,13 +925,11 @@ class FlashAttentionImpl(AttentionImpl):
         window_size = self.sliding_window
         alibi_slopes: Optional[torch.Tensor] = self.alibi_slopes
         logits_soft_cap: Optional[float] = self.logits_soft_cap
-        logger.debug(f"cpu_offset:{attn_metadata.cpu_offset}")
 
         # NOTE(HONG): updating KV cache(GPU) here -> implement copying(write) KV cache to CPU cache.
         if kv_cache.numel() > 0:
             key_cache = kv_cache[0]
             value_cache = kv_cache[1]
-            logger.debug(f"cpu_slot_mapping: {attn_metadata.cpu_slot_mapping}")
             # We skip updating the KV cache under two conditions:
             #  a. When the Attention Type is ENCODER. In this phase, we compute
             #     only the encoder attention without updating the cache.
@@ -967,8 +949,6 @@ class FlashAttentionImpl(AttentionImpl):
                     updated_slot_mapping = attn_metadata.slot_mapping
                     updated_slot_mapping_cpu = attn_metadata.cpu_slot_mapping
 
-                logger.debug(f"[Layer {layer}][Begin attention] slot_mapping[:50] {updated_slot_mapping[:50]}")
-                logger.debug(f"slot_mapping_cpu[:50] {updated_slot_mapping_cpu[:50]}")
 
                 # Reshape the input keys and values and store them in the cache.
                 # If kv_cache is not provided, the new key and value tensors are
@@ -987,7 +967,7 @@ class FlashAttentionImpl(AttentionImpl):
                 )
                 torch.cuda.synchronize()
 
-                # # TODO(HONG): Copy only blocks that are updated with newly generated tokens.                
+                # # # TODO(HONG): Copy only blocks that are updated with newly generated tokens.                
                 if layer >=0 : # ?
                     # print(f"Writing new KV to CPU at layer{layer}")
                     if kv_cache_cpu is not None and updated_slot_mapping_cpu.numel()>0:
@@ -1007,9 +987,6 @@ class FlashAttentionImpl(AttentionImpl):
                             for i in range(num_tokens):
                                 p = page_idx[i].item()
                                 o = offset_idx[i].item()
-                                if i%50==0:
-                                    logger.debug(f"tok{i}->slot{updated_slot_mapping_cpu[i]}=CPU[{p}][{o}]")
-
                                 # copy each token slice                            
                                 kv_cache_cpu[0][p, o, :, :] = key_cpu[i, :, :] # key 
                                 kv_cache_cpu[1][p, o, :, :] = value_cpu[i, :, :] # value
@@ -1111,7 +1088,6 @@ class FlashAttentionImpl(AttentionImpl):
                         out=decode_output,
                     )
             else:
-                logger.debug(f"decode meta  {decode_meta.block_tables.shape if decode_meta.block_tables is not None else None}")
                 # Use flash_attn_with_kvcache for normal decoding.
                 (
                     seq_lens_arg,
