@@ -116,7 +116,6 @@ def compute_slot_mapping(is_profile_run: bool, slot_mapping: List[int],
     """
     Compute slot mapping.
     """
-    logger.debug(f"compute_slot_mapping received seq_id: {seq_id}, block_tables: {block_tables}")
     if is_profile_run:
         # During memory profiling, the block tables are not
         # initialized yet. In this case, we just use a dummy

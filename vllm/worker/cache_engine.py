@@ -1224,8 +1224,6 @@ class FlattenedCacheEngine(CacheEngineBase):
             
         elif self.prefetch_mode == "flexgen":
             free_blocks = self.block_manager.get_num_free_gpu_blocks() 
-            total_blocks = self.num_gpu_blocks 
-            
 
             if not is_decoding and self.free_mem_at_first_prefill_step is None:
                 self.free_mem_at_first_prefill_step = int(free_blocks * 0.8)
