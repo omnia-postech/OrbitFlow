@@ -349,6 +349,7 @@ class Scheduler:
         self.pipeline_parallel_size = pipeline_parallel_size
 
         self._pause_window_remaining: int = 0
+        self.slo_from_delaysim = {}
 
         version = "selfattn"
         if (self.scheduler_config.runner_type == "pooling"
@@ -764,9 +765,6 @@ class Scheduler:
                                 ret.decode_seq_groups_list.append(pg)
                             self.paused.clear() 
 
-                        # TODO(HONG): need to use profiled data for layer_time
-                        layer_time_f = 0.005 / 32
-
                         request_list = []
                         requests = [g.seq_group.request_id for g in ret.decode_seq_groups]
                         len(ret.decode_seq_groups[0].seq_group.seqs[0].data._cached_all_token_ids)                        
@@ -774,18 +772,15 @@ class Scheduler:
                         context_blocks = {req: group.seq_group.seqs[0].n_blocks for req, group in zip(requests, ret.decode_seq_groups)}
 
                         layer_time = {}
+                        SLO = {}
                         for sg in ret.decode_seq_groups:
                             req_id = sg.seq_group.request_id
                             # 토큰 개수: _cached_all_token_ids 리스트 길이
                             num_tokens = len(sg.seq_group.seqs[0].data._cached_all_token_ids)
-                            layer_time[req_id] = 1.001743183e06 * num_tokens + 0.0495196                            
-                        layer_time = {req: layer_time_f for req in requests}
-
-                        # TODO(HONG): need to link with real deposit_counts -> need to change SLO
-                        deposit_count = {req: self.deposit_map.get(req, 0) for req in requests}
-
-                        # TODO(HONG): need to get SLO 
-                        SLO = {req: 0.007 for req in requests}
+                            layer_time[req_id] = 1.001743183e06 * num_tokens + 0.0495196
+                            SLO[req_id] = self.slo_from_delaysim[req_id]
+                        
+                        deposit_count = {req: self.deposit_map.get(req, 0) for req in requests}                        
 
                         request_list = [Request(req, context_blocks[req], layer_time[req], deposit_count[req], SLO[req]) for req in requests]
 
