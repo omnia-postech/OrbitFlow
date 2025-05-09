@@ -777,8 +777,8 @@ class Scheduler:
                             req_id = sg.seq_group.request_id
                             # 토큰 개수: _cached_all_token_ids 리스트 길이
                             num_tokens = len(sg.seq_group.seqs[0].data._cached_all_token_ids)
-                            layer_time[req_id] = 1.001743183e06 * num_tokens + 0.0495196
-                            SLO[req_id] = self.slo_from_delaysim[req_id]
+                            layer_time[req_id] = (1.001743183e-06 * num_tokens + 0.0495196) / 32
+                            SLO[req_id] = 1/self.slo_from_delaysim[req_id]
                         
                         deposit_count = {req: self.deposit_map.get(req, 0) for req in requests}                        
 
@@ -797,7 +797,7 @@ class Scheduler:
                             case result:                 
                                 result[0].resume = False # For debugging
                                 self.resume_distances = [sol.n for sol in result if sol.resume]
-                                logger.debug(f"Resume distances for each request: {self.resume_distances}")                                       
+                                logger.info(f"Resume distances for each request: {self.resume_distances}")                                       
                                 pause_ids = {sol.id for sol in result if not sol.resume}
                                 # NOTE(HONG): we need to pause that are not resume status
                                 # get scheduled_seq_group and seq_group that matches with sol.request_id

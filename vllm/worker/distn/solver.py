@@ -34,11 +34,14 @@ class Solver:
         L = layer_num 
         M = 1e6                     # big-M
 
+# === 2. floor/ceil 값 미리 계산 ===
         floor_val = {n: math.floor(L / n) for n in range(1, L+2)}
 
+# === 3. 모델 생성 및 설정 ===
         model = gp.Model('block_solver')
         model.Params.NonConvex = 2    # 비선형 곱 제약 허용
 
+# === 4. 의사결정 변수 ===
         resume        = model.addVars(requests, vtype=GRB.BINARY, name='resume')
 
         prefetch_dist = model.addVars(requests, lb=1, ub=L+2, vtype=GRB.INTEGER, name='prefetch_dist')
@@ -63,12 +66,16 @@ class Solver:
         ratio        = model.addVars(requests, lb=0, name='ratio')
         slo_fail_per_decode     = model.addVars(requests, lb=0, name='slo_fail_per_decode')
 
+# === 5. 제약식 ===
+
+# 5.2 batch_layer = max(layer_time[r] * resume[r])
         for r in requests:
             model.addConstr(batch_layer >= layer_time[r] * resume[r],
                             name=f"batch_layer_{r}")
 
         model.addConstr(1 <= gp.quicksum(resume[r] for r in requests), name="should execute more than 1")
 
+# 5.3 comm_time 정의: 필요한 블록 수 ÷ block_bandwidth
         model.addConstr(
             comm_time == gp.quicksum(
                 resume[r] * offload_num[r] * context_blocks[r]
@@ -77,10 +84,13 @@ class Solver:
             name="comm_time_def"
         )
 
+# 5.4 comp_time = batch_layer * L
         model.addConstr(comp_time == batch_layer * L, name="comp_time_def")
 
+# 5.5 token_time = max(comm_time, comp_time)
         model.addGenConstrMax(token_time, [comm_time, comp_time], name="token_time_max")
 
+# 5.6 actual_time indicator
         for r in requests:
             model.addGenConstrIndicator(resume[r], True,
                                         actual_time[r] == token_time,
@@ -89,6 +99,8 @@ class Solver:
                                         actual_time[r] >= M,
                                         name=f"act_off_{r}")
 
+
+# 5.8 ratio * H = deposit_timer (비선형 제약)
         for r in requests:
             model.addQConstr(ratio[r] * actual_time[r] == decode_steps * SLO[r], name=f"ratio_qc_{r}")
 
@@ -96,6 +108,7 @@ class Solver:
             model.addConstr(slo_fail_per_decode[r] * decode_steps >= decode_steps - ratio[r] - deposit_count[r],
                             name=f"slo_fail_{r}")
 
+# 5.11 GPU 메모리 제약: 필요한 블록 수 ≤ gpu_block_capacity
         model.addConstr(
             gp.quicksum(
                 (L - offload_num[r]) * context_blocks[r]
@@ -104,12 +117,14 @@ class Solver:
             name="memory_limit"
         )
 
+# === 6. 목적함수 및 최적화 ===
         goodput = model.addVar(lb=0, name='obj')
         model.addConstr(goodput * token_time == gp.quicksum(resume[r] for r in requests) - slo_fail_per_decode.sum())
         model.setObjective(goodput, GRB.MAXIMIZE)
         model.Params.OutputFlag = 1
         model.optimize()
 
+# === 7. 결과 출력 ===
         if model.Status == GRB.OPTIMAL:
             print("\n--- Optimal Solution ---")
             print(" r | resume | offload_num | slo_fail | actual_time")
@@ -141,7 +156,7 @@ if __name__ == "__main__":
     context_blocks   = {'r1':  int(300 / 16), 'r2': int(200 / 16), 'r3':  int(150 / 16), 'r4': int(350 / 16)}  # 각 요청에 대해 읽어야 할 메타데이터 블록 수
     layer_time       = {'r1': 0.12, 'r2': 0.12, 'r3': 0.19, 'r4': 0.12}  # ms
     deposit_count    = {'r1': 0,   'r2': 3,   'r3': 100, 'r4': 0}
-    SLO              = {'r1': 1,  'r2': 1,  'r3': 1, 'r4': 1}   # ms
+    SLO              = {'r1': 2,  'r2': 1,  'r3': 3, 'r4': 4}   # ms
 
     requests_list = []
 
@@ -153,3 +168,4 @@ if __name__ == "__main__":
             print("No optimal solution found.")
         case result:
             pass
+

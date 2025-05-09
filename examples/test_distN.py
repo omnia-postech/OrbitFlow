@@ -563,7 +563,7 @@ def main(configs):
     print(f"Logging to {configs.output_log}")
     import sys 
     sys.stdout = open(configs.output_log, 'w')
-    engine = LLMEngine.from_engine_args(args)
+    engine = LLMEngine.from_engine_args(args)  
     
     csv_path = configs.output_log.replace(".log", ".csv")
 
