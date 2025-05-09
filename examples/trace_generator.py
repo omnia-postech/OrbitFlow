@@ -173,7 +173,7 @@ class RequestType:
         self.max_out = max_output_tokens
 
         if (dataset_name == "ShareGPT"):
-            token_bank_path = os.path.join("../samples", f"{dataset_name}.json")
+            token_bank_path = os.path.join("/home/sychoy/vllm/samples", f"{dataset_name}.json")
 
             if not os.path.exists(token_bank_path):
                 print(f"Token bank {token_bank_path} not found. Start to make token bank.")
@@ -629,6 +629,57 @@ class DiscreteBimodalArrival(ArrivalPattern):
 
 
 # -------------------------------------------------------
+# Poisson Bursty
+# -------------------------------------------------------
+class PoissonBurstyArrivalPattern(ArrivalPattern):
+    """
+    Generate requests in bursts:
+    - Each burst has size ~ Poisson(lambda_burst)
+    - Each burst is separated by gap ~ Poisson(lambda_gap)
+    """
+
+    def __init__(self, lambda_burst: float):
+        self.lambda_burst = lambda_burst
+        self.lambda_gap = 0
+
+    @staticmethod
+    def _sample_poisson(lmbd: float) -> int:
+        """Knuth's algorithm for Poisson sampling."""
+        L = math.exp(-lmbd)
+        p = 1.0
+        k = 0
+        while p > L:
+            k += 1
+            p *= random.random()
+        return k - 1
+
+    def generate_arrival_times(self, num_requests: int) -> List[int]:
+        arrivals = []
+        current_time = 0
+        total_requests = 0
+        t = 0
+
+        while total_requests < num_requests:
+            burst_size = min(
+                self._sample_poisson(self.lambda_burst),
+                num_requests - total_requests
+            )
+
+            for i in range(burst_size):
+                offset = random.randint(4, 10)
+                arrivals.append(current_time + offset)
+
+            total_requests += burst_size
+            # 다음 burst까지의 간격
+            gap = int(random.uniform(self.lambda_gap * 0.8, self.lambda_gap))
+
+            current_time += gap
+            t += 1
+
+        return sorted(arrivals)
+
+
+# -------------------------------------------------------
 # Continuous Poisson
 # -------------------------------------------------------
 
@@ -849,6 +900,8 @@ class Trace:
         return (f"Trace(\n"
                 f"  arrival_pattern={self.arrival_pattern_name},\n"
                 f"  batch_size={self.batch_size},\n"
+                f"  max_model_len={self.max_model_len},\n"
+                f"  num_gpu_blocks_override={self.num_gpu_blocks_override},\n"
                 f"  request_type_probs={info},\n"
                 f"  vocab={self.vocab},\n"
                 f"  requests=[{len(self.requests)} dictionary entries]\n"
@@ -908,11 +961,13 @@ class Trace:
             requests=requests_dict,
             arrival_pattern_name=arrival_pattern_str,
             batch_size=data["batch_size"],
+            max_model_len=data["max_model_len"],
             request_type_probs=request_type_probs_data,  # we keep it as-is
             vocab=tuple(data["vocab"]),
             num_gpu_blocks_override=num_gpu_blocks_override,
             gpu_memory_utilization=gpu_memory_utilization
         )
+    
     def add_estimate_sched(self,
                            num_gpu_blocks: int,
                            block_size: int = 16,
@@ -1027,6 +1082,7 @@ class Trace:
         data = {
             "arrival_pattern": _arrival_pattern_to_dict(self.arrival_pattern_name),
             "batch_size": self.batch_size,
+            "max_model_len": self.max_model_len,
             "num_gpu_blocks_override": self.num_gpu_blocks_override,
             "request_type_probs": request_type_probs_data,
             "vocab": self.vocab
@@ -1054,6 +1110,10 @@ class Trace:
 
             # b) batch_size
             f.write(f'  "batch_size":{data["batch_size"]},\n')
+
+            f.write(f'  "max_model_len":{data["max_model_len"]},\n')
+
+            f.write(f'  "num_gpu_blocks_override":{data["num_gpu_blocks_override"]},\n')
 
             # c) request_type_probs (one-liner)
             rtp_json = json.dumps(data["request_type_probs"], separators=(',', ':'))
@@ -1153,6 +1213,17 @@ class TraceType:
         for rt, p in sorted_rt:
             running_sum += p
             self.cumulative_probs.append((rt, running_sum))
+
+        if hasattr(self.arrival_pattern, "lambda_gap"):
+            max_out_across_types = max(rt.max_out for rt in self.request_type_probs.keys())
+            min_out_across_types = min(rt.min_out for rt in self.request_type_probs.keys())
+
+            # 예시 구간: [min_val, max_val] = [max_out * 0.5, max_out * 1.5]
+            min_val = min_out_across_types
+            max_val = max_out_across_types
+            self.arrival_pattern.lambda_gap = int(min_val + (max_val - min_val) * 0.25)
+            print(f"lambda_gap: {self.arrival_pattern.lambda_gap}")
+
 
     def compress_idle_steps(self, requests):
         """
@@ -1395,6 +1466,7 @@ def make_trace_default(
     max_parallel: int = 4,
     arrival_pattern  = DiscretePoissonArrival(lambda_per_step=0.005, max_steps=100000)
 ):
+    arrival_pattern = PoissonBurstyArrivalPattern(lambda_burst=5)
     # predefine some requests 
     shortshort = RequestType(
         category_name="Short-Short ShareGPT",
