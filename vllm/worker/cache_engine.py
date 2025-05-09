@@ -1211,9 +1211,11 @@ class FlattenedCacheEngine(CacheEngineBase):
         elif self.prefetch_mode  == "solver":            
             if not is_decoding and not self._solver_prefill_done:
                 dist = [-1] * len(snapshot.candidates)
+                logger.info(f"[driver] {dist}")
                 self._solver_prefill_done = True                
             else:          
                 dist = self.resume_distances[:len(snapshot.candidates)]
+                logger.info(f"[driver] {dist}")
         elif self.prefetch_mode == "flexgen":
             total_blocks = self.num_gpu_blocks 
             if not is_decoding:
