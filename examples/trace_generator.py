@@ -9,11 +9,18 @@ import json
 import warnings
 import re 
 import math
+import os
+from datasets import load_dataset
+from transformers import AutoTokenizer
 
 from pathlib import Path
 import numpy as np
 from transformers import AutoTokenizer
 import tqdm, json, argparse
+PROFILED_A = 1.0017431830666432e-06
+PROFILED_B = 0.049519613282613506
+import json, argparse
+from tqdm import tqdm
 
 
 def build_token_bank(
@@ -73,13 +80,18 @@ class Request:
     token_ids: List[int]
     sched_time: Optional[float|int] = None
     wait_time: Optional[float|int] = None
-
+    slo: Optional[float|int] = None
     def __repr__(self):
         """
         Custom string representation, including scheduling details if they're available.
         """
         if sched_time := getattr(self, 'sched_time', None):
-            return (f"Request(category={self.category}, prompt={self.input_length}, "
+            if self.slo is not None:
+                return (f"Request(category={self.category}, prompt={self.input_length}, "
+                    f"max_tokens={self.output_length}, slo={self.slo}, arrive_time={self.arrival_time}, "
+                    f"sched_time={sched_time}, wait_time={self.wait_time})")
+            else:
+                return (f"Request(category={self.category}, prompt={self.input_length}, "
                     f"max_tokens={self.output_length}, arrive_time={self.arrival_time}, "
                     f"sched_time={sched_time}, wait_time={self.wait_time})")
         else:
@@ -130,11 +142,12 @@ class RequestType:
     def __init__(
         self,
         category_name: str,
-        min_input_tokens: int,
-        max_input_tokens: int,
-        min_output_tokens: int,
-        max_output_tokens: int,
+        min_input_tokens: int = 0,
+        max_input_tokens: int = 0,
+        min_output_tokens: int = 0,
+        max_output_tokens: int = 0,
         sampling_method: str = "default",
+        dataset_name: str = None,
         **kwargs: Any
     ):
         """
@@ -158,6 +171,25 @@ class RequestType:
         self.max_in = max_input_tokens
         self.min_out = min_output_tokens
         self.max_out = max_output_tokens
+
+        if (dataset_name == "ShareGPT"):
+            token_bank_path = os.path.join("/home/sychoy/vllm/samples", f"{dataset_name}.json")
+
+            if not os.path.exists(token_bank_path):
+                print(f"Token bank {token_bank_path} not found. Start to make token bank.")
+                bank = self.save_token_bank(dataset_name, token_bank_path)
+            else: 
+                with open(token_bank_path, "r", encoding="utf-8") as f:
+                    bank = [json.loads(line) for line in f]
+
+            # trace_limit 조건을 만족하는 샘플만 필터링
+            self.bank = [
+                sample for sample in bank
+                if (self.min_in <= sample["input_length"] <= self.max_in) and
+                    (self.min_out <= sample["output_length"] <= self.max_out)
+            ]
+
+            print(f"{self.category_name} has token bank with {len(self.bank)} samples.")
         
         if sampling_method not in self.SUPPORTED_METHODS:
             raise ValueError(f"Unsupported sampling_method: {sampling_method}")
@@ -294,6 +326,7 @@ class RequestType:
         token_bank_path: Optional[str] = None,
         contiguous: bool = True,
         mmap: bool = True,
+        slo_max = True,
     ):
         """
         Creates a single `Request` object using the configured sampler method
@@ -306,30 +339,87 @@ class RequestType:
                 if (input_length + output_length) > trace_limit:
                     continue  # re-sample
             break
-
+        if slo_max: 
+            total_length = input_length + output_length 
+            slo = total_length * PROFILED_A + PROFILED_B 
         # 2) get the token source
+        
+        if self.bank is not None:
+            bank_size = len(self.bank)
+
+            idx = np.random.randint(0, bank_size)
+            input_length = self.bank[idx]["input_length"]
+            output_length = self.bank[idx]["output_length"]
+            token_ids = self.bank[idx]["input_token_ids"]
+
         if token_bank_path is None:
             token_ids = [random.randint(*vocab) for _ in range(input_length)]
+        
+        if slo_max:
+            return Request(
+                category=self.category_name,
+                input_length=input_length,
+                output_length=output_length,
+                arrival_time=arrival_time,
+                token_ids=token_ids,
+                slo=slo,
+            ) 
+        else:
+            return Request(
+                category=self.category_name,
+                input_length=input_length,
+                output_length=output_length,
+                arrival_time=arrival_time,
+                token_ids=token_ids
+            )
+    
+    def save_token_bank(self, token_bank, token_bank_path):
+        tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3.1-8B-Instruct")
+        parsed_data = []
+
+        test = 1
+        if token_bank == "ShareGPT":
+            json_path = "/home/sychoy/vllm/downloads/ShareGPT_V3_unfiltered_cleaned_split.json"  # JSON 다운로드 위치
+            with open(json_path, "r", encoding="utf-8") as f:
+                dataset = json.load(f)
+
+            # Filter out the conversations with less than 2 turns.
+            dataset = [data for data in dataset if len(data["conversations"]) >= 2]
+            # Only keep the first two turns of each conversation.
+            dataset = [(data["conversations"][0]["value"],
+            data["conversations"][1]["value"]) for data in dataset]
+
+            for i in tqdm(range(len(dataset))):
+                prompt = dataset[i][0]
+                completion = dataset[i][1]
+
+                if (test < 3):
+                    print(f"print {test}th data")
+                    print(dataset[i])
+                    print()
+                    print()
+                    test += 1
+
+                if not prompt or not completion:
+                    continue
+
+                input_tokens = tokenizer.encode(prompt, truncation=True, max_length=2048)
+
+                parsed_data.append({
+                    "input_length": len(prompt),
+                    "output_length": len(completion),
+                    "input_token_ids": input_tokens,
+                })
 
         else:
-            bank = np.load(token_bank_path, mmap_mode="r" if mmap else None)
-            bank_size = bank.shape[0]
-            if bank_size < input_length:
-                raise ValueError("token bank shorter than requested input")
+            raise ValueError(f"Wrong token bank name: {token_bank}")
 
-            if contiguous:
-                start = random.randint(0, bank_size - input_length)
-                token_ids = bank[start : start + input_length].tolist()
-            else:
-                idx = np.random.randint(0, bank_size, size=input_length)
-                token_ids = bank[idx].tolist()
-        return Request(
-            category=self.category_name,
-            input_length=input_length,
-            output_length=output_length,
-            arrival_time=arrival_time,
-            token_ids=token_ids
-        )
+        os.makedirs(os.path.dirname(token_bank_path), exist_ok=True)
+        with open(token_bank_path, "w", encoding="utf-8") as f:
+            for item in parsed_data:
+                f.write(json.dumps(item) + "\n")
+
+        return parsed_data
 
 # -------------------------------------------------------
 # ArrivalPattern Interface
@@ -536,6 +626,57 @@ class DiscreteBimodalArrival(ArrivalPattern):
         return (f"DiscreteBimodalArrival("
                 f"lambda1={self.lambda1}, lambda2={self.lambda2}, "
                 f"p={self.p}, max_steps={self.max_steps})")
+
+
+# -------------------------------------------------------
+# Poisson Bursty
+# -------------------------------------------------------
+class PoissonBurstyArrivalPattern(ArrivalPattern):
+    """
+    Generate requests in bursts:
+    - Each burst has size ~ Poisson(lambda_burst)
+    - Each burst is separated by gap ~ Poisson(lambda_gap)
+    """
+
+    def __init__(self, lambda_burst: float):
+        self.lambda_burst = lambda_burst
+        self.lambda_gap = 0
+
+    @staticmethod
+    def _sample_poisson(lmbd: float) -> int:
+        """Knuth's algorithm for Poisson sampling."""
+        L = math.exp(-lmbd)
+        p = 1.0
+        k = 0
+        while p > L:
+            k += 1
+            p *= random.random()
+        return k - 1
+
+    def generate_arrival_times(self, num_requests: int) -> List[int]:
+        arrivals = []
+        current_time = 0
+        total_requests = 0
+        t = 0
+
+        while total_requests < num_requests:
+            burst_size = min(
+                self._sample_poisson(self.lambda_burst),
+                num_requests - total_requests
+            )
+
+            for i in range(burst_size):
+                offset = random.randint(4, 10)
+                arrivals.append(current_time + offset)
+
+            total_requests += burst_size
+            # 다음 burst까지의 간격
+            gap = int(random.uniform(self.lambda_gap * 0.8, self.lambda_gap))
+
+            current_time += gap
+            t += 1
+
+        return sorted(arrivals)
 
 
 # -------------------------------------------------------
@@ -759,6 +900,8 @@ class Trace:
         return (f"Trace(\n"
                 f"  arrival_pattern={self.arrival_pattern_name},\n"
                 f"  batch_size={self.batch_size},\n"
+                f"  max_model_len={self.max_model_len},\n"
+                f"  num_gpu_blocks_override={self.num_gpu_blocks_override},\n"
                 f"  request_type_probs={info},\n"
                 f"  vocab={self.vocab},\n"
                 f"  requests=[{len(self.requests)} dictionary entries]\n"
@@ -818,11 +961,13 @@ class Trace:
             requests=requests_dict,
             arrival_pattern_name=arrival_pattern_str,
             batch_size=data["batch_size"],
+            max_model_len=data["max_model_len"],
             request_type_probs=request_type_probs_data,  # we keep it as-is
             vocab=tuple(data["vocab"]),
             num_gpu_blocks_override=num_gpu_blocks_override,
             gpu_memory_utilization=gpu_memory_utilization
         )
+    
     def add_estimate_sched(self,
                            num_gpu_blocks: int,
                            block_size: int = 16,
@@ -937,6 +1082,7 @@ class Trace:
         data = {
             "arrival_pattern": _arrival_pattern_to_dict(self.arrival_pattern_name),
             "batch_size": self.batch_size,
+            "max_model_len": self.max_model_len,
             "num_gpu_blocks_override": self.num_gpu_blocks_override,
             "request_type_probs": request_type_probs_data,
             "vocab": self.vocab
@@ -964,6 +1110,10 @@ class Trace:
 
             # b) batch_size
             f.write(f'  "batch_size":{data["batch_size"]},\n')
+
+            f.write(f'  "max_model_len":{data["max_model_len"]},\n')
+
+            f.write(f'  "num_gpu_blocks_override":{data["num_gpu_blocks_override"]},\n')
 
             # c) request_type_probs (one-liner)
             rtp_json = json.dumps(data["request_type_probs"], separators=(',', ':'))
@@ -1064,6 +1214,17 @@ class TraceType:
             running_sum += p
             self.cumulative_probs.append((rt, running_sum))
 
+        if hasattr(self.arrival_pattern, "lambda_gap"):
+            max_out_across_types = max(rt.max_out for rt in self.request_type_probs.keys())
+            min_out_across_types = min(rt.min_out for rt in self.request_type_probs.keys())
+
+            # 예시 구간: [min_val, max_val] = [max_out * 0.5, max_out * 1.5]
+            min_val = min_out_across_types
+            max_val = max_out_across_types
+            self.arrival_pattern.lambda_gap = int(min_val + (max_val - min_val) * 0.25)
+            print(f"lambda_gap: {self.arrival_pattern.lambda_gap}")
+
+
     def compress_idle_steps(self, requests):
         """
         For discrete-time arrival traces, this function compresses any idle periods between
@@ -1132,7 +1293,8 @@ class TraceType:
             req = chosen_rt.generate_request(
                 arrival_time=arrival_time,
                 vocab=self.vocab,
-                trace_limit=trace_limit
+                trace_limit=trace_limit,
+                slo_max=True
             )
             requests.append(req)
 
@@ -1156,208 +1318,260 @@ class TraceType:
         return trace
 
 
-# -------------------------------------------------------
-# Example usage
-# -------------------------------------------------------
-if __name__ == "__main__":
-    
-    max_model_len = 10000
-    block_size = 16
-    num_gpu_blocks = max_model_len//block_size
-    max_parallel = 4 # batch size 
-    
-    arrival_pattern  = DiscretePoissonArrival(lambda_per_step=0.01, max_steps=4000)
-
-    chatbot_qa = RequestType(
-        category_name="ChatBot Q&A",
-        min_input_tokens=20,   # short question
-        max_input_tokens=200,
-        min_output_tokens=20,  # short answer
-        max_output_tokens=200,
-        sampling_method="uniform"
+def build_sched_save(
+    filename: str,
+    request_type_dict: dict,
+    arrival,
+    num_requests: int,
+    max_parallel,
+    num_gpu_blocks: int,
+    block_size: int,
+    plot_distributions: bool = True,            # ← new flag
+    skip_token_ids: bool = True,
+    postfix_trace: str  = "_trace",
+    postfix_model: str  = "_model"
+):
+    import json, random, matplotlib.pyplot as plt
+    from itertools import accumulate
+    from pathlib import Path
+    """
+    1) Make a TraceType
+    2) Generate a trace
+    3) Call add_estimate_sched(...) with the global GPU parameters
+    4) Save trace to JSON  (skip_token_ids=True keeps files small)
+    5) [optional] Plot & save distributions of the generated trace
+       vs. the underlying generative model.
+    """
+    trace_type = TraceType(request_type_dict, arrival, vocab=(200, 30000))
+    trace_obj  = trace_type.generate_requests(
+        num_requests=num_requests, batch_size=max_parallel
     )
 
-    # B) Creative Generation: short input, long output
-    #    Real-world usage: user provides a short prompt, wants a lengthy/creative response.
-    creative_gen = RequestType(
-        category_name="Creative Generation",
-        min_input_tokens=10,
-        max_input_tokens=100,
-        min_output_tokens=500,
-        max_output_tokens=2000,
-        sampling_method="uniform"
+    # GPU-capacity scheduling simulation
+    trace_obj.add_estimate_sched(
+        num_gpu_blocks=num_gpu_blocks, block_size=block_size,
+        max_parallel=max_parallel
     )
 
-    # C) Legal Contract Analysis: large input, large output
-    #    Real-world usage: user uploads a big contract and wants thorough, in-depth analysis.
-    contract_analysis = RequestType(
-        category_name="Legal Contract Analysis",
+    # ---------- 4. persist JSON ----------
+    trace_obj.save_to_json(filename, skip_token_ids=skip_token_ids)
+
+    # -------- NEW: write a summary .txt with total token counts -----------------
+    tot_in  = sum(r.input_length  for r in trace_obj.requests.values())
+    tot_out = sum(r.output_length for r in trace_obj.requests.values())
+
+    txt_path = Path(filename).with_suffix("")  # strip “.json”
+    with open(f"{txt_path}_token_totals.txt", "w") as fh:
+        fh.write(f"total_input_tokens  {tot_in}\n")
+        fh.write(f"total_output_tokens {tot_out}\n")
+
+    # ---------- 5. optional plotting ----------
+    if not plot_distributions:
+        return                                            # nothing else to do
+    # ---------------- empirical data ----------------
+    reqs          = list(trace_obj.requests.values())
+    input_lens    = np.array([r.input_length  for r in reqs])
+    output_lens   = np.array([r.output_length for r in reqs])
+    arrivals      = np.sort([r.arrival_time for r in reqs])
+    inter_arr_emp = np.diff(arrivals)          # empty if len<2
+
+    # ---------------- analytic model ----------------
+    # 1) helper → uniform-mixture PMF
+    def mixture_uniform_pmf(bounds, probs):
+        lo = min(b[0] for b in bounds.values())
+        hi = max(b[1] for b in bounds.values())
+        xs = np.arange(lo, hi + 1)
+        pmf = np.zeros_like(xs, dtype=float)
+        for cat, p in probs.items():
+            a, b = bounds[cat]
+            pmf[(xs >= a) & (xs <= b)] += p / (b - a + 1)
+        return xs, pmf
+
+    # build per-category bounds dicts
+    in_bounds  = {rt.category_name: (rt.min_in,
+                                     rt.max_in)
+                  for rt in request_type_dict}
+    out_bounds = {rt.category_name: (rt.min_out,
+                                     rt.max_out)
+                  for rt in request_type_dict}
+    probs = {rt.category_name: p for rt, p in request_type_dict.items()}
+
+    xin,  pin  = mixture_uniform_pmf(in_bounds,  probs)
+    xout, pout = mixture_uniform_pmf(out_bounds, probs)
+
+    # 2) geometric PMF: P(k) = (1-λ)^{k-1} λ   for k≥1
+    lam = getattr(arrival, "lambda_per_step", None)
+    k_max = (inter_arr_emp.max() if inter_arr_emp.size else 1) + 20
+    k_vals = np.arange(1, k_max + 1)
+    if lam is not None and 0 < lam < 1:
+        pgeom = (1 - lam) ** (k_vals - 1) * lam
+    else:                      # continuous pattern or λ invalid → flat 0
+        pgeom = np.zeros_like(k_vals, dtype=float)
+
+    # ---------------- save helper ----------------
+    stem = Path(filename).with_suffix("")  # remove .json
+
+    def savefig(tag, postfix):
+        out = f"{stem}{postfix}_{tag}.png"
+        plt.savefig(out, dpi=150, bbox_inches="tight")
+        plt.close()
+
+    # ---------------- trace histograms ----------------
+    plt.figure()
+    plt.hist(input_lens, bins=50)
+    plt.xlabel("input length (tokens)"); plt.ylabel("count")
+    plt.title("Trace: input-length distribution")
+    savefig("input", postfix_trace)
+
+    plt.figure()
+    plt.hist(output_lens, bins=50)
+    plt.xlabel("output length (tokens)"); plt.ylabel("count")
+    plt.title("Trace: output-length distribution")
+    savefig("output", postfix_trace)
+
+    if inter_arr_emp.size:
+        plt.figure()
+        plt.hist(inter_arr_emp, bins=50)
+        plt.xlabel("inter-arrival gap"); plt.ylabel("count")
+        plt.title("Trace: inter-arrival distribution")
+        savefig("inter", postfix_trace)
+
+    # ---------------- analytic PDFs / PMF ----------------
+    plt.figure()
+    plt.step(xin, pin, where="mid")
+    plt.xlabel("input length (tokens)"); plt.ylabel("probability")
+    plt.title("Model: input-length PDF (mixture of uniforms)")
+    savefig("input", postfix_model)
+
+    plt.figure()
+    plt.step(xout, pout, where="mid")
+    plt.xlabel("output length (tokens)"); plt.ylabel("probability")
+    plt.title("Model: output-length PDF (mixture of uniforms)")
+    savefig("output", postfix_model)
+
+    if lam is not None and 0 < lam < 1:
+        plt.figure()
+        plt.stem(k_vals, pgeom)
+        plt.xlabel("inter-arrival gap (steps)"); plt.ylabel("probability")
+        plt.title(f"Model: geometric PMF (λ={lam:g})")
+        savefig("inter", postfix_model)
+
+def make_trace_default(
+    filename: str = "benchmark_trace_test.json",
+    request_type_probs: List = [0.25, 0.25, 0.25, 0.25],
+    num_requests: int = 100,
+    batch_size: int = 1, 
+    num_gpu_blocks: int = 6000, 
+    block_size: int = 16,
+    max_parallel: int = 4,
+    arrival_pattern  = DiscretePoissonArrival(lambda_per_step=0.005, max_steps=100000)
+):
+    arrival_pattern = PoissonBurstyArrivalPattern(lambda_burst=5)
+    # predefine some requests 
+    shortshort = RequestType(
+        category_name="Short-Short ShareGPT",
+        min_input_tokens=100,   # short question
+        max_input_tokens=500,
+        min_output_tokens=100,  # short answer
+        max_output_tokens=1000,
+        sampling_method="uniform",
+        dataset_name="ShareGPT"
+    )
+    shortlong = RequestType(
+        category_name="Short-Long ShareGPT",
+        min_input_tokens=100,
+        max_input_tokens=400,
+        min_output_tokens=1000,
+        max_output_tokens=10000,
+        sampling_method="uniform",
+        dataset_name="ShareGPT"
+    )
+    longlong = RequestType(
+        category_name="Long-Long ShareGPT",
         min_input_tokens=2000,
         max_input_tokens=8000,
         min_output_tokens=2000,
         max_output_tokens=10000,
-        sampling_method="uniform"
+        sampling_method="uniform",
+        dataset_name="ShareGPT"
     )
-
-    # D) Proofreading: large input, short output
-    #    Real-world usage: user provides a long text to check; 
-    #    minimal feedback or corrections are returned.
-    proofreading = RequestType(
-        category_name="Proofreading",
-        min_input_tokens=2000,
-        max_input_tokens=5000,
-        min_output_tokens=50,
-        max_output_tokens=200,
-        sampling_method="uniform"
+    longshort = RequestType(
+        category_name="Long-Short ShareGPT",
+        min_input_tokens=5000,
+        max_input_tokens=8000,
+        min_output_tokens=100,
+        max_output_tokens=1000,
+        sampling_method="uniform",
+        dataset_name="ShareGPT"
     )
-
-    # Helper to build a trace, run scheduling, and save JSON
-    def build_sched_save(
-        filename: str,
-        request_type_dict: dict,
-        arrival,
-        num_requests: int,
-        skip_token_ids=True,
-    ):
-        """
-        1) Make a TraceType
-        2) Generate a trace
-        3) Call add_estimate_sched(...) with the global GPU parameters
-        4) Save trace to JSON (skip_token_ids=True)
-        """
-        trace_type = TraceType(request_type_dict, arrival, vocab=(200, 30000))
-        trace_obj = trace_type.generate_requests(num_requests=num_requests, batch_size=max_parallel)
-
-        # Add scheduling data
-        trace_obj.add_estimate_sched(
-            num_gpu_blocks=num_gpu_blocks,
-            block_size=block_size,
-            max_parallel=max_parallel
-        )
-
-        # Save trace
-        trace_obj.save_to_json(filename, skip_token_ids=skip_token_ids)
-        
+    probs_dict = {t:prob for (t,prob) in zip([shortshort, shortlong, longlong, longshort], request_type_probs)}
+    for k,v in probs_dict.items():
+        if v == 0:
+            del probs_dict[k]
+    skip_token_ids = True
+    build_sched_save(
+        filename=filename,
+        request_type_dict=probs_dict,
+        arrival=arrival_pattern,
+        num_requests=num_requests,
+        skip_token_ids=skip_token_ids,
+        max_parallel=max_parallel,
+        num_gpu_blocks=num_gpu_blocks,
+        block_size=block_size,
+    )
+# -------------------------------------------------------
+# Example usage
+# -------------------------------------------------------
+# if __name__ == "__main__":
     
-    skip_token_ids = False
-    # Single Type: ChatBot Q&A only
-    build_sched_save(
-        filename="trace_single_chatbot_qa.json",
-        request_type_dict={chatbot_qa: 1.0},
-        arrival=arrival_pattern,
-        num_requests=20,
-        skip_token_ids=skip_token_ids,
-    )
+#     max_model_len = 10000
+#     block_size = 16
+#     num_gpu_blocks = max_model_len//block_size
+#     max_parallel = 4 # batch size 
+    
+#     arrival_pattern  = DiscretePoissonArrival(lambda_per_step=0.01, max_steps=4000)
 
-    # Single Type: Creative Generation only
-    build_sched_save(
-        filename="trace_single_creative_gen.json",
-        request_type_dict={creative_gen: 1.0},
-        arrival=arrival_pattern,
-        num_requests=20,
-        skip_token_ids=skip_token_ids,
-    )
+#     chatbot_qa = RequestType(
+#         category_name="ChatBot Q&A",
+#         min_input_tokens=20,   # short question
+#         max_input_tokens=200,
+#         min_output_tokens=20,  # short answer
+#         max_output_tokens=200,
+#         sampling_method="uniform"
+#     )
 
-    # Single Type: Legal Contract Analysis only
-    build_sched_save(
-        filename="trace_single_contract_analysis.json",
-        request_type_dict={contract_analysis: 1.0},
-        arrival=arrival_pattern,
-        num_requests=20,
-        skip_token_ids=skip_token_ids,
-    )
+#     # B) Creative Generation: short input, long output
+#     #    Real-world usage: user provides a short prompt, wants a lengthy/creative response.
+#     creative_gen = RequestType(
+#         category_name="Creative Generation",
+#         min_input_tokens=10,
+#         max_input_tokens=100,
+#         min_output_tokens=500,
+#         max_output_tokens=2000,
+#         sampling_method="uniform"
+#     )
 
-    # Single Type: Proofreading only
-    build_sched_save(
-        filename="trace_single_proofreading.json",
-        request_type_dict={proofreading: 1.0},
-        arrival=arrival_pattern,
-        num_requests=20,
-        skip_token_ids=skip_token_ids,
-    )
+#     # C) Legal Contract Analysis: large input, large output
+#     #    Real-world usage: user uploads a big contract and wants thorough, in-depth analysis.
+#     contract_analysis = RequestType(
+#         category_name="Legal Contract Analysis",
+#         min_input_tokens=2000,
+#         max_input_tokens=8000,
+#         min_output_tokens=2000,
+#         max_output_tokens=10000,
+#         sampling_method="uniform"
+#     )
 
-    # 4) Generate traces that mix any two of the above.
-    #    We define real-world usage scenarios where certain tasks appear together.
-
-    # A) ChatBot Q&A + Creative Generation
-    #    Real-world: an LLM platform with primarily short queries,
-    #    but some users ask for bigger creative expansions. 
-    build_sched_save(
-        filename="trace_mix2_chatbot_creative.json",
-        request_type_dict={chatbot_qa: 0.7, creative_gen: 0.3},  # 70/30
-        arrival=arrival_pattern,
-        num_requests=30,
-        skip_token_ids=skip_token_ids,
-    )
-
-    # B) Creative Generation + Proofreading
-    #    Real-world: writer platform that frequently requests large expansions 
-    #    and sometimes does quick grammar checks on existing text.
-    build_sched_save(
-        filename="trace_mix2_creative_proofreading.json",
-        request_type_dict={creative_gen: 0.4, proofreading: 0.6},  # 40/60
-        arrival=arrival_pattern,
-        num_requests=30,
-        skip_token_ids=skip_token_ids,
-    )
-
-    # C) ChatBot Q&A + Contract Analysis
-    #    Real-world: a service that mostly does short Q&A, but occasionally
-    #    users send big documents for legal analysis.
-    build_sched_save(
-        filename="trace_mix2_chatbot_contract.json",
-        request_type_dict={chatbot_qa: 0.8, contract_analysis: 0.2},
-        arrival=arrival_pattern,
-        num_requests=30,
-        skip_token_ids=skip_token_ids,
-    )
-
-    # ... (Similarly, you could define other pairs if you want) ...
-
-    # 5) Mixes of three
-    #    Example: ChatBot Q&A + Creative Gen + Proofreading 
-    #    Real-world: a content creation tool used mostly for short QA, 
-    #    sometimes for bigger creative expansions, occasionally for proofreading.
-
-    build_sched_save(
-        filename="trace_mix3_chatbot_creative_proof.json",
-        request_type_dict={
-            chatbot_qa: 0.5,
-            creative_gen: 0.3,
-            proofreading: 0.2,
-        },
-        arrival=arrival_pattern,
-        num_requests=40,
-        skip_token_ids=skip_token_ids,
-    )
-
-    # Another 3-type scenario: ChatBot Q&A + Contract Analysis + Proofreading
-    # e.g., a general LLM that gets short Q&A requests, big legal docs, and quick proof edits
-    build_sched_save(
-        filename="trace_mix3_chatbot_contract_proof.json",
-        request_type_dict={
-            chatbot_qa: 0.4,
-            contract_analysis: 0.4,
-            proofreading: 0.2
-        },
-        arrival=arrival_pattern,
-        num_requests=40,
-        skip_token_ids=skip_token_ids,
-    )
-
-    # 6) Mix of all four
-    #    Real-world: a general-purpose LLM system that handles a variety 
-    #    of requests – short Q&A, creative expansions, big doc analysis, quick proofreading.
-
-    build_sched_save(
-        filename="trace_mix4_all.json",
-        request_type_dict={
-            chatbot_qa: 0.25,
-            creative_gen: 0.25,
-            contract_analysis: 0.25,
-            proofreading: 0.25
-        },
-        arrival=arrival_pattern,
-        num_requests=50,
-        skip_token_ids=skip_token_ids,
-    )
+#     # D) Proofreading: large input, short output
+#     #    Real-world usage: user provides a long text to check; 
+#     #    minimal feedback or corrections are returned.
+#     proofreading = RequestType(
+#         category_name="Proofreading",
+#         min_input_tokens=2000,
+#         max_input_tokens=5000,
+#         min_output_tokens=50,
+#         max_output_tokens=200,
+#         sampling_method="uniform"
+#     )
+if __name__ == "__main__":
+    make_trace_default("/home/sychoy/vllm/samples/traces/benchmark_trace_test.json",)

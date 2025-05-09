@@ -917,7 +917,6 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
 
                 # release the memory associated with those blocks
                 self.block_tables[seq_id][layer].free()
-        logger.debug(f"freed_blocks: {freed_blocks}")
         return freed_blocks
     
     def _allocate_sequence(self, seq: Sequence, device: Device = Device.GPU) -> BlockTable: # Xinyue
@@ -951,8 +950,6 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         block_table.allocate(token_ids=token_ids,
                         device=Device.GPU)
         if (n_blocks > len(block_table._blocks)): # if the request was resumed with a lookahead block
-            logger.debug(f"allocate_seq_by_layer: {seq_id}, {layer_id}, {n_blocks} > {len(block_table._blocks)}")
-            logger.debug(f"allocate_seq_by_layer: {len(token_ids)} tokens, token_ids {token_ids}")
             num_empty_slots = block_table._blocks._blocks[-1].num_empty_slots
             block_table.append_token_ids(
                 token_ids = [],
@@ -1246,10 +1243,8 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
             return (num_blocks_touched, AllocStatus.NEVER)
         elif self.block_allocator.get_num_free_blocks(
                 device) - num_blocks_touched - num_additional >= watermark_blocks:
-            logger.info(f"num_touched {num_blocks_touched}, have {self.block_allocator.get_num_free_blocks(device)}")
             return (num_blocks_touched, AllocStatus.OK)
         else:
-            logger.info(f"num_touched {num_blocks_touched}, have {self.block_allocator.get_num_free_blocks(device)}")
             return (num_blocks_touched, AllocStatus.LATER)
 
     def _can_swap(self,

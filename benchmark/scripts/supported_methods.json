@@ -1,0 +1,27 @@
+{
+    "Flexgen": [
+      "--prefetch-mode",        "flexgen",
+      "--prefetch-distance",    "1",
+      "--flattened-cache",      "true",
+      "--merge-prefetch-buffer", "true"
+    ],
+    "NoPrefetch": [
+        "--prefetch-mode",        "none",
+        "--prefetch-distance",    "1",
+        "--flattened-cache",      "true",
+        "--merge-prefetch-buffer", "true"
+    ],
+    "NextLayer": [
+    "--prefetch-mode",        "static",
+    "--prefetch-distance",    "0",
+    "--flattened-cache",      "true",
+    "--merge-prefetch-buffer", "true"
+    ],
+    "SelectN": [
+    "--prefetch-mode",        "selectn",
+    "--prefetch-distance",    "1",
+    "--flattened-cache",      "true",
+    "--merge-prefetch-buffer", "true"
+    ]
+  }
+  

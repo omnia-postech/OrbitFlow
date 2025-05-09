@@ -866,7 +866,6 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         create on-device tensors.
         """
         # Combine and flatten intermediate data.
-        logger.debug(f"build got cpu_offset {[i.cpu_offset for i in self.inter_data_list]}")
         
         input_tokens = []
         token_types = []
@@ -1750,16 +1749,10 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
             model_forward_start.record()
 
         if not bypass_model_exec:
-            logger.debug(f"model runner received {model_input.attn_metadata}")
             if  model_input.attn_metadata.slot_mapping.ndim == 2: 
                 layer_metas = build_layer_metadata(model_input.attn_metadata)
-                logger.debug(f"model runner received L1 {layer_metas[1].block_tables}")
-                logger.debug(f"model runner received L1 {layer_metas[1].slot_mapping}")
-                logger.debug(f"model runner received L2 {layer_metas[2].block_tables}")
-                logger.debug(f"model runner received L2 {layer_metas[2].slot_mapping}")
             else:
                 layer_metas = model_input.attn_metadata # profile run
-                logger.debug(f"model runner received 1D meta {layer_metas}")
 
             with set_forward_context(layer_metas, self.vllm_config):
                 hidden_or_intermediate_states = model_executable(

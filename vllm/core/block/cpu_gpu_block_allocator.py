@@ -178,7 +178,6 @@ class CpuGpuBlockAllocator(DeviceAwareBlockAllocator):
     #     for i in range(new_blocks, num_blocks):
     #         self._free_block_indices.append(i)
     #     msg += f", free blocks after update: {self._free_block_indices}"
-    #     logger.info(msg)
         
     #     self._all_block_indices = frozenset(range(num_blocks))
         

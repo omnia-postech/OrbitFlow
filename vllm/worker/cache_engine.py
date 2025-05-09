@@ -22,6 +22,8 @@ logger = init_logger(__name__)
 from math import ceil
 from typing import Sequence, Literal
 PREFETCH_GROW_STEP = 100          # <-- set once, reuse everywhere
+PROFILED_A = 1.0017431830666432e-06
+PROFILED_B = 0.049519613282613506
 import json 
 import copy
 import math
@@ -944,6 +946,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             seq_group_metadata=seq_group_metadata,
         )
         dist_dict, _ = self._select_prefetch_distance(snap, self.prefetch_distance, total_context_lens, is_decoding)
+        logger.critical(f"dist:{dist_dict}")
         plan = self._plan_cache_delta(snap, dist_dict)
 
         return plan, dist_dict
@@ -1152,7 +1155,7 @@ class FlattenedCacheEngine(CacheEngineBase):
 
         return total_blocks * t_per_block
 
-    def compute_comp_time_for_requests(self, slo_allowed: float) -> float:
+    def compute_comp_time_for_requests(self, slo_allowed: float, max_comp_time=None) -> float:
         """
         SelectN 공식 기반의 분자 계산:
           numerator = t_layer * (1 + δ)
@@ -1167,12 +1170,13 @@ class FlattenedCacheEngine(CacheEngineBase):
             float: numerator 값 (초)
         """
         # TODO(HONG): need to change from getting proper compute time of batched reqeusts from profiled record  
-        total_compute = 0.12047052383422852
+        if not max_comp_time:
+            max_comp_time = 0.12047052383422852
         num_layers = self.block_manager.num_attention_layers
-        t_layer = total_compute / num_layers
+        t_layer = max_comp_time / num_layers
 
         # δ 계산: (SLO - naive) / naive
-        delta = (slo_allowed - total_compute) / total_compute
+        delta = (slo_allowed - max_comp_time) / max_comp_time
         delta = max(delta, 0.0)
 
         # numerator = t_layer * (1 + δ)
@@ -1211,36 +1215,25 @@ class FlattenedCacheEngine(CacheEngineBase):
             else:          
                 dist = self.resume_distances[:len(snapshot.candidates)]
         elif self.prefetch_mode == "flexgen":
-            free_mem, total_mem = torch.cuda.mem_get_info()
-            msg = f"Free Memory: {free_mem / 1024 / 1024} MB"
-            logger.info(msg)
-            msg = f"Total Memory: {total_mem / 1024 / 1024} MB"
-            logger.info(msg)
-
-            if not is_decoding and self.free_mem_at_first_prefill_step is None:
-                self.free_mem_at_first_prefill_step = int(free_mem * 0.8)
-                logger.info(f"[flexgen] first prefill step free_mem: {self.free_mem_at_first_prefill_step / 1024 / 1024:.2f} MB")
+            total_blocks = self.num_gpu_blocks 
+            if not is_decoding:
                 self.flexgen_dist = -1
-            
-            # if not is_decoding:
-            #     self.prev_flexgen_distance = None
-
             if is_decoding and self.prev_flexgen_distance is None:
-                KV_cache_size = self.get_KV_cache_size_for_single_layers(total_context_lens)
-                num_layers_on_GPU = math.floor(self.free_mem_at_first_prefill_step / KV_cache_size)
+                blocks_per_layer = 0
+                for ctx_len in total_context_lens:
+                    blocks_per_layer += math.ceil(ctx_len / self.block_size)
+                
+                num_layers_on_GPU = (total_blocks // blocks_per_layer)
                 num_layers_on_GPU = min(32, num_layers_on_GPU)
                 num_layers_to_offload = 32 - num_layers_on_GPU
                 if num_layers_to_offload == 0:
                     self.prev_flexgen_distance = -1
                 else:
-                    self.prev_flexgen_distance = math.floor(self.block_manager.num_attention_layers / num_layers_to_offload)
+                    self.prev_flexgen_distance = self.block_manager.num_attention_layers // num_layers_to_offload
                     self.prev_flexgen_distance = max(0, self.prev_flexgen_distance)
                 logger.info(f"[flexgen] prefill → distance set to {self.prev_flexgen_distance}")
                 self.flexgen_dist = self.prev_flexgen_distance
-            
-            # distance = self.prev_flexgen_distance
             dist = [self.flexgen_dist] * len(snapshot.candidates)
-            
             if not is_decoding:
                 self.prev_flexgen_distance = None
 
@@ -1254,8 +1247,11 @@ class FlattenedCacheEngine(CacheEngineBase):
             if is_decoding and self.need_update_selectn: 
                 logger.info(f"[driver] First decoding going on")                     
                 comm_time = self.compute_comm_time_for_requests(total_context_lens)
-                slo_allowed = 0.005 # TTFT: 0.05s TPOT: 0.005s
-                comp_time = self.compute_comp_time_for_requests(slo_allowed)
+                slo_ratio = 0.5 # hardcoded
+                max_comp_time = sum(total_context_lens) * PROFILED_A + PROFILED_B
+                slo_allowed = max_comp_time / slo_ratio 
+                
+                comp_time = self.compute_comp_time_for_requests(slo_allowed, max_comp_time)
                 self.prev_selectn_distance = self.prefetch_distance_for_seletcn(comm_time, comp_time)
                 self.need_update_selectn = False
 

@@ -18,6 +18,8 @@ import pandas as pd
 import torch 
 import bisect
 import torch
+import csv, os, pathlib
+
 torch.set_printoptions(edgeitems=2, linewidth=120, sci_mode=True)
 # --- Config ---
 MODEL = "/home/jongseop/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"
@@ -28,6 +30,8 @@ MAX_MODEL_LEN = 13000
 BLOCK_SIZE  = 16
 SLO_THRESHOLD = 0.5      
 CSV_OUTPUT_FILE = "metrics.csv"
+PROFILED_A = 1.0017431830666432e-06
+PROFILED_B = 0.049519613282613506
 test_trace = {
     "description": "Continuous batching; BS = 4; A6000 with 48GB memory; Continuous batched request too large to fit in available memory.", 
     "batch_size": 4, 
@@ -45,20 +49,34 @@ test_trace = {
 DEFAULT_PROMPTS = test_trace
 
 class DelaySimulator:
-    def __init__(self, v_tps: float):        
+    def __init__(self, v_tps: float, slo_ratio: float = 0.5, deposit_enabled: bool = True):        
         # v_tps: tokens per second
-        self.v = v_tps
+        self.deposit_enabled = deposit_enabled # if disabled, deposit is empty and the simulator only keeps track of slo violations
+        self.v_default = v_tps          # keep for backwards compatibility
+        self.v = {}                           # rid -> tokens/sec
         self.last_time = {}
         self.last_decode_time = 0.0
         # self.interval = 1.0 / v_tps       # 토큰 하나가 배출되어야 하는 간격(초)
         # self.next_deadline = self.interval
         self.deposit = defaultdict(int)   # request_id → 누적된 토큰 수
+        self.violations = defaultdict(int)      #  #of slo violations for each request
+        self.slo_ratio = slo_ratio
+        logger.info(f"[Simulator __init__] v_tps={self.v_default:.3f} tokens/sec")
 
-        logger.info(f"[Simulator __init__] v_tps={self.v:.3f} tokens/sec")
+    def register(self, rid: str, slo_s_per_token: float):
+        if slo_s_per_token <= 0:
+            raise ValueError("SLO must be > 0")
+        slo_s_per_token = slo_s_per_token / self.slo_ratio # slo = 1.0, ratio = 0.5 => real slo = 2 
+        self.v[rid] = 1.0 / slo_s_per_token
+        self.deposit[rid] = 0
+        self.violations[rid] = 0
 
     def on_token(self, rid: str, step_time: float):
         before = self.deposit[rid]
-        self.deposit[rid] += 1
+        if self.deposit_enabled:
+            self.deposit[rid] += 1
+        else: 
+            self.deposit[rid] = 1 # exactly 1 token, since we assume whatever we had is sent right away
         after = self.deposit[rid]
         
         if rid not in self.last_time: 
@@ -74,24 +92,28 @@ class DelaySimulator:
 
         for rid, dep in list(self.deposit.items()):
             last   = self.last_time.get(rid, step_time)
-            dt     = step_time - last             
-            n      = int(dt * self.v)             
+            dt     = step_time - last           
+            v  = self.v.get(rid, self.v_default)  # default v_tps  
+            n      = int(dt * v)             
             if n <= 0:
                 continue
 
             # release n tokens, but not more than deposit
             if dep < n:
+                self.violations[rid] += 1 
                 rid_log.append(f"{rid}(SLO {dep}/{n})")
             else:
-                rid_log.append(f"{rid}({n})")
+                rid_log.append(f"{rid}({n})@{v:.2f}t/s)")
             to_rel = min(n, dep)
             # deposit 차감
             self.deposit[rid] -= to_rel
+            if self.deposit[rid] == 0:         # backlog cleared → reset stopwatch
+                self.last_time[rid] = step_time   #  ← NEW LINE
             pops.append((rid, to_rel))
             
             # last_time[rid] 을 방출된 토큰 시간만큼 앞으로 이동
             # 즉, to_rel tokens / v_tps 만큼 경과시킨 것처럼
-            advance = to_rel / self.v
+            advance = to_rel / v
             self.last_time[rid] = last + advance
         # single-line summary
         if rid_log:
@@ -101,7 +123,8 @@ class DelaySimulator:
                 " | ".join(rid_log),
             )
         return pops
-    
+    def violation_count(self, rid: str) -> int:
+        return self.violations.get(rid, 0)
     def finish(self, rid: str):
         """요청 완료 시 호출: 남은 deposit 제거, tracking 변수 cleanup"""
         if rid in self.deposit:
@@ -110,6 +133,10 @@ class DelaySimulator:
         if rid in self.last_time:
             logger.info(f"[finish] removing last_time entry for {rid}")
             del self.last_time[rid]
+        if rid in self.v:
+            self.v.pop(rid, None)
+        if rid in self.violations:
+            self.violations.pop(rid,None)
 
     def stats(self) -> dict:
         """현재 deposit 맵(rid→남은 토큰 수) 반환."""
@@ -161,7 +188,7 @@ def enqueue_batch(engine, batch, request_metadata):
         )
         engine.add_request(req_id, prompt_obj, sampling_params)
 
-def run_inference_step_mode(engine, trace_obj, csv_path=None):
+def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=False):
     """
     Step-based inference driver that consumes a Trace object (dictionary-based).
     Each request's arrival_time is interpreted as the 'arrive_at_step'.
@@ -267,7 +294,27 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
             engine.add_request(req_id, prompt_obj, sampling_params)
 
     SLO_THRESHOLD = 0.5 # TBT SLO (seconds per token)
-    sim = DelaySimulator(v_tps=1/SLO_THRESHOLD)
+    sim = DelaySimulator(v_tps=1/SLO_THRESHOLD, slo_ratio=0.5, deposit_enabled=enable_deposit)
+
+    if csv_path is None:
+        csv_path = "metrics.csv"
+    csv_path = pathlib.Path(csv_path)
+
+    # True if we need to write the header row first
+    write_header = not csv_path.exists()
+    csv_fh = csv_path.open("a", newline="", buffering=1)   # line-buffered I/O
+    csv_writer = csv.DictWriter(csv_fh, fieldnames=[
+        "request_id", "arrival_time", "first_scheduled_time",
+        "finished_time", "stall_times",
+        "time_to_first_token", "slo_threshold",
+        "slo_violations",
+        "stall_duration", "decode_length",
+        "end_to_end_time", "decode_time",
+        "time_per_output_token", "time_between_tokens",
+        "stall_durations",
+    ])
+    if write_header:
+        csv_writer.writeheader()
 
     # The main simulation loop
     while queue or request_metadata:
@@ -278,6 +325,14 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
         if ready:
             # We enqueue *all* that are <= cumulative_steps
             enqueue_batch(engine, ready, request_metadata)
+            for (req_id, req_obj )in ready: 
+                if hasattr(req_obj, "slo") and req_obj.slo is not None: 
+                    max_slo = req_obj.slo
+                    slo = sim.register(req_id, max_slo)
+                else: 
+                    max_slo = PROFILED_A*(req_obj.input_length + req_obj.output_length) + PROFILED_B
+                    slo = sim.register(req_id, max_slo)
+                logger.critical(f"Enqueued request {req_id} with max_slo {max_slo} and SLO {(1/sim.v[req_id]):.3f} ms per token")
             # Remove them from the queue
             queue = [(req_id, req_obj) for (req_id, req_obj) in queue
                      if req_obj.arrival_time > cumulative_steps]
@@ -285,6 +340,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
         # TODO(Heelim): need to send metadata to scheduler to make decision of which request and when to pause and resume
         deposit_map = sim.stats()  
         engine.scheduler[0].deposit_map = deposit_map
+        engine.scheduler[0].v_tps = sim.v 
         # NOTE(HONG): use below for pipelining parallelism
         step_start = time.time()
         step_outputs = engine.step()
@@ -341,10 +397,10 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
 
             # If the request is finished:
             if output.finished:
-                logger.info(f"Finished request {rid} at step {cumulative_steps}, finish_reason={output.outputs[0].finish_reason}")
-                logger.info(f"{rid} prompt: {len(output.prompt_token_ids)} tokens; {output.prompt_token_ids[:20]}")
-                logger.info(f"{rid} output: {len(output.prompt_token_ids)} {output.outputs[0].token_ids[:20]}")
-                logger.info(f"{rid} text: {output.outputs[0].text[:20]}")
+                logger.critical(f"Finished request {rid} at step {cumulative_steps}, finish_reason={output.outputs[0].finish_reason}")
+                logger.critical(f"{rid} prompt: {len(output.prompt_token_ids)} tokens; {output.prompt_token_ids[:20]}")
+                logger.critical(f"{rid} output: {len(output.prompt_token_ids)} {output.outputs[0].token_ids[:20]}")
+                logger.critical(f"{rid} text: {output.outputs[0].text[:20]}")
                 running_requests.remove(rid)
 
                 # ------------------------------------------------------------------
@@ -377,10 +433,9 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
                     "first_scheduled_time": 0,                 # not available locally
                     "finished_time": finished_time_local - (start_time or 0),
                     "stall_times": json.dumps(request_metadata[rid]["stall_times"]),
-                    "wait_duration": 0.0,                       # not measured here
                     "time_to_first_token": first_token_time_local - arrival_time_local,
-                    "model_execute_time": 0.0,                 # not measured here
-                    "scheduler_overehad": 0.0,                 # not measured here
+                    "slo_threshold": sim.v[rid],
+                    "slo_violations": sim.violation_count(rid),
                     "stall_duration": request_metadata[rid]["stall_duration"],
                     "decode_length": decode_length,
                     "end_to_end_time": finished_time_local - arrival_time_local,
@@ -390,6 +445,8 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
                     "stall_durations": json.dumps(request_metadata[rid]["stall_durations"]),
                 }
                 metrics_data.append(row)
+                csv_writer.writerow(row)
+                csv_fh.flush()  
 
                 request_metadata.pop(rid)
                 logger.info(f"Finished request {rid} with {decode_length} decode tokens")
@@ -480,6 +537,8 @@ def main(configs):
     print(f"merge_prefetch_buffer: {merge_prefetch_buffer}")
     print(f"pause_and_resume: {pause_and_resume}")
     
+    if flattened_cache and num_gpu_blocks_override is not None:
+        num_gpu_blocks_override *= 32 
     args = EngineArgs(
         model=MODEL,
         max_model_len=max_model_len,
@@ -490,7 +549,7 @@ def main(configs):
         disable_log_stats=True,
         gpu_memory_utilization=gpu_memory_utilization,
         enforce_eager=True,
-        num_gpu_blocks_override=num_gpu_blocks_override*32 if flattened_cache else num_gpu_blocks_override,
+        num_gpu_blocks_override=num_gpu_blocks_override,
         preemption_mode="pause",
         is_monolithic_distn=is_monolithic_distn,
         prefetch_mode = prefetch_mode,
@@ -498,7 +557,7 @@ def main(configs):
         enable_chunked_prefill=False,
         flattened_cache=flattened_cache,
         merge_prefetch_buffer=merge_prefetch_buffer,
-        pause_and_resume=pause_and_resume,
+        pause_and_resume=False,
         disable_sliding_window=True,
     )
     print(f"Logging to {configs.output_log}")
@@ -506,7 +565,9 @@ def main(configs):
     sys.stdout = open(configs.output_log, 'w')
     engine = LLMEngine.from_engine_args(args)
     
-    run_inference_step_mode(engine, trace, csv_path=configs.output_log.replace(".log", ".csv"))
+    csv_path = configs.output_log.replace(".log", ".csv")
+
+    run_inference_step_mode(engine, trace, csv_path=csv_path,enable_deposit=configs.enable_deposit)
 
 if __name__ == "__main__":
     from vllm.utils import FlexibleArgumentParser
@@ -543,6 +604,10 @@ if __name__ == "__main__":
                         action="store_true",
                         default=False,
                         help="whether to use pause and resume")
+    parser.add_argument("--enable-deposit",
+                        action="store_true",
+                        default=False,
+                        help="whether to use use token deposit")
     args = parser.parse_args()    
     print(args)
     # --- Setup Logging ---

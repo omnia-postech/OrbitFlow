@@ -1,0 +1,14 @@
+{
+  "arrival_pattern":{"type":"DiscretePoissonArrival","params":{"lambda_per_step":0.001,"max_steps":7000}},
+  "batch_size":4,
+  "request_type_probs":[["Short-Short",0.25],["Short-Long",0.25],["Long-Long",0.25],["Long-Short",0.25]],
+  "vocab":[200,30000],
+  "requests":{
+    "request_0":{"category":"Long-Short","input_length":6285,"output_length":640,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_1":{"category":"Short-Long","input_length":170,"output_length":8086,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_2":{"category":"Long-Short","input_length":6725,"output_length":119,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_3":{"category":"Short-Long","input_length":276,"output_length":4370,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_4":{"category":"Short-Short","input_length":439,"output_length":372,"arrival_time":4088,"sched_time":4088,"wait_time":0},
+    "request_5":{"category":"Short-Short","input_length":202,"output_length":750,"arrival_time":4462,"sched_time":4462,"wait_time":0}
+  }
+}
