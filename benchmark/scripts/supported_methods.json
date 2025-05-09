@@ -17,12 +17,24 @@
     "--flattened-cache",      "true",
     "--merge-prefetch-buffer", "true"
     ],
+    "Static1": [
+        "--prefetch-mode",        "static",
+        "--prefetch-distance",    "1",
+        "--flattened-cache",      "true",
+        "--merge-prefetch-buffer", "true"
+    ],
     "Static2": [
         "--prefetch-mode",        "static",
         "--prefetch-distance",    "2",
         "--flattened-cache",      "true",
         "--merge-prefetch-buffer", "true"
         ],
+    "Static8": [
+        "--prefetch-mode",        "static",
+        "--prefetch-distance",    "8",
+        "--flattened-cache",      "true",
+        "--merge-prefetch-buffer", "true"
+    ],
     "SelectN": [
     "--prefetch-mode",        "selectn",
     "--prefetch-distance",    "1",
