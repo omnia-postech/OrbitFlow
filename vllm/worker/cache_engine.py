@@ -940,6 +940,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             seq_group_metadata=seq_group_metadata,
         )
         dist_dict, _ = self._select_prefetch_distance(snap, self.prefetch_distance, total_context_lens, is_decoding)
+        logger.critical(f"dist:{dist_dict}")
         plan = self._plan_cache_delta(snap, dist_dict)
 
         return plan, dist_dict
@@ -1222,36 +1223,27 @@ class FlattenedCacheEngine(CacheEngineBase):
 
             
         elif self.prefetch_mode == "flexgen":
-            free_mem, total_mem = torch.cuda.mem_get_info()
-            msg = f"Free Memory: {free_mem / 1024 / 1024} MB"
-            logger.info(msg)
-            msg = f"Total Memory: {total_mem / 1024 / 1024} MB"
-            logger.info(msg)
+            free_blocks = self.block_manager.get_num_free_gpu_blocks() 
+            total_blocks = self.num_gpu_blocks 
+            
 
             if not is_decoding and self.free_mem_at_first_prefill_step is None:
-                self.free_mem_at_first_prefill_step = int(free_mem * 0.8)
-                logger.info(f"[flexgen] first prefill step free_mem: {self.free_mem_at_first_prefill_step / 1024 / 1024:.2f} MB")
+                self.free_mem_at_first_prefill_step = int(free_blocks * 0.8)
+                logger.info(f"[flexgen] first prefill step free_mem: {self.free_mem_at_first_prefill_step} blocks")
                 self.flexgen_dist = -1
-            
-            # if not is_decoding:
-            #     self.prev_flexgen_distance = None
-
+            self.flexgen_dist = -1
             if is_decoding and self.prev_flexgen_distance is None:
-                KV_cache_size = self.get_KV_cache_size_for_single_layers(total_context_lens)
-                num_layers_on_GPU = math.floor(self.free_mem_at_first_prefill_step / KV_cache_size)
+                num_layers_on_GPU = ((self.free_mem_at_first_prefill_step // free_blocks))
                 num_layers_on_GPU = min(32, num_layers_on_GPU)
                 num_layers_to_offload = 32 - num_layers_on_GPU
                 if num_layers_to_offload == 0:
                     self.prev_flexgen_distance = -1
                 else:
-                    self.prev_flexgen_distance = math.floor(self.block_manager.num_attention_layers / num_layers_to_offload)
+                    self.prev_flexgen_distance = self.block_manager.num_attention_layers // num_layers_to_offload
                     self.prev_flexgen_distance = max(0, self.prev_flexgen_distance)
                 logger.info(f"[flexgen] prefill → distance set to {self.prev_flexgen_distance}")
                 self.flexgen_dist = self.prev_flexgen_distance
-            
-            # distance = self.prev_flexgen_distance
             dist = [self.flexgen_dist] * len(snapshot.candidates)
-            
             if not is_decoding:
                 self.prev_flexgen_distance = None
 
