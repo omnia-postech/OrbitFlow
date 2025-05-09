@@ -1273,7 +1273,7 @@ class FlattenedCacheEngine(CacheEngineBase):
                 prev_dist = list(snapshot.prev_dist_dict.values())[0]
                 if prev_dist == -1:
                     dist = [self.num_attention_layers//2] * len(snapshot.candidates)
-                elif not prev_dist == 0:
+                elif prev_dist > 0:
                     dist = [prev_dist - 1] * len(snapshot.candidates) 
                 else: 
                     dist = [prev_dist] * len(snapshot.candidates)
