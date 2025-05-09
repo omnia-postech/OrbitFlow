@@ -9,11 +9,15 @@ import json
 import warnings
 import re 
 import math
+import os
+from datasets import load_dataset
+from transformers import AutoTokenizer
 
 from pathlib import Path
 import numpy as np
 from transformers import AutoTokenizer
-import tqdm, json, argparse
+import json, argparse
+from tqdm import tqdm
 
 
 def build_token_bank(
@@ -130,10 +134,10 @@ class RequestType:
     def __init__(
         self,
         category_name: str,
-        min_input_tokens: int,
-        max_input_tokens: int,
-        min_output_tokens: int,
-        max_output_tokens: int,
+        min_input_tokens: int = 0,
+        max_input_tokens: int = 0,
+        min_output_tokens: int = 0,
+        max_output_tokens: int = 0,
         sampling_method: str = "default",
         **kwargs: Any
     ):
@@ -158,6 +162,11 @@ class RequestType:
         self.max_in = max_input_tokens
         self.min_out = min_output_tokens
         self.max_out = max_output_tokens
+
+        if (self.category_name == "ShareGPT"):
+            self.use_bank = True
+        else:
+            self.use_bank = False
         
         if sampling_method not in self.SUPPORTED_METHODS:
             raise ValueError(f"Unsupported sampling_method: {sampling_method}")
@@ -291,38 +300,46 @@ class RequestType:
         arrival_time: float = 0.0,
         vocab: Tuple[int, int] = (200, 30_000),
         trace_limit: Optional[int] = None,
-        token_bank_path: Optional[str] = None,
-        contiguous: bool = True,
-        mmap: bool = True,
     ):
         """
         Creates a single `Request` object using the configured sampler method
         to select input_length and output_length. Then optionally checks trace_limit.
         """
-        # 1) Sample the lengths
-        while True:
-            input_length, output_length = self.sampler()
-            if trace_limit is not None:
-                if (input_length + output_length) > trace_limit:
-                    continue  # re-sample
-            break
+        if self.use_bank is False:
+            # 1) Sample the lengths
+            while True:
+                input_length, output_length = self.sampler()
+                if trace_limit is not None:
+                    if (input_length + output_length) > trace_limit:
+                        continue  # re-sample
+                break
 
-        # 2) get the token source
-        if token_bank_path is None:
+            # 2) get the token source
             token_ids = [random.randint(*vocab) for _ in range(input_length)]
-
         else:
-            bank = np.load(token_bank_path, mmap_mode="r" if mmap else None)
-            bank_size = bank.shape[0]
-            if bank_size < input_length:
-                raise ValueError("token bank shorter than requested input")
+            token_bank_path = os.path.join("../samples", f"{self.category_name}.json")
 
-            if contiguous:
-                start = random.randint(0, bank_size - input_length)
-                token_ids = bank[start : start + input_length].tolist()
-            else:
-                idx = np.random.randint(0, bank_size, size=input_length)
-                token_ids = bank[idx].tolist()
+            if not os.path.exists(token_bank_path):
+                print(f"Token bank {token_bank_path} not found. Start to make token bank.")
+                bank = self.save_token_bank(self.category_name, token_bank_path)
+            else: 
+                with open(token_bank_path, "r", encoding="utf-8") as f:
+                    bank = [json.loads(line) for line in f]
+
+            # trace_limit 조건을 만족하는 샘플만 필터링
+            filtered_bank = [
+                sample for sample in bank
+                if (sample["input_length"] + sample["output_length"]) < trace_limit
+            ]
+                
+            bank_size = len(filtered_bank)
+            # print(f"bank_size: {bank_size}")
+
+            idx = np.random.randint(0, bank_size)
+            input_length = filtered_bank[idx]["input_length"]
+            output_length = filtered_bank[idx]["output_length"]
+            token_ids = filtered_bank[idx]["input_token_ids"]
+
         return Request(
             category=self.category_name,
             input_length=input_length,
@@ -330,6 +347,54 @@ class RequestType:
             arrival_time=arrival_time,
             token_ids=token_ids
         )
+    
+    def save_token_bank(self, token_bank, token_bank_path):
+        tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3.1-8B-Instruct")
+        parsed_data = []
+
+        test = 1
+        if token_bank == "ShareGPT":
+            json_path = "/home/sychoy/vllm/downloads/ShareGPT_V3_unfiltered_cleaned_split.json"  # JSON 다운로드 위치
+            with open(json_path, "r", encoding="utf-8") as f:
+                dataset = json.load(f)
+
+            # Filter out the conversations with less than 2 turns.
+            dataset = [data for data in dataset if len(data["conversations"]) >= 2]
+            # Only keep the first two turns of each conversation.
+            dataset = [(data["conversations"][0]["value"],
+            data["conversations"][1]["value"]) for data in dataset]
+
+            for i in tqdm(range(len(dataset))):
+                prompt = dataset[i][0]
+                completion = dataset[i][1]
+
+                if (test < 5):
+                    print(f"print {test}th data")
+                    print(dataset[i])
+                    print()
+                    print()
+                    test += 1
+
+                if not prompt or not completion:
+                    continue
+
+                input_tokens = tokenizer.encode(prompt, truncation=True, max_length=2048)
+
+                parsed_data.append({
+                    "input_length": len(prompt),
+                    "output_length": len(completion),
+                    "input_token_ids": input_tokens,
+                })
+
+        else:
+            raise ValueError(f"Wrong token bank name: {token_bank}")
+
+        os.makedirs(os.path.dirname(token_bank_path), exist_ok=True)
+        with open(token_bank_path, "w", encoding="utf-8") as f:
+            for item in parsed_data:
+                f.write(json.dumps(item) + "\n")
+
+        return parsed_data
 
 # -------------------------------------------------------
 # ArrivalPattern Interface
@@ -1168,6 +1233,10 @@ if __name__ == "__main__":
     
     arrival_pattern  = DiscretePoissonArrival(lambda_per_step=0.01, max_steps=4000)
 
+    share_gpt = RequestType(
+        category_name="ShareGPT",
+    )
+
     chatbot_qa = RequestType(
         category_name="ChatBot Q&A",
         min_input_tokens=20,   # short question
@@ -1226,7 +1295,7 @@ if __name__ == "__main__":
         4) Save trace to JSON (skip_token_ids=True)
         """
         trace_type = TraceType(request_type_dict, arrival, vocab=(200, 30000))
-        trace_obj = trace_type.generate_requests(num_requests=num_requests, batch_size=max_parallel)
+        trace_obj = trace_type.generate_requests(num_requests=num_requests, batch_size=max_parallel, trace_limit=max_model_len)
 
         # Add scheduling data
         trace_obj.add_estimate_sched(
@@ -1238,43 +1307,50 @@ if __name__ == "__main__":
         # Save trace
         trace_obj.save_to_json(filename, skip_token_ids=skip_token_ids)
         
-    
-    skip_token_ids = False
-    # Single Type: ChatBot Q&A only
     build_sched_save(
-        filename="trace_single_chatbot_qa.json",
-        request_type_dict={chatbot_qa: 1.0},
+        filename="../traces/trace_share_gpt.json",
+        request_type_dict={share_gpt: 1.0},
         arrival=arrival_pattern,
-        num_requests=20,
-        skip_token_ids=skip_token_ids,
+        num_requests=5,
+        skip_token_ids=False,
     )
 
-    # Single Type: Creative Generation only
-    build_sched_save(
-        filename="trace_single_creative_gen.json",
-        request_type_dict={creative_gen: 1.0},
-        arrival=arrival_pattern,
-        num_requests=20,
-        skip_token_ids=skip_token_ids,
-    )
+    # skip_token_ids = False
+    # # Single Type: ChatBot Q&A only
+    # build_sched_save(
+    #     filename="trace_single_chatbot_qa.json",
+    #     request_type_dict={chatbot_qa: 1.0},
+    #     arrival=arrival_pattern,
+    #     num_requests=20,
+    #     skip_token_ids=skip_token_ids,
+    # )
 
-    # Single Type: Legal Contract Analysis only
-    build_sched_save(
-        filename="trace_single_contract_analysis.json",
-        request_type_dict={contract_analysis: 1.0},
-        arrival=arrival_pattern,
-        num_requests=20,
-        skip_token_ids=skip_token_ids,
-    )
+    # # Single Type: Creative Generation only
+    # build_sched_save(
+    #     filename="trace_single_creative_gen.json",
+    #     request_type_dict={creative_gen: 1.0},
+    #     arrival=arrival_pattern,
+    #     num_requests=20,
+    #     skip_token_ids=skip_token_ids,
+    # )
 
-    # Single Type: Proofreading only
-    build_sched_save(
-        filename="trace_single_proofreading.json",
-        request_type_dict={proofreading: 1.0},
-        arrival=arrival_pattern,
-        num_requests=20,
-        skip_token_ids=skip_token_ids,
-    )
+    # # Single Type: Legal Contract Analysis only
+    # build_sched_save(
+    #     filename="trace_single_contract_analysis.json",
+    #     request_type_dict={contract_analysis: 1.0},
+    #     arrival=arrival_pattern,
+    #     num_requests=20,
+    #     skip_token_ids=skip_token_ids,
+    # )
+
+    # # Single Type: Proofreading only
+    # build_sched_save(
+    #     filename="trace_single_proofreading.json",
+    #     request_type_dict={proofreading: 1.0},
+    #     arrival=arrival_pattern,
+    #     num_requests=20,
+    #     skip_token_ids=skip_token_ids,
+    # )
 
     # 4) Generate traces that mix any two of the above.
     #    We define real-world usage scenarios where certain tasks appear together.
@@ -1282,35 +1358,35 @@ if __name__ == "__main__":
     # A) ChatBot Q&A + Creative Generation
     #    Real-world: an LLM platform with primarily short queries,
     #    but some users ask for bigger creative expansions. 
-    build_sched_save(
-        filename="trace_mix2_chatbot_creative.json",
-        request_type_dict={chatbot_qa: 0.7, creative_gen: 0.3},  # 70/30
-        arrival=arrival_pattern,
-        num_requests=30,
-        skip_token_ids=skip_token_ids,
-    )
+    # build_sched_save(
+    #     filename="trace_mix2_chatbot_creative.json",
+    #     request_type_dict={chatbot_qa: 0.7, creative_gen: 0.3},  # 70/30
+    #     arrival=arrival_pattern,
+    #     num_requests=30,
+    #     skip_token_ids=skip_token_ids,
+    # )
 
-    # B) Creative Generation + Proofreading
-    #    Real-world: writer platform that frequently requests large expansions 
-    #    and sometimes does quick grammar checks on existing text.
-    build_sched_save(
-        filename="trace_mix2_creative_proofreading.json",
-        request_type_dict={creative_gen: 0.4, proofreading: 0.6},  # 40/60
-        arrival=arrival_pattern,
-        num_requests=30,
-        skip_token_ids=skip_token_ids,
-    )
+    # # B) Creative Generation + Proofreading
+    # #    Real-world: writer platform that frequently requests large expansions 
+    # #    and sometimes does quick grammar checks on existing text.
+    # build_sched_save(
+    #     filename="trace_mix2_creative_proofreading.json",
+    #     request_type_dict={creative_gen: 0.4, proofreading: 0.6},  # 40/60
+    #     arrival=arrival_pattern,
+    #     num_requests=30,
+    #     skip_token_ids=skip_token_ids,
+    # )
 
-    # C) ChatBot Q&A + Contract Analysis
-    #    Real-world: a service that mostly does short Q&A, but occasionally
-    #    users send big documents for legal analysis.
-    build_sched_save(
-        filename="trace_mix2_chatbot_contract.json",
-        request_type_dict={chatbot_qa: 0.8, contract_analysis: 0.2},
-        arrival=arrival_pattern,
-        num_requests=30,
-        skip_token_ids=skip_token_ids,
-    )
+    # # C) ChatBot Q&A + Contract Analysis
+    # #    Real-world: a service that mostly does short Q&A, but occasionally
+    # #    users send big documents for legal analysis.
+    # build_sched_save(
+    #     filename="trace_mix2_chatbot_contract.json",
+    #     request_type_dict={chatbot_qa: 0.8, contract_analysis: 0.2},
+    #     arrival=arrival_pattern,
+    #     num_requests=30,
+    #     skip_token_ids=skip_token_ids,
+    # )
 
     # ... (Similarly, you could define other pairs if you want) ...
 
@@ -1320,44 +1396,44 @@ if __name__ == "__main__":
     #    sometimes for bigger creative expansions, occasionally for proofreading.
 
     build_sched_save(
-        filename="trace_mix3_chatbot_creative_proof.json",
+        filename="../traces/trace_mix_0.5_0.3_0.2_0_poison.json",
         request_type_dict={
             chatbot_qa: 0.5,
             creative_gen: 0.3,
             proofreading: 0.2,
         },
         arrival=arrival_pattern,
-        num_requests=40,
-        skip_token_ids=skip_token_ids,
+        num_requests=10,
+        skip_token_ids=False,
     )
 
-    # Another 3-type scenario: ChatBot Q&A + Contract Analysis + Proofreading
-    # e.g., a general LLM that gets short Q&A requests, big legal docs, and quick proof edits
-    build_sched_save(
-        filename="trace_mix3_chatbot_contract_proof.json",
-        request_type_dict={
-            chatbot_qa: 0.4,
-            contract_analysis: 0.4,
-            proofreading: 0.2
-        },
-        arrival=arrival_pattern,
-        num_requests=40,
-        skip_token_ids=skip_token_ids,
-    )
+    # # Another 3-type scenario: ChatBot Q&A + Contract Analysis + Proofreading
+    # # e.g., a general LLM that gets short Q&A requests, big legal docs, and quick proof edits
+    # build_sched_save(
+    #     filename="trace_mix3_chatbot_contract_proof.json",
+    #     request_type_dict={
+    #         chatbot_qa: 0.4,
+    #         contract_analysis: 0.4,
+    #         proofreading: 0.2
+    #     },
+    #     arrival=arrival_pattern,
+    #     num_requests=40,
+    #     skip_token_ids=skip_token_ids,
+    # )
 
-    # 6) Mix of all four
-    #    Real-world: a general-purpose LLM system that handles a variety 
-    #    of requests – short Q&A, creative expansions, big doc analysis, quick proofreading.
+    # # 6) Mix of all four
+    # #    Real-world: a general-purpose LLM system that handles a variety 
+    # #    of requests – short Q&A, creative expansions, big doc analysis, quick proofreading.
 
-    build_sched_save(
-        filename="trace_mix4_all.json",
-        request_type_dict={
-            chatbot_qa: 0.25,
-            creative_gen: 0.25,
-            contract_analysis: 0.25,
-            proofreading: 0.25
-        },
-        arrival=arrival_pattern,
-        num_requests=50,
-        skip_token_ids=skip_token_ids,
-    )
+    # build_sched_save(
+    #     filename="trace_mix4_all.json",
+    #     request_type_dict={
+    #         chatbot_qa: 0.25,
+    #         creative_gen: 0.25,
+    #         contract_analysis: 0.25,
+    #         proofreading: 0.25
+    #     },
+    #     arrival=arrival_pattern,
+    #     num_requests=50,
+    #     skip_token_ids=skip_token_ids,
+    # )
