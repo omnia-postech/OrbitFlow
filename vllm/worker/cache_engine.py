@@ -645,6 +645,10 @@ class FlattenedCacheEngine(CacheEngineBase):
         self.free_mem_at_first_prefill_step: Optional[int] = None
         self.prev_flexgen_distance: Optional[int] = None
         self.flexgen_dist = None
+
+        # NOTE(HONG): for solver
+        self._solver_prefill_done = False
+        self.resume_distances: List[int] = []
         
         msg = f"Prefetch mode: {self.prefetch_mode}, prefetch distance: {self.prefetch_distance}"
         msg = f"Merge prefetch buffer: {self.merge_prefetch_buffer}"
@@ -1204,25 +1208,12 @@ class FlattenedCacheEngine(CacheEngineBase):
             dist = [-1] * len(snapshot.candidates) 
         elif self.prefetch_mode  == "static":
             dist = [prefetch_distance] * len(snapshot.candidates)
-        elif self.prefetch_mode  == "solver":
-            dist = [prefetch_distance] * len(snapshot.candidates)
-            layer_time_f = 0.12047052383422852 / 32
-            request_list = []
-            requests = ["a" +str(i) for i in range(len(total_context_lens))]
-            remaining_steps = {requests[i]: 100 for i in range(len(total_context_lens))}
-            context_blocks = {requests[i]: math.ceil(total_context_lens[i] / self.block_size) for i in range(len(total_context_lens))}
-            layer_time = {requests[i]: layer_time_f for i in range(len(total_context_lens))}
-            deposit_count = {requests[i]: 0 for i in range(len(total_context_lens))}
-            SLO = {requests[i]: 1 for i in range(len(total_context_lens))}
-
-            for id in requests:
-                request_list.append(Request(id, remaining_steps[id], context_blocks[id], layer_time[id], deposit_count[id], SLO[id]))
-                
-            match Solver.solve(request_list, block_bandwidth = 103178.0, gpu_block_capacity = self.num_gpu_blocks):
-                case None:
-                    print("No optimal solution found.")
-                case result:
-                    pass
+        elif self.prefetch_mode  == "solver":            
+            if not is_decoding and not self._solver_prefill_done:
+                dist = [-1] * len(snapshot.candidates)
+                self._solver_prefill_done = True                
+            else:          
+                dist = self.resume_distances[:len(snapshot.candidates)]
         elif self.prefetch_mode == "flexgen":
             total_blocks = self.num_gpu_blocks 
             if not is_decoding:

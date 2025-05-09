@@ -17,6 +17,8 @@ from vllm.sequence import (Sequence, SequenceData, SequenceGroup,
                            SequenceGroupMetadata, SequenceGroupMetadataDelta,
                            SequenceStatus)
 from vllm.utils import Device, PyObjectCache
+from gurobipy import GRB
+from vllm.worker.distn.solver import Solver, Result, Request
 
 logger = init_logger(__name__)
 
@@ -346,6 +348,9 @@ class Scheduler:
         self.lora_config = lora_config
         self.pipeline_parallel_size = pipeline_parallel_size
 
+        self._pause_window_remaining: int = 0
+        self.slo_from_delaysim = {}
+
         version = "selfattn"
         if (self.scheduler_config.runner_type == "pooling"
                 or self.cache_config.is_attention_free):
@@ -387,6 +392,7 @@ class Scheduler:
         self.paused_cpu: Deque[SequenceGroup] = deque()
         # deposit_map: request_id -> available output tokens
         self.deposit_map: Dict[str, int] = {}
+        self.resume_distances: List[int] = []
         
         # Sequence groups finished requests ids since last step iteration.
         # It lets the model know that any state associated with these requests
@@ -600,15 +606,19 @@ class Scheduler:
         swapped_out: List[SequenceGroup] = ret.swapped_out
         paused: List[SequenceGroup] = ret.paused 
         
-        # NOTE(HONG): resume
-        for seq_group in list(self.paused):
-            if self.deposit_map.get(seq_group.request_id, 0) == 20: # threshold, hard coded 
-                logger.info(f"RESUME-PROACTIVE: request {seq_group.request_id} moved from PAUSED -> RUNNING; "
-                            f"paused_queue_size={len(self.paused)-1}, running_queue_size={len(self.running)+1}")
-                self.paused.remove(seq_group)
-                self.running.append(seq_group)
-
-            # TODO(HONG): need to load KV cache from CPU memory to GPU memory
+        # if self.cache_config.pause_and_resume:
+        #     if self.cache_config.prefetch_mode == "solver":
+        #         pass
+        #     else:         
+        #         ####################### Naive resume #######################
+        #         # NOTE(HONG): Naive pause and resume -> left for future use
+        #         for seq_group in list(self.paused):
+        #             if self.deposit_map.get(seq_group.request_id, 0) == 20: # threshold, hard coded 
+        #                 logger.info(f"RESUME-PROACTIVE: request {seq_group.request_id} moved from PAUSED -> RUNNING; "
+        #                             f"paused_queue_size={len(self.paused)-1}, running_queue_size={len(self.running)+1}")
+        #                 self.paused.remove(seq_group)
+        #                 self.running.append(seq_group)
+        #         ####################### Naive resume #######################
 
         running_queue = self.running
         assert len(self._async_stopped) == 0
@@ -727,23 +737,106 @@ class Scheduler:
                 if curr_loras is not None and seq_group.lora_int_id > 0:
                     curr_loras.add(seq_group.lora_int_id)
 
-        # NOTE(HONG): pause
-        # if not self.paused and self.running and len(self.running) > 1:
-        if self.running and len(self.running) > 1: # whats the purpose of this check
-            candidates = [
-                g for g in self.running 
-                if self.deposit_map.get(g.request_id, 0) > 50 # threshold, hard coded
-                and any(seq.status == SequenceStatus.RUNNING for seq in g.get_seqs())
-            ]
-            candidates.extend(paused) 
-            if candidates: 
-                # candidates[1].get_seqs()[0].get_output_len()
-                pause_victim = max(candidates, key=lambda g: g.get_seqs()[0].get_output_len())
-                logger.info(f"PAUSE: request {pause_victim.request_id} moved from RUNNING -> PAUSED; "
-                            f"running_queue_size={len(self.running)-1}, paused_queue_size={len(self.paused)+1}")
+        if self.cache_config.pause_and_resume:
+            if not self.running and not self.waiting and paused:
+                logger.info(f"No running or waiting seqs; restoring {len(paused)} paused requests")
+                for pg in list(paused):                    
+                    scheduled = self._scheduled_seq_group_cache[self.cache_id].get_object()
+                    scheduled.seq_group = pg
+                    scheduled.token_chunk_size = 1
+                    ret.decode_seq_groups.append(scheduled)
+                    ret.decode_seq_groups_list.append(pg)
+                paused.clear()
+                self._pause_window_remaining = 0
 
-                self.running.remove(pause_victim)
-                self.paused.append(pause_victim)
+            if self.cache_config.prefetch_mode == "solver":
+                if ret.decode_seq_groups and len(ret.decode_seq_groups)>0:
+                    if self._pause_window_remaining > 0:
+                        logger.info(f"Within pause window (remaining={self._pause_window_remaining}), skipping solver")
+                        self._pause_window_remaining -= 1
+                    else:
+                        if self.paused:
+                            logger.info(f"RESTORE-PAUSED: bringing back {len(self.paused)} paused requests into decode candidates")
+                            for pg in list(self.paused):
+                                scheduled = self._scheduled_seq_group_cache[self.cache_id].get_object()
+                                scheduled.seq_group = pg
+                                scheduled.token_chunk_size = 1
+                                ret.decode_seq_groups.append(scheduled)
+                                ret.decode_seq_groups_list.append(pg)
+                            self.paused.clear() 
+
+                        request_list = []
+                        requests = [g.seq_group.request_id for g in ret.decode_seq_groups]
+                        len(ret.decode_seq_groups[0].seq_group.seqs[0].data._cached_all_token_ids)                        
+
+                        context_blocks = {req: group.seq_group.seqs[0].n_blocks for req, group in zip(requests, ret.decode_seq_groups)}
+
+                        layer_time = {}
+                        SLO = {}
+                        for sg in ret.decode_seq_groups:
+                            req_id = sg.seq_group.request_id
+                            # 토큰 개수: _cached_all_token_ids 리스트 길이
+                            num_tokens = len(sg.seq_group.seqs[0].data._cached_all_token_ids)
+                            layer_time[req_id] = 1.001743183e06 * num_tokens + 0.0495196
+                            SLO[req_id] = self.slo_from_delaysim[req_id]
+                        
+                        deposit_count = {req: self.deposit_map.get(req, 0) for req in requests}                        
+
+                        request_list = [Request(req, context_blocks[req], layer_time[req], deposit_count[req], SLO[req]) for req in requests]
+
+                        bandwidth = 25.19 * 1024**3  # B/s
+                        head_size = 128
+                        num_kv_heads = 8
+                        per_token_bytes = 2 * 2 * head_size * num_kv_heads
+                        block_bytes      = per_token_bytes * self.block_manager.block_size
+                        block_bandwidth = block_bytes / bandwidth
+                            
+                        match Solver.solve(request_list, block_bandwidth = block_bandwidth, gpu_block_capacity = self.block_manager.num_total_gpu_blocks):
+                            case None:
+                                logger.info(f"No optimal solution found.")
+                            case result:                 
+                                result[0].resume = False # For debugging
+                                self.resume_distances = [sol.n for sol in result if sol.resume]
+                                logger.debug(f"Resume distances for each request: {self.resume_distances}")                                       
+                                pause_ids = {sol.id for sol in result if not sol.resume}
+                                # NOTE(HONG): we need to pause that are not resume status
+                                # get scheduled_seq_group and seq_group that matches with sol.request_id
+                                # 1. remove scheduled_seq_group from decode_seq_groups
+                                # 2. remove seq_group from ret.decode_seq_groups_list                                    
+                                if pause_ids:
+                                    logger.info(f"Proactive pause for requests: {pause_ids}")
+                                new_decodes: List[ScheduledSequenceGroup] = []
+                                new_decode_list: List[SequenceGroup] = []
+                                for sg in ret.decode_seq_groups:
+                                    rid = sg.seq_group.request_id
+                                    if rid in pause_ids:
+                                        self.paused.append(sg.seq_group)                                    
+                                        logger.info(f"Paused ScheduledSequenceGroup for '{rid}'")
+                                    else:
+                                        new_decodes.append(sg)
+                                        new_decode_list.append(sg.seq_group)
+                                ret.decode_seq_groups = new_decodes
+                                ret.decode_seq_groups_list = new_decode_list
+                                                            
+            else:         
+                ####################### Naive pause #######################
+                # NOTE(HONG): pause
+                if ret.decode_seq_groups and len(ret.decode_seq_groups)>1:
+                    candidates = [
+                        g for g in self.ret.decode_seq_groups 
+                        if self.deposit_map.get(g.request_id, 0) > 50 # threshold, hard coded
+                        and any(seq.status == SequenceStatus.RUNNING for seq in g.get_seqs())
+                    ]
+                    candidates.extend(paused) 
+                    if candidates: 
+                        # candidates[1].get_seqs()[0].get_output_len()
+                        pause_victim = max(candidates, key=lambda g: g.get_seqs()[0].get_output_len())
+                        logger.info(f"PAUSE: request {pause_victim.request_id} moved from RUNNING -> PAUSED; "
+                                    f"running_queue_size={len(self.running)-1}, paused_queue_size={len(self.paused)+1}")
+
+                        self.running.remove(pause_victim)
+                        self.paused.append(pause_victim)
+                ####################### Naive pause #######################
 
         self._scheduler_running_outputs_cache[self.next_cache_id].reset()
         self._scheduled_seq_group_cache[self.next_cache_id].reset()
@@ -1255,9 +1348,20 @@ class Scheduler:
         )
         # Make sure we include num running seqs before scheduling prefill,
         # so that we don't schedule beyond max_num_seqs for prefill.
-        for seq_group in self.running:
-            budget.add_num_seqs(seq_group.request_id,
-                                seq_group.get_max_num_running_seqs())
+
+        if self.cache_config.pause_and_resume:
+            active = list(self.running) + list(self.paused)
+            for seq_group in active:
+                budget.add_num_seqs(seq_group.request_id,
+                                    seq_group.get_max_num_running_seqs())
+        else:
+            for seq_group in self.running:
+                budget.add_num_seqs(seq_group.request_id,
+                                    seq_group.get_max_num_running_seqs())
+
+        # for seq_group in self.running:
+        #     budget.add_num_seqs(seq_group.request_id,
+        #                         seq_group.get_max_num_running_seqs())
         curr_loras = set(
             seq_group.lora_int_id for seq_group in self.running
             if seq_group.lora_int_id > 0) if self.lora_enabled else None
@@ -1272,6 +1376,10 @@ class Scheduler:
                                                curr_loras,
                                                enable_chunking=False)
 
+        if self.cache_config.pause_and_resume and self.cache_config.prefetch_mode == "solver":
+            if prefills.seq_groups:
+                self._pause_window_remaining = 0
+        
         if len(prefills.seq_groups
                ) == 0 and self.scheduler_config.policy == "priority":
             self._schedule_priority_preemption(budget)
