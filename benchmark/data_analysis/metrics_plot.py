@@ -116,6 +116,7 @@ def plot_time_between_tokens(df: pd.DataFrame, csv_path: Path) -> Path:
     ax.set_ylabel("Δt (s)")
     ax.set_title("Inter-token latency per request (scatter)")
     ax.grid(True, linewidth=0.3)
+    ax.set_ylim(0, 0.1)
     plt.tight_layout()
 
     out_file = csv_path.with_name(f"{csv_path.stem}_tbt.png")
