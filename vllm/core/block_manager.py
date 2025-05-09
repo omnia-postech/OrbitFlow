@@ -786,7 +786,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
             msg = f"can_append_slots failed: {num_touched_blocks} > {num_free_gpu_blocks}; "\
                 f"total_gpu_blocks: {self.block_allocator.get_num_total_blocks(Device.GPU)},  " \
                     f"{self.block_allocator._allocators[Device.GPU]._free_block_indices}"
-            logger.info(msg)
+            logger.critical(msg)
         return num_touched_blocks <= num_free_gpu_blocks
 
     def append_slots(

@@ -1262,7 +1262,32 @@ class FlattenedCacheEngine(CacheEngineBase):
             dist = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10][:len(snapshot.candidates)] # FIXME Xinyue hard code
         elif self.prefetch_mode == "distn_single": 
             dist = [-1] * len(snapshot.candidates) 
-            # replace with a function here
+            if len(snapshot.prev_dist_dict) > 0:
+                prev_dist = list(snapshot.prev_dist_dict.values())[0]
+            else: 
+                prev_dist = -1
+            # increase the distance by 1 if no free blocks available for next step 
+            free_blocks = self.block_manager.get_num_free_gpu_blocks() 
+            max_append_blocks = len(snapshot.candidates) * self.num_attention_layers 
+            if free_blocks < max_append_blocks: # more offloading 
+                prev_dist = list(snapshot.prev_dist_dict.values())[0]
+                if prev_dist == -1:
+                    dist = [self.num_attention_layers//2] * len(snapshot.candidates)
+                elif not prev_dist == 0:
+                    dist = [prev_dist - 1] * len(snapshot.candidates) 
+                else: 
+                    dist = [prev_dist] * len(snapshot.candidates)
+            elif free_blocks > self.num_gpu_blocks * 0.3 and prev_dist > -1: # some offload  
+                # lets add, free block enough for at least 
+                num_block_per_layer = 0
+                for ctx_len in total_context_lens:
+                    num_block_per_layer += math.ceil(ctx_len / self.block_size)
+                num_layers_on_GPU = (self.num_gpu_blocks // num_block_per_layer) 
+                num_layers_on_CPU = self.num_attention_layers- num_layers_on_GPU
+                dist = [self.num_attention_layers // num_layers_on_CPU] * len(snapshot.candidates)
+            else: 
+                dist = [prev_dist] * len(snapshot.candidates)
+                
         else:
             raise ValueError(f"unknown policy {self.prefetch_mode}")
         dist = self._normalise_prefetch_distance(spec=dist, candidates=snapshot.candidates)
