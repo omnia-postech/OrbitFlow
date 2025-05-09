@@ -147,6 +147,7 @@ class RequestType:
         min_output_tokens: int = 0,
         max_output_tokens: int = 0,
         sampling_method: str = "default",
+        dataset_name: str = None,
         **kwargs: Any
     ):
         """
@@ -171,10 +172,24 @@ class RequestType:
         self.min_out = min_output_tokens
         self.max_out = max_output_tokens
 
-        if (self.category_name == "ShareGPT"):
-            self.use_bank = True
-        else:
-            self.use_bank = False
+        if (dataset_name == "ShareGPT"):
+            token_bank_path = os.path.join("../samples", f"{dataset_name}.json")
+
+            if not os.path.exists(token_bank_path):
+                print(f"Token bank {token_bank_path} not found. Start to make token bank.")
+                bank = self.save_token_bank(dataset_name, token_bank_path)
+            else: 
+                with open(token_bank_path, "r", encoding="utf-8") as f:
+                    bank = [json.loads(line) for line in f]
+
+            # trace_limit 조건을 만족하는 샘플만 필터링
+            self.bank = [
+                sample for sample in bank
+                if (self.min_in <= sample["input_length"] <= self.max_in) and
+                    (self.min_out <= sample["output_length"] <= self.max_out)
+            ]
+
+            print(f"{self.category_name} has token bank with {len(self.bank)} samples.")
         
         if sampling_method not in self.SUPPORTED_METHODS:
             raise ValueError(f"Unsupported sampling_method: {sampling_method}")
@@ -329,53 +344,16 @@ class RequestType:
             slo = total_length * PROFILED_A + PROFILED_B 
         # 2) get the token source
         
-        if token_bank_path is None:
-            token_ids = [random.randint(*vocab) for _ in range(input_length)]
-        if self.use_bank is False:
-            # 1) Sample the lengths
-            while True:
-                input_length, output_length = self.sampler()
-                if trace_limit is not None:
-                    if (input_length + output_length) > trace_limit:
-                        continue  # re-sample
-                break
-
-            # 2) get the token source
-            token_ids = [random.randint(*vocab) for _ in range(input_length)]
-        else:
-            bank = np.load(token_bank_path, mmap_mode="r" if mmap else None)
-            bank_size = bank.shape[0]
-            if bank_size < input_length:
-                raise ValueError("token bank shorter than requested input")
-
-            if contiguous:
-                start = random.randint(0, bank_size - input_length)
-                token_ids = bank[start : start + input_length].tolist()
-            else:
-                idx = np.random.randint(0, bank_size, size=input_length)
-                token_ids = bank[idx].tolist()
-            token_bank_path = os.path.join("../samples", f"{self.category_name}.json")
-
-            if not os.path.exists(token_bank_path):
-                print(f"Token bank {token_bank_path} not found. Start to make token bank.")
-                bank = self.save_token_bank(self.category_name, token_bank_path)
-            else: 
-                with open(token_bank_path, "r", encoding="utf-8") as f:
-                    bank = [json.loads(line) for line in f]
-
-            # trace_limit 조건을 만족하는 샘플만 필터링
-            filtered_bank = [
-                sample for sample in bank
-                if (sample["input_length"] + sample["output_length"]) < trace_limit
-            ]
-                
-            bank_size = len(filtered_bank)
-            # print(f"bank_size: {bank_size}")
+        if self.bank is not None:
+            bank_size = len(self.bank)
 
             idx = np.random.randint(0, bank_size)
-            input_length = filtered_bank[idx]["input_length"]
-            output_length = filtered_bank[idx]["output_length"]
-            token_ids = filtered_bank[idx]["input_token_ids"]
+            input_length = self.bank[idx]["input_length"]
+            output_length = self.bank[idx]["output_length"]
+            token_ids = self.bank[idx]["input_token_ids"]
+
+        if token_bank_path is None:
+            token_ids = [random.randint(*vocab) for _ in range(input_length)]
         
         if slo_max:
             return Request(
@@ -415,7 +393,7 @@ class RequestType:
                 prompt = dataset[i][0]
                 completion = dataset[i][1]
 
-                if (test < 5):
+                if (test < 3):
                     print(f"print {test}th data")
                     print(dataset[i])
                     print()
@@ -1406,6 +1384,7 @@ def build_sched_save(
         plt.xlabel("inter-arrival gap (steps)"); plt.ylabel("probability")
         plt.title(f"Model: geometric PMF (λ={lam:g})")
         savefig("inter", postfix_model)
+
 def make_trace_default(
     filename: str = "benchmark_trace_test.json",
     request_type_probs: List = [0.25, 0.25, 0.25, 0.25],
@@ -1414,40 +1393,44 @@ def make_trace_default(
     num_gpu_blocks: int = 6000, 
     block_size: int = 16,
     max_parallel: int = 4,
-    arrival_pattern  = DiscretePoissonArrival(lambda_per_step=0.01, max_steps=4000)
+    arrival_pattern  = DiscretePoissonArrival(lambda_per_step=0.005, max_steps=100000)
 ):
     # predefine some requests 
     shortshort = RequestType(
-        category_name="Short-Short",
+        category_name="Short-Short ShareGPT",
         min_input_tokens=100,   # short question
         max_input_tokens=500,
         min_output_tokens=100,  # short answer
         max_output_tokens=1000,
-        sampling_method="uniform"
+        sampling_method="uniform",
+        dataset_name="ShareGPT"
     )
     shortlong = RequestType(
-        category_name="Short-Long",
+        category_name="Short-Long ShareGPT",
         min_input_tokens=100,
         max_input_tokens=400,
         min_output_tokens=1000,
         max_output_tokens=10000,
-        sampling_method="uniform"
+        sampling_method="uniform",
+        dataset_name="ShareGPT"
     )
     longlong = RequestType(
-        category_name="Long-Long",
+        category_name="Long-Long ShareGPT",
         min_input_tokens=2000,
         max_input_tokens=8000,
         min_output_tokens=2000,
         max_output_tokens=10000,
-        sampling_method="uniform"
+        sampling_method="uniform",
+        dataset_name="ShareGPT"
     )
     longshort = RequestType(
-        category_name="Long-Short",
+        category_name="Long-Short ShareGPT",
         min_input_tokens=5000,
         max_input_tokens=8000,
         min_output_tokens=100,
         max_output_tokens=1000,
-        sampling_method="uniform"
+        sampling_method="uniform",
+        dataset_name="ShareGPT"
     )
     probs_dict = {t:prob for (t,prob) in zip([shortshort, shortlong, longlong, longshort], request_type_probs)}
     for k,v in probs_dict.items():
@@ -1519,4 +1502,4 @@ def make_trace_default(
 #         sampling_method="uniform"
 #     )
 if __name__ == "__main__":
-    make_trace_default("/home/xinyuema/vllm/samples/traces/benchmark_trace_test.json",)
+    make_trace_default("/home/sychoy/vllm/samples/traces/benchmark_trace_test.json",)
