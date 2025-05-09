@@ -340,6 +340,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
         # TODO(Heelim): need to send metadata to scheduler to make decision of which request and when to pause and resume
         deposit_map = sim.stats()  
         engine.scheduler[0].deposit_map = deposit_map
+        engine.scheduler[0].v_tps = sim.v 
         # NOTE(HONG): use below for pipelining parallelism
         step_start = time.time()
         step_outputs = engine.step()

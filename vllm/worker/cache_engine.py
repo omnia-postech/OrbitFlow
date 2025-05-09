@@ -22,6 +22,8 @@ logger = init_logger(__name__)
 from math import ceil
 from typing import Sequence, Literal
 PREFETCH_GROW_STEP = 100          # <-- set once, reuse everywhere
+PROFILED_A = 1.0017431830666432e-06
+PROFILED_B = 0.049519613282613506
 import json 
 import copy
 import math
@@ -1149,7 +1151,7 @@ class FlattenedCacheEngine(CacheEngineBase):
 
         return total_blocks * t_per_block
 
-    def compute_comp_time_for_requests(self, slo_allowed: float) -> float:
+    def compute_comp_time_for_requests(self, slo_allowed: float, max_comp_time=None) -> float:
         """
         SelectN 공식 기반의 분자 계산:
           numerator = t_layer * (1 + δ)
@@ -1164,12 +1166,13 @@ class FlattenedCacheEngine(CacheEngineBase):
             float: numerator 값 (초)
         """
         # TODO(HONG): need to change from getting proper compute time of batched reqeusts from profiled record  
-        total_compute = 0.12047052383422852
+        if not max_comp_time:
+            max_comp_time = 0.12047052383422852
         num_layers = self.block_manager.num_attention_layers
-        t_layer = total_compute / num_layers
+        t_layer = max_comp_time / num_layers
 
         # δ 계산: (SLO - naive) / naive
-        delta = (slo_allowed - total_compute) / total_compute
+        delta = (slo_allowed - max_comp_time) / max_comp_time
         delta = max(delta, 0.0)
 
         # numerator = t_layer * (1 + δ)
@@ -1235,10 +1238,6 @@ class FlattenedCacheEngine(CacheEngineBase):
                 if num_layers_to_offload == 0:
                     self.prev_flexgen_distance = -1
                 else:
-                    logger.critical(f"self.free_mem_at_first_prefill_step {self.free_mem_at_first_prefill_step} blocks")
-                    logger.critical(f"self.free_blocks {free_blocks} blocks")
-                    logger.critical(f"num_layers_on_GPU {num_layers_on_GPU} blocks")
-                    logger.critical(f"num_layers_to_offload {num_layers_to_offload} blocks")
                     self.prev_flexgen_distance = self.block_manager.num_attention_layers // num_layers_to_offload
                     self.prev_flexgen_distance = max(0, self.prev_flexgen_distance)
                 logger.info(f"[flexgen] prefill → distance set to {self.prev_flexgen_distance}")
@@ -1257,8 +1256,11 @@ class FlattenedCacheEngine(CacheEngineBase):
             if is_decoding and self.need_update_selectn: 
                 logger.info(f"[driver] First decoding going on")                     
                 comm_time = self.compute_comm_time_for_requests(total_context_lens)
-                slo_allowed = 0.005 # TTFT: 0.05s TPOT: 0.005s
-                comp_time = self.compute_comp_time_for_requests(slo_allowed)
+                slo_ratio = 0.5 # hardcoded
+                max_comp_time = sum(total_context_lens) * PROFILED_A + PROFILED_B
+                slo_allowed = max_comp_time / slo_ratio 
+                
+                comp_time = self.compute_comp_time_for_requests(slo_allowed, max_comp_time)
                 self.prev_selectn_distance = self.prefetch_distance_for_seletcn(comm_time, comp_time)
                 self.need_update_selectn = False
 
