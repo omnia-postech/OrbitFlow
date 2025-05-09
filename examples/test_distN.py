@@ -18,6 +18,7 @@ import pandas as pd
 import torch 
 import bisect
 import torch
+
 torch.set_printoptions(edgeitems=2, linewidth=120, sci_mode=True)
 # --- Config ---
 MODEL = "/home/jongseop/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"
@@ -28,6 +29,8 @@ MAX_MODEL_LEN = 13000
 BLOCK_SIZE  = 16
 SLO_THRESHOLD = 0.5      
 CSV_OUTPUT_FILE = "metrics.csv"
+PROFILED_A = 1.0017431830666432e-06
+PROFILED_B = 0.049519613282613506
 test_trace = {
     "description": "Continuous batching; BS = 4; A6000 with 48GB memory; Continuous batched request too large to fit in available memory.", 
     "batch_size": 4, 
@@ -480,6 +483,8 @@ def main(configs):
     print(f"merge_prefetch_buffer: {merge_prefetch_buffer}")
     print(f"pause_and_resume: {pause_and_resume}")
     
+    if flattened_cache and num_gpu_blocks_override is not None:
+        num_gpu_blocks_override *= 32 
     args = EngineArgs(
         model=MODEL,
         max_model_len=max_model_len,
@@ -490,7 +495,7 @@ def main(configs):
         disable_log_stats=True,
         gpu_memory_utilization=gpu_memory_utilization,
         enforce_eager=True,
-        num_gpu_blocks_override=num_gpu_blocks_override*32 if flattened_cache else num_gpu_blocks_override,
+        num_gpu_blocks_override=num_gpu_blocks_override,
         preemption_mode="pause",
         is_monolithic_distn=is_monolithic_distn,
         prefetch_mode = prefetch_mode,
@@ -498,7 +503,7 @@ def main(configs):
         enable_chunked_prefill=False,
         flattened_cache=flattened_cache,
         merge_prefetch_buffer=merge_prefetch_buffer,
-        pause_and_resume=pause_and_resume,
+        pause_and_resume=False,
         disable_sliding_window=True,
     )
     print(f"Logging to {configs.output_log}")

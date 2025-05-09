@@ -14,7 +14,8 @@ from pathlib import Path
 import numpy as np
 from transformers import AutoTokenizer
 import tqdm, json, argparse
-
+PROFILED_A = 1.0017431830666432e-06
+PROFILED_B = 0.049519613282613506
 
 def build_token_bank(
     text_path: str,
@@ -73,13 +74,18 @@ class Request:
     token_ids: List[int]
     sched_time: Optional[float|int] = None
     wait_time: Optional[float|int] = None
-
+    slo: Optional[float|int] = None
     def __repr__(self):
         """
         Custom string representation, including scheduling details if they're available.
         """
         if sched_time := getattr(self, 'sched_time', None):
-            return (f"Request(category={self.category}, prompt={self.input_length}, "
+            if self.slo is not None:
+                return (f"Request(category={self.category}, prompt={self.input_length}, "
+                    f"max_tokens={self.output_length}, slo={self.slo}, arrive_time={self.arrival_time}, "
+                    f"sched_time={sched_time}, wait_time={self.wait_time})")
+            else:
+                return (f"Request(category={self.category}, prompt={self.input_length}, "
                     f"max_tokens={self.output_length}, arrive_time={self.arrival_time}, "
                     f"sched_time={sched_time}, wait_time={self.wait_time})")
         else:
@@ -294,6 +300,7 @@ class RequestType:
         token_bank_path: Optional[str] = None,
         contiguous: bool = True,
         mmap: bool = True,
+        slo_max = True,
     ):
         """
         Creates a single `Request` object using the configured sampler method
@@ -306,7 +313,9 @@ class RequestType:
                 if (input_length + output_length) > trace_limit:
                     continue  # re-sample
             break
-
+        if slo_max: 
+            total_length = input_length + output_length 
+            slo = total_length * PROFILED_A + PROFILED_B 
         # 2) get the token source
         if token_bank_path is None:
             token_ids = [random.randint(*vocab) for _ in range(input_length)]
@@ -323,13 +332,23 @@ class RequestType:
             else:
                 idx = np.random.randint(0, bank_size, size=input_length)
                 token_ids = bank[idx].tolist()
-        return Request(
-            category=self.category_name,
-            input_length=input_length,
-            output_length=output_length,
-            arrival_time=arrival_time,
-            token_ids=token_ids
-        )
+        if slo_max:
+            return Request(
+                category=self.category_name,
+                input_length=input_length,
+                output_length=output_length,
+                arrival_time=arrival_time,
+                token_ids=token_ids,
+                slo=slo,
+            ) 
+        else:
+            return Request(
+                category=self.category_name,
+                input_length=input_length,
+                output_length=output_length,
+                arrival_time=arrival_time,
+                token_ids=token_ids
+            )
 
 # -------------------------------------------------------
 # ArrivalPattern Interface
@@ -1132,7 +1151,8 @@ class TraceType:
             req = chosen_rt.generate_request(
                 arrival_time=arrival_time,
                 vocab=self.vocab,
-                trace_limit=trace_limit
+                trace_limit=trace_limit,
+                slo_max=True
             )
             requests.append(req)
 
@@ -1156,208 +1176,254 @@ class TraceType:
         return trace
 
 
-# -------------------------------------------------------
-# Example usage
-# -------------------------------------------------------
-if __name__ == "__main__":
-    
-    max_model_len = 10000
-    block_size = 16
-    num_gpu_blocks = max_model_len//block_size
-    max_parallel = 4 # batch size 
-    
+def build_sched_save(
+    filename: str,
+    request_type_dict: dict,
+    arrival,
+    num_requests: int,
+    max_parallel,
+    num_gpu_blocks: int,
+    block_size: int,
+    plot_distributions: bool = True,            # ← new flag
+    skip_token_ids: bool = True,
+    postfix_trace: str  = "_trace",
+    postfix_model: str  = "_model"
+):
+    import json, random, matplotlib.pyplot as plt
+    from itertools import accumulate
+    from pathlib import Path
+    """
+    1) Make a TraceType
+    2) Generate a trace
+    3) Call add_estimate_sched(...) with the global GPU parameters
+    4) Save trace to JSON  (skip_token_ids=True keeps files small)
+    5) [optional] Plot & save distributions of the generated trace
+       vs. the underlying generative model.
+    """
+    trace_type = TraceType(request_type_dict, arrival, vocab=(200, 30000))
+    trace_obj  = trace_type.generate_requests(
+        num_requests=num_requests, batch_size=max_parallel
+    )
+
+    # GPU-capacity scheduling simulation
+    trace_obj.add_estimate_sched(
+        num_gpu_blocks=num_gpu_blocks, block_size=block_size,
+        max_parallel=max_parallel
+    )
+
+    # ---------- 4. persist JSON ----------
+    trace_obj.save_to_json(filename, skip_token_ids=skip_token_ids)
+
+    # -------- NEW: write a summary .txt with total token counts -----------------
+    tot_in  = sum(r.input_length  for r in trace_obj.requests.values())
+    tot_out = sum(r.output_length for r in trace_obj.requests.values())
+
+    txt_path = Path(filename).with_suffix("")  # strip “.json”
+    with open(f"{txt_path}_token_totals.txt", "w") as fh:
+        fh.write(f"total_input_tokens  {tot_in}\n")
+        fh.write(f"total_output_tokens {tot_out}\n")
+
+    # ---------- 5. optional plotting ----------
+    if not plot_distributions:
+        return                                            # nothing else to do
+    # ---------------- empirical data ----------------
+    reqs          = list(trace_obj.requests.values())
+    input_lens    = np.array([r.input_length  for r in reqs])
+    output_lens   = np.array([r.output_length for r in reqs])
+    arrivals      = np.sort([r.arrival_time for r in reqs])
+    inter_arr_emp = np.diff(arrivals)          # empty if len<2
+
+    # ---------------- analytic model ----------------
+    # 1) helper → uniform-mixture PMF
+    def mixture_uniform_pmf(bounds, probs):
+        lo = min(b[0] for b in bounds.values())
+        hi = max(b[1] for b in bounds.values())
+        xs = np.arange(lo, hi + 1)
+        pmf = np.zeros_like(xs, dtype=float)
+        for cat, p in probs.items():
+            a, b = bounds[cat]
+            pmf[(xs >= a) & (xs <= b)] += p / (b - a + 1)
+        return xs, pmf
+
+    # build per-category bounds dicts
+    in_bounds  = {rt.category_name: (rt.min_in,
+                                     rt.max_in)
+                  for rt in request_type_dict}
+    out_bounds = {rt.category_name: (rt.min_out,
+                                     rt.max_out)
+                  for rt in request_type_dict}
+    probs = {rt.category_name: p for rt, p in request_type_dict.items()}
+
+    xin,  pin  = mixture_uniform_pmf(in_bounds,  probs)
+    xout, pout = mixture_uniform_pmf(out_bounds, probs)
+
+    # 2) geometric PMF: P(k) = (1-λ)^{k-1} λ   for k≥1
+    lam = getattr(arrival, "lambda_per_step", None)
+    k_max = (inter_arr_emp.max() if inter_arr_emp.size else 1) + 20
+    k_vals = np.arange(1, k_max + 1)
+    if lam is not None and 0 < lam < 1:
+        pgeom = (1 - lam) ** (k_vals - 1) * lam
+    else:                      # continuous pattern or λ invalid → flat 0
+        pgeom = np.zeros_like(k_vals, dtype=float)
+
+    # ---------------- save helper ----------------
+    stem = Path(filename).with_suffix("")  # remove .json
+
+    def savefig(tag, postfix):
+        out = f"{stem}{postfix}_{tag}.png"
+        plt.savefig(out, dpi=150, bbox_inches="tight")
+        plt.close()
+
+    # ---------------- trace histograms ----------------
+    plt.figure()
+    plt.hist(input_lens, bins=50)
+    plt.xlabel("input length (tokens)"); plt.ylabel("count")
+    plt.title("Trace: input-length distribution")
+    savefig("input", postfix_trace)
+
+    plt.figure()
+    plt.hist(output_lens, bins=50)
+    plt.xlabel("output length (tokens)"); plt.ylabel("count")
+    plt.title("Trace: output-length distribution")
+    savefig("output", postfix_trace)
+
+    if inter_arr_emp.size:
+        plt.figure()
+        plt.hist(inter_arr_emp, bins=50)
+        plt.xlabel("inter-arrival gap"); plt.ylabel("count")
+        plt.title("Trace: inter-arrival distribution")
+        savefig("inter", postfix_trace)
+
+    # ---------------- analytic PDFs / PMF ----------------
+    plt.figure()
+    plt.step(xin, pin, where="mid")
+    plt.xlabel("input length (tokens)"); plt.ylabel("probability")
+    plt.title("Model: input-length PDF (mixture of uniforms)")
+    savefig("input", postfix_model)
+
+    plt.figure()
+    plt.step(xout, pout, where="mid")
+    plt.xlabel("output length (tokens)"); plt.ylabel("probability")
+    plt.title("Model: output-length PDF (mixture of uniforms)")
+    savefig("output", postfix_model)
+
+    if lam is not None and 0 < lam < 1:
+        plt.figure()
+        plt.stem(k_vals, pgeom)
+        plt.xlabel("inter-arrival gap (steps)"); plt.ylabel("probability")
+        plt.title(f"Model: geometric PMF (λ={lam:g})")
+        savefig("inter", postfix_model)
+def make_trace_default(
+    filename: str = "benchmark_trace_test.json",
+    request_type_probs: List = [0.25, 0.25, 0.25, 0.25],
+    num_requests: int = 100,
+    batch_size: int = 1, 
+    num_gpu_blocks: int = 6000, 
+    block_size: int = 16,
+    max_parallel: int = 4,
     arrival_pattern  = DiscretePoissonArrival(lambda_per_step=0.01, max_steps=4000)
-
-    chatbot_qa = RequestType(
-        category_name="ChatBot Q&A",
-        min_input_tokens=20,   # short question
-        max_input_tokens=200,
-        min_output_tokens=20,  # short answer
-        max_output_tokens=200,
+):
+    # predefine some requests 
+    shortshort = RequestType(
+        category_name="Short-Short",
+        min_input_tokens=100,   # short question
+        max_input_tokens=500,
+        min_output_tokens=100,  # short answer
+        max_output_tokens=1000,
         sampling_method="uniform"
     )
-
-    # B) Creative Generation: short input, long output
-    #    Real-world usage: user provides a short prompt, wants a lengthy/creative response.
-    creative_gen = RequestType(
-        category_name="Creative Generation",
-        min_input_tokens=10,
-        max_input_tokens=100,
-        min_output_tokens=500,
-        max_output_tokens=2000,
+    shortlong = RequestType(
+        category_name="Short-Long",
+        min_input_tokens=100,
+        max_input_tokens=400,
+        min_output_tokens=1000,
+        max_output_tokens=10000,
         sampling_method="uniform"
     )
-
-    # C) Legal Contract Analysis: large input, large output
-    #    Real-world usage: user uploads a big contract and wants thorough, in-depth analysis.
-    contract_analysis = RequestType(
-        category_name="Legal Contract Analysis",
+    longlong = RequestType(
+        category_name="Long-Long",
         min_input_tokens=2000,
         max_input_tokens=8000,
         min_output_tokens=2000,
         max_output_tokens=10000,
         sampling_method="uniform"
     )
-
-    # D) Proofreading: large input, short output
-    #    Real-world usage: user provides a long text to check; 
-    #    minimal feedback or corrections are returned.
-    proofreading = RequestType(
-        category_name="Proofreading",
-        min_input_tokens=2000,
-        max_input_tokens=5000,
-        min_output_tokens=50,
-        max_output_tokens=200,
+    longshort = RequestType(
+        category_name="Long-Short",
+        min_input_tokens=5000,
+        max_input_tokens=8000,
+        min_output_tokens=100,
+        max_output_tokens=1000,
         sampling_method="uniform"
     )
-
-    # Helper to build a trace, run scheduling, and save JSON
-    def build_sched_save(
-        filename: str,
-        request_type_dict: dict,
-        arrival,
-        num_requests: int,
-        skip_token_ids=True,
-    ):
-        """
-        1) Make a TraceType
-        2) Generate a trace
-        3) Call add_estimate_sched(...) with the global GPU parameters
-        4) Save trace to JSON (skip_token_ids=True)
-        """
-        trace_type = TraceType(request_type_dict, arrival, vocab=(200, 30000))
-        trace_obj = trace_type.generate_requests(num_requests=num_requests, batch_size=max_parallel)
-
-        # Add scheduling data
-        trace_obj.add_estimate_sched(
-            num_gpu_blocks=num_gpu_blocks,
-            block_size=block_size,
-            max_parallel=max_parallel
-        )
-
-        # Save trace
-        trace_obj.save_to_json(filename, skip_token_ids=skip_token_ids)
-        
+    probs_dict = {t:prob for (t,prob) in zip([shortshort, shortlong, longlong, longshort], request_type_probs)}
+    for k,v in probs_dict.items():
+        if v == 0:
+            del probs_dict[k]
+    skip_token_ids = True
+    build_sched_save(
+        filename=filename,
+        request_type_dict=probs_dict,
+        arrival=arrival_pattern,
+        num_requests=num_requests,
+        skip_token_ids=skip_token_ids,
+        max_parallel=max_parallel,
+        num_gpu_blocks=num_gpu_blocks,
+        block_size=block_size,
+    )
+# -------------------------------------------------------
+# Example usage
+# -------------------------------------------------------
+# if __name__ == "__main__":
     
-    skip_token_ids = False
-    # Single Type: ChatBot Q&A only
-    build_sched_save(
-        filename="trace_single_chatbot_qa.json",
-        request_type_dict={chatbot_qa: 1.0},
-        arrival=arrival_pattern,
-        num_requests=20,
-        skip_token_ids=skip_token_ids,
-    )
+#     max_model_len = 10000
+#     block_size = 16
+#     num_gpu_blocks = max_model_len//block_size
+#     max_parallel = 4 # batch size 
+    
+#     arrival_pattern  = DiscretePoissonArrival(lambda_per_step=0.01, max_steps=4000)
 
-    # Single Type: Creative Generation only
-    build_sched_save(
-        filename="trace_single_creative_gen.json",
-        request_type_dict={creative_gen: 1.0},
-        arrival=arrival_pattern,
-        num_requests=20,
-        skip_token_ids=skip_token_ids,
-    )
+#     chatbot_qa = RequestType(
+#         category_name="ChatBot Q&A",
+#         min_input_tokens=20,   # short question
+#         max_input_tokens=200,
+#         min_output_tokens=20,  # short answer
+#         max_output_tokens=200,
+#         sampling_method="uniform"
+#     )
 
-    # Single Type: Legal Contract Analysis only
-    build_sched_save(
-        filename="trace_single_contract_analysis.json",
-        request_type_dict={contract_analysis: 1.0},
-        arrival=arrival_pattern,
-        num_requests=20,
-        skip_token_ids=skip_token_ids,
-    )
+#     # B) Creative Generation: short input, long output
+#     #    Real-world usage: user provides a short prompt, wants a lengthy/creative response.
+#     creative_gen = RequestType(
+#         category_name="Creative Generation",
+#         min_input_tokens=10,
+#         max_input_tokens=100,
+#         min_output_tokens=500,
+#         max_output_tokens=2000,
+#         sampling_method="uniform"
+#     )
 
-    # Single Type: Proofreading only
-    build_sched_save(
-        filename="trace_single_proofreading.json",
-        request_type_dict={proofreading: 1.0},
-        arrival=arrival_pattern,
-        num_requests=20,
-        skip_token_ids=skip_token_ids,
-    )
+#     # C) Legal Contract Analysis: large input, large output
+#     #    Real-world usage: user uploads a big contract and wants thorough, in-depth analysis.
+#     contract_analysis = RequestType(
+#         category_name="Legal Contract Analysis",
+#         min_input_tokens=2000,
+#         max_input_tokens=8000,
+#         min_output_tokens=2000,
+#         max_output_tokens=10000,
+#         sampling_method="uniform"
+#     )
 
-    # 4) Generate traces that mix any two of the above.
-    #    We define real-world usage scenarios where certain tasks appear together.
-
-    # A) ChatBot Q&A + Creative Generation
-    #    Real-world: an LLM platform with primarily short queries,
-    #    but some users ask for bigger creative expansions. 
-    build_sched_save(
-        filename="trace_mix2_chatbot_creative.json",
-        request_type_dict={chatbot_qa: 0.7, creative_gen: 0.3},  # 70/30
-        arrival=arrival_pattern,
-        num_requests=30,
-        skip_token_ids=skip_token_ids,
-    )
-
-    # B) Creative Generation + Proofreading
-    #    Real-world: writer platform that frequently requests large expansions 
-    #    and sometimes does quick grammar checks on existing text.
-    build_sched_save(
-        filename="trace_mix2_creative_proofreading.json",
-        request_type_dict={creative_gen: 0.4, proofreading: 0.6},  # 40/60
-        arrival=arrival_pattern,
-        num_requests=30,
-        skip_token_ids=skip_token_ids,
-    )
-
-    # C) ChatBot Q&A + Contract Analysis
-    #    Real-world: a service that mostly does short Q&A, but occasionally
-    #    users send big documents for legal analysis.
-    build_sched_save(
-        filename="trace_mix2_chatbot_contract.json",
-        request_type_dict={chatbot_qa: 0.8, contract_analysis: 0.2},
-        arrival=arrival_pattern,
-        num_requests=30,
-        skip_token_ids=skip_token_ids,
-    )
-
-    # ... (Similarly, you could define other pairs if you want) ...
-
-    # 5) Mixes of three
-    #    Example: ChatBot Q&A + Creative Gen + Proofreading 
-    #    Real-world: a content creation tool used mostly for short QA, 
-    #    sometimes for bigger creative expansions, occasionally for proofreading.
-
-    build_sched_save(
-        filename="trace_mix3_chatbot_creative_proof.json",
-        request_type_dict={
-            chatbot_qa: 0.5,
-            creative_gen: 0.3,
-            proofreading: 0.2,
-        },
-        arrival=arrival_pattern,
-        num_requests=40,
-        skip_token_ids=skip_token_ids,
-    )
-
-    # Another 3-type scenario: ChatBot Q&A + Contract Analysis + Proofreading
-    # e.g., a general LLM that gets short Q&A requests, big legal docs, and quick proof edits
-    build_sched_save(
-        filename="trace_mix3_chatbot_contract_proof.json",
-        request_type_dict={
-            chatbot_qa: 0.4,
-            contract_analysis: 0.4,
-            proofreading: 0.2
-        },
-        arrival=arrival_pattern,
-        num_requests=40,
-        skip_token_ids=skip_token_ids,
-    )
-
-    # 6) Mix of all four
-    #    Real-world: a general-purpose LLM system that handles a variety 
-    #    of requests – short Q&A, creative expansions, big doc analysis, quick proofreading.
-
-    build_sched_save(
-        filename="trace_mix4_all.json",
-        request_type_dict={
-            chatbot_qa: 0.25,
-            creative_gen: 0.25,
-            contract_analysis: 0.25,
-            proofreading: 0.25
-        },
-        arrival=arrival_pattern,
-        num_requests=50,
-        skip_token_ids=skip_token_ids,
-    )
+#     # D) Proofreading: large input, short output
+#     #    Real-world usage: user provides a long text to check; 
+#     #    minimal feedback or corrections are returned.
+#     proofreading = RequestType(
+#         category_name="Proofreading",
+#         min_input_tokens=2000,
+#         max_input_tokens=5000,
+#         min_output_tokens=50,
+#         max_output_tokens=200,
+#         sampling_method="uniform"
+#     )
+if __name__ == "__main__":
+    make_trace_default("/home/xinyuema/vllm/samples/traces/benchmark_trace_test.json",)
