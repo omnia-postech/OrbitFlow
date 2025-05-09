@@ -356,7 +356,6 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None):
                 arrival_time_local = request_metadata[rid]["arrival_time"]
                 finished_time_local = step_time
                 m = output.metrics
-
                 token_ts = request_metadata[rid]["token_timestamps"]
                 if token_ts:
                     first_token_time_local = token_ts[0]
