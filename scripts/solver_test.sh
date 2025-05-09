@@ -35,5 +35,6 @@ for T in "${CFG_LIST[@]}"; do
         --prefetch-distance 1 \
         --flattened-cache true \
         --merge-prefetch-buffer true \
+        --pause-and-resume \
         --output-log ../outputs/${EXP}/${T}/output.log
 done

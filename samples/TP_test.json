@@ -11,11 +11,11 @@
     ["ChatBot Q&A", 0.7],
     ["Creative Generation", 0.3]
   ],
-  "num_gpu_blocks_override": 300,
+  "num_gpu_blocks_override": 600,
   "vocab": [200, 30000],
   "requests": {
     "request_0":  {"category":"ChatBot Q&A","input_length":1400,"output_length":3,"arrival_time":0,"sched_time":0,"wait_time":0},
-    "request_1":  {"category":"ChatBot Q&A","input_length":10,"output_length":5,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_1":  {"category":"ChatBot Q&A","input_length":10,"output_length":2,"arrival_time":0,"sched_time":0,"wait_time":0},
     "request_2":  {"category":"ChatBot Q&A","input_length":4000,"output_length":3,"arrival_time":0,"sched_time":0,"wait_time":0},
     "request_3":  {"category":"ChatBot Q&A","input_length":10,"output_length":5,"arrival_time":0,"sched_time":0,"wait_time":0}
   }

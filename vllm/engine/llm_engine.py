@@ -1394,6 +1394,8 @@ class LLMEngine:
                 execute_model_req.async_callback = self.async_callbacks[
                     virtual_engine]
 
+            self.model_executor.driver_worker.cache_engine[0].resume_distances = self.scheduler[virtual_engine].resume_distances
+
             # (xinyue) worker entry point
             outputs = self.model_executor.execute_model(
                 execute_model_req=execute_model_req)
