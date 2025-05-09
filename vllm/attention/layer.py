@@ -14,8 +14,6 @@ from vllm.model_executor.layers.quantization.base_config import (
 from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 from vllm.platforms import _Backend, current_platform
 from vllm.utils import direct_register_custom_op
-from vllm.logger import init_logger
-logger = init_logger(__name__)
 from copy import copy
 
 
@@ -135,7 +133,6 @@ class Attention(nn.Module):
         is_recomp: bool = False,
         attn_type: str = AttentionType.DECODER,
     ) -> torch.Tensor:
-        logger.debug(f"Attention received {attn_metadata.block_tables.shape} ")
 
         if self.use_direct_call:
             return self.impl.forward(query,
@@ -315,7 +312,6 @@ def unified_attention_with_output(
                       self._v_scale,
                       attn_type=attn_type,
                       output=output)
-
 def unified_attention_with_output_fake(
     query: torch.Tensor,
     key: torch.Tensor,
