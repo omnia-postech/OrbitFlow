@@ -2,6 +2,9 @@
 from typing import Set, Any, Dict, List, Optional, Tuple, OrderedDict
 from collections import defaultdict
 import torch
+from gurobipy import GRB
+from vllm.worker.distn.solver import Solver, Result, Request
+
 
 import gc
 
@@ -523,7 +526,6 @@ class CacheEngine(CacheEngineBase):
                             device=device))
         return kv_cache
 
-    def swap_in(self, src_to_dst: torch.Tensor) -> None:
         for i in range(self.num_attention_layers):
             self.attn_backend.swap_blocks(self.cpu_cache[i], self.gpu_cache[i],
                                           src_to_dst)
@@ -1198,6 +1200,27 @@ class FlattenedCacheEngine(CacheEngineBase):
             dist = [-1] * len(snapshot.candidates) 
         elif self.prefetch_mode  == "static":
             dist = [prefetch_distance] * len(snapshot.candidates)
+        elif self.prefetch_mode  == "solver":
+            dist = [prefetch_distance] * len(snapshot.candidates)
+            layer_time_f = 0.12047052383422852 / 32
+            request_list = []
+            requests = ["a" +str(i) for i in range(len(total_context_lens))]
+            remaining_steps = {requests[i]: 100 for i in range(len(total_context_lens))}
+            context_blocks = {requests[i]: math.ceil(total_context_lens[i] / self.block_size) for i in range(len(total_context_lens))}
+            layer_time = {requests[i]: layer_time_f for i in range(len(total_context_lens))}
+            deposit_count = {requests[i]: 0 for i in range(len(total_context_lens))}
+            SLO = {requests[i]: 1 for i in range(len(total_context_lens))}
+
+            for id in requests:
+                request_list.append(Request(id, remaining_steps[id], context_blocks[id], layer_time[id], deposit_count[id], SLO[id]))
+                
+            match Solver.solve(request_list, block_bandwidth = 103178.0, gpu_block_capacity = self.num_gpu_blocks):
+                case None:
+                    print("No optimal solution found.")
+                case result:
+                    pass
+
+            
         elif self.prefetch_mode == "flexgen":
             free_mem, total_mem = torch.cuda.mem_get_info()
             msg = f"Free Memory: {free_mem / 1024 / 1024} MB"

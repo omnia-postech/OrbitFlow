@@ -9,6 +9,9 @@ import json
 import warnings
 import re 
 import math
+import os
+from datasets import load_dataset
+from transformers import AutoTokenizer
 
 from pathlib import Path
 import numpy as np
@@ -16,6 +19,9 @@ from transformers import AutoTokenizer
 import tqdm, json, argparse
 PROFILED_A = 1.0017431830666432e-06
 PROFILED_B = 0.049519613282613506
+import json, argparse
+from tqdm import tqdm
+
 
 def build_token_bank(
     text_path: str,
@@ -136,10 +142,10 @@ class RequestType:
     def __init__(
         self,
         category_name: str,
-        min_input_tokens: int,
-        max_input_tokens: int,
-        min_output_tokens: int,
-        max_output_tokens: int,
+        min_input_tokens: int = 0,
+        max_input_tokens: int = 0,
+        min_output_tokens: int = 0,
+        max_output_tokens: int = 0,
         sampling_method: str = "default",
         **kwargs: Any
     ):
@@ -164,6 +170,11 @@ class RequestType:
         self.max_in = max_input_tokens
         self.min_out = min_output_tokens
         self.max_out = max_output_tokens
+
+        if (self.category_name == "ShareGPT"):
+            self.use_bank = True
+        else:
+            self.use_bank = False
         
         if sampling_method not in self.SUPPORTED_METHODS:
             raise ValueError(f"Unsupported sampling_method: {sampling_method}")
@@ -317,9 +328,20 @@ class RequestType:
             total_length = input_length + output_length 
             slo = total_length * PROFILED_A + PROFILED_B 
         # 2) get the token source
+        
         if token_bank_path is None:
             token_ids = [random.randint(*vocab) for _ in range(input_length)]
+        if self.use_bank is False:
+            # 1) Sample the lengths
+            while True:
+                input_length, output_length = self.sampler()
+                if trace_limit is not None:
+                    if (input_length + output_length) > trace_limit:
+                        continue  # re-sample
+                break
 
+            # 2) get the token source
+            token_ids = [random.randint(*vocab) for _ in range(input_length)]
         else:
             bank = np.load(token_bank_path, mmap_mode="r" if mmap else None)
             bank_size = bank.shape[0]
@@ -332,6 +354,29 @@ class RequestType:
             else:
                 idx = np.random.randint(0, bank_size, size=input_length)
                 token_ids = bank[idx].tolist()
+            token_bank_path = os.path.join("../samples", f"{self.category_name}.json")
+
+            if not os.path.exists(token_bank_path):
+                print(f"Token bank {token_bank_path} not found. Start to make token bank.")
+                bank = self.save_token_bank(self.category_name, token_bank_path)
+            else: 
+                with open(token_bank_path, "r", encoding="utf-8") as f:
+                    bank = [json.loads(line) for line in f]
+
+            # trace_limit 조건을 만족하는 샘플만 필터링
+            filtered_bank = [
+                sample for sample in bank
+                if (sample["input_length"] + sample["output_length"]) < trace_limit
+            ]
+                
+            bank_size = len(filtered_bank)
+            # print(f"bank_size: {bank_size}")
+
+            idx = np.random.randint(0, bank_size)
+            input_length = filtered_bank[idx]["input_length"]
+            output_length = filtered_bank[idx]["output_length"]
+            token_ids = filtered_bank[idx]["input_token_ids"]
+        
         if slo_max:
             return Request(
                 category=self.category_name,
@@ -349,6 +394,54 @@ class RequestType:
                 arrival_time=arrival_time,
                 token_ids=token_ids
             )
+    
+    def save_token_bank(self, token_bank, token_bank_path):
+        tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3.1-8B-Instruct")
+        parsed_data = []
+
+        test = 1
+        if token_bank == "ShareGPT":
+            json_path = "/home/sychoy/vllm/downloads/ShareGPT_V3_unfiltered_cleaned_split.json"  # JSON 다운로드 위치
+            with open(json_path, "r", encoding="utf-8") as f:
+                dataset = json.load(f)
+
+            # Filter out the conversations with less than 2 turns.
+            dataset = [data for data in dataset if len(data["conversations"]) >= 2]
+            # Only keep the first two turns of each conversation.
+            dataset = [(data["conversations"][0]["value"],
+            data["conversations"][1]["value"]) for data in dataset]
+
+            for i in tqdm(range(len(dataset))):
+                prompt = dataset[i][0]
+                completion = dataset[i][1]
+
+                if (test < 5):
+                    print(f"print {test}th data")
+                    print(dataset[i])
+                    print()
+                    print()
+                    test += 1
+
+                if not prompt or not completion:
+                    continue
+
+                input_tokens = tokenizer.encode(prompt, truncation=True, max_length=2048)
+
+                parsed_data.append({
+                    "input_length": len(prompt),
+                    "output_length": len(completion),
+                    "input_token_ids": input_tokens,
+                })
+
+        else:
+            raise ValueError(f"Wrong token bank name: {token_bank}")
+
+        os.makedirs(os.path.dirname(token_bank_path), exist_ok=True)
+        with open(token_bank_path, "w", encoding="utf-8") as f:
+            for item in parsed_data:
+                f.write(json.dumps(item) + "\n")
+
+        return parsed_data
 
 # -------------------------------------------------------
 # ArrivalPattern Interface
