@@ -1220,23 +1220,25 @@ class FlattenedCacheEngine(CacheEngineBase):
                     print("No optimal solution found.")
                 case result:
                     pass
-
-            
         elif self.prefetch_mode == "flexgen":
-            free_blocks = self.block_manager.get_num_free_gpu_blocks() 
-
-            if not is_decoding and self.free_mem_at_first_prefill_step is None:
-                self.free_mem_at_first_prefill_step = int(free_blocks * 0.8)
-                logger.info(f"[flexgen] first prefill step free_mem: {self.free_mem_at_first_prefill_step} blocks")
+            total_blocks = self.num_gpu_blocks 
+            if not is_decoding:
                 self.flexgen_dist = -1
-            self.flexgen_dist = -1
             if is_decoding and self.prev_flexgen_distance is None:
-                num_layers_on_GPU = ((self.free_mem_at_first_prefill_step // free_blocks))
+                blocks_per_layer = 0
+                for ctx_len in total_context_lens:
+                    blocks_per_layer += math.ceil(ctx_len / self.block_size)
+                
+                num_layers_on_GPU = (total_blocks // blocks_per_layer)
                 num_layers_on_GPU = min(32, num_layers_on_GPU)
                 num_layers_to_offload = 32 - num_layers_on_GPU
                 if num_layers_to_offload == 0:
                     self.prev_flexgen_distance = -1
                 else:
+                    logger.critical(f"self.free_mem_at_first_prefill_step {self.free_mem_at_first_prefill_step} blocks")
+                    logger.critical(f"self.free_blocks {free_blocks} blocks")
+                    logger.critical(f"num_layers_on_GPU {num_layers_on_GPU} blocks")
+                    logger.critical(f"num_layers_to_offload {num_layers_to_offload} blocks")
                     self.prev_flexgen_distance = self.block_manager.num_attention_layers // num_layers_to_offload
                     self.prev_flexgen_distance = max(0, self.prev_flexgen_distance)
                 logger.info(f"[flexgen] prefill → distance set to {self.prev_flexgen_distance}")
