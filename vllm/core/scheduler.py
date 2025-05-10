@@ -795,7 +795,8 @@ class Scheduler:
                             case None:
                                 logger.info(f"No optimal solution found.")
                             case result:                 
-                                result[0].resume = False # For debugging
+                                # result[0].resume = False # For debugging
+                                self._pause_window_remaining = result[0].window
                                 self.resume_distances = [sol.n for sol in result if sol.resume]
                                 logger.info(f"Resume distances for each request: {self.resume_distances}")                                       
                                 pause_ids = {sol.id for sol in result if not sol.resume}
