@@ -9,11 +9,10 @@ export VLLM_CONFIGURE_LOGGING=1
 LOGGING_LEVEL=CRITICAL
 ROOT="/home/xinyuema/vllm"
 
-EXP_LIST=(TestTrace)                         # ← your “experiments”
-METHOD_LIST=(Flexgen)      # ← indexes into JSON above
-# METHOD_LIST=(Flexgen NoPrefetch NextLayer SelectN)      # ← indexes into JSON above
-TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/test_trace1/"
-TRACE_LIST=(test_trace1_3)
+EXP_LIST=(TestSolver)                         # ← your “experiments”
+METHOD_LIST=(DistNSingle Flexgen NextLayer NoPrefetch SelectN Static8)      # ← indexes into JSON above
+TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/sy_reproduce/"
+TRACE_LIST=(test_trace1_10_not_enough)
 
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"
@@ -65,12 +64,12 @@ PY
       printf 'EXP_ARGS for METHOD=%s:\n  ' "$METHOD"
       printf '%q ' "${EXP_ARGS[@]}"; echo            # newline
 
-    ### execution
+        ### execution
       python "${ROOT}/examples/test_distN.py" \
           --config-file "${TRACE_CFG_DIR}/${TRACE}.json" \
           "${EXP_ARGS[@]}" \
           --output-log "${RUN_DIR}/outputs.log"
-    ### execution
+        ### execution
 
       CSV="${RUN_DIR}/outputs.csv"
       if [[ -f "$CSV" ]]; then         # sanity-check: file must exist

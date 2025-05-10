@@ -40,7 +40,8 @@
         "--prefetch-distance",    "1",
         "--flattened-cache",      "true",
         "--merge-prefetch-buffer", "true",
-        "--pause-and-resume"
+        "--pause-and-resume",
+        "--enable-deposit"
     ]
   }
   
