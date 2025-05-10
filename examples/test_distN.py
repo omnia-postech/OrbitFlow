@@ -91,9 +91,14 @@ class DelaySimulator:
         rid_log: list[str] = []
 
         for rid, dep in list(self.deposit.items()):
+            v  = self.v.get(rid, None)  # default v_tps  
+            if dep == 0:
+                self.last_time[rid] = step_time
+                continue 
+            
+            
             last   = self.last_time.get(rid, step_time)
             dt     = step_time - last           
-            v  = self.v.get(rid, self.v_default)  # default v_tps  
             n      = int(dt * v)             
             if n <= 0:
                 continue
@@ -101,23 +106,25 @@ class DelaySimulator:
             # release n tokens, but not more than deposit
             if dep < n:
                 self.violations[rid] += 1 
-                rid_log.append(f"{rid}(SLO {dep}/{n})")
+                rid_log.append(f"{rid}(SLO {dep}/{n}), {self.violations[rid]} violations so far")
             else:
                 rid_log.append(f"{rid}({n})@{v:.2f}t/s)")
             to_rel = min(n, dep)
             # deposit 차감
             self.deposit[rid] -= to_rel
+
+
             if self.deposit[rid] == 0:         # backlog cleared → reset stopwatch
                 self.last_time[rid] = step_time   #  ← NEW LINE
+            else: 
+                # last_time[rid] 을 방출된 토큰 시간만큼 앞으로 이동
+                # 즉, to_rel tokens / v_tps 만큼 경과시킨 것처럼
+                advance = to_rel / v
+                self.last_time[rid] = last + advance                
             pops.append((rid, to_rel))
-            
-            # last_time[rid] 을 방출된 토큰 시간만큼 앞으로 이동
-            # 즉, to_rel tokens / v_tps 만큼 경과시킨 것처럼
-            advance = to_rel / v
-            self.last_time[rid] = last + advance
         # single-line summary
         if rid_log:
-            logger.info(
+            logger.critical(
                 "[pop] deposits=%s | released: %s",
                 deposits_snapshot,
                 " | ".join(rid_log),
@@ -434,7 +441,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                     "finished_time": finished_time_local - (start_time or 0),
                     "stall_times": json.dumps(request_metadata[rid]["stall_times"]),
                     "time_to_first_token": first_token_time_local - arrival_time_local,
-                    "slo_threshold": sim.v[rid],
+                    "slo_threshold": 1/sim.v[rid],
                     "slo_violations": sim.violation_count(rid),
                     "stall_duration": request_metadata[rid]["stall_duration"],
                     "decode_length": decode_length,

@@ -34,12 +34,12 @@
         "--prefetch-distance",    "8",
         "--flattened-cache",      "true",
         "--merge-prefetch-buffer", "true"
-    ],
+        ],
     "SelectN": [
-    "--prefetch-mode",        "selectn",
-    "--prefetch-distance",    "1",
-    "--flattened-cache",      "true",
-    "--merge-prefetch-buffer", "true"
+        "--prefetch-mode",        "selectn",
+        "--prefetch-distance",    "1",
+        "--flattened-cache",      "true",
+        "--merge-prefetch-buffer", "true"
     ], 
     "DistNSingle": [
         "--prefetch-mode",        "distn_single",
@@ -52,7 +52,8 @@
         "--prefetch-distance",    "1",
         "--flattened-cache",      "true",
         "--merge-prefetch-buffer", "true",
-        "--pause-and-resume"
+        "--pause-and-resume",
+        "--enable-deposit"
     ]
   }
   
