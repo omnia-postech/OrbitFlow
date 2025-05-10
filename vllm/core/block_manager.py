@@ -176,9 +176,8 @@ class SelfAttnBlockSpaceManager(BlockSpaceManager):
 
             # Add blocks to the block table only if the sequence is non empty.
             block_table.allocate(token_ids=seq.get_token_ids(),
-                                 extra_hash=extra_hash)
-            msg = f"block_table allocated for seq {seq.seq_id}, {len(block_table._blocks)} blocks"
-            logger.info(msg)
+                                 extra_hash=extra_hash)            
+            logger.info(f"block_table allocated for seq {seq.seq_id}, {len(block_table._blocks)} blocks")
         return block_table
 
     def allocate(self, seq_group: SequenceGroup) -> None:
@@ -716,11 +715,9 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
             block_table_gpu: BlockTable = self._allocate_sequence(seq, Device.GPU)
             block_table_cpu: BlockTable = self._allocate_sequence(seq, Device.CPU)
             self.block_tables[seq.seq_id].append(block_table_gpu)
-            self.cpu_block_tables[seq.seq_id].append(block_table_cpu)
-        msg = f"gpu block_table allocated for seq {seq.seq_id}, {len(self.block_tables[seq.seq_id][0]._blocks)} blocks for {i+1} layers"
-        logger.info(msg)
-        msg = f"cpu block_table allocated for seq {seq.seq_id}, {len(self.cpu_block_tables[seq.seq_id][0]._blocks)} blocks for {i+1} layers"
-        logger.info(msg)
+            self.cpu_block_tables[seq.seq_id].append(block_table_cpu)        
+        logger.debug(f"gpu block_table allocated for seq {seq.seq_id}, {len(self.block_tables[seq.seq_id][0]._blocks)} blocks for {i+1} layers")        
+        logger.debug(f"cpu block_table allocated for seq {seq.seq_id}, {len(self.cpu_block_tables[seq.seq_id][0]._blocks)} blocks for {i+1} layers")
         # Track seq
         self._last_access_blocks_tracker.add_seq(seq.seq_id) # Xinyue for prefix caching, relevant? 
 

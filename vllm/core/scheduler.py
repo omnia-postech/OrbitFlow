@@ -605,20 +605,6 @@ class Scheduler:
         preempted: List[SequenceGroup] = ret.preempted
         swapped_out: List[SequenceGroup] = ret.swapped_out
         paused: List[SequenceGroup] = ret.paused 
-        
-        # if self.cache_config.pause_and_resume:
-        #     if self.cache_config.prefetch_mode == "solver":
-        #         pass
-        #     else:         
-        #         ####################### Naive resume #######################
-        #         # NOTE(HONG): Naive pause and resume -> left for future use
-        #         for seq_group in list(self.paused):
-        #             if self.deposit_map.get(seq_group.request_id, 0) == 20: # threshold, hard coded 
-        #                 logger.info(f"RESUME-PROACTIVE: request {seq_group.request_id} moved from PAUSED -> RUNNING; "
-        #                             f"paused_queue_size={len(self.paused)-1}, running_queue_size={len(self.running)+1}")
-        #                 self.paused.remove(seq_group)
-        #                 self.running.append(seq_group)
-        #         ####################### Naive resume #######################
 
         running_queue = self.running
         assert len(self._async_stopped) == 0
@@ -739,7 +725,7 @@ class Scheduler:
 
         if self.cache_config.pause_and_resume:
             if not self.running and not self.waiting and paused:
-                logger.info(f"No running or waiting seqs; restoring {len(paused)} paused requests")
+                logger.debug(f"No running or waiting seqs; restoring {len(paused)} paused requests")
                 for pg in list(paused):                    
                     scheduled = self._scheduled_seq_group_cache[self.cache_id].get_object()
                     scheduled.seq_group = pg
@@ -752,11 +738,11 @@ class Scheduler:
             if self.cache_config.prefetch_mode == "solver":
                 if ret.decode_seq_groups and len(ret.decode_seq_groups)>0:
                     if self._pause_window_remaining > 0:
-                        logger.info(f"Within pause window (remaining={self._pause_window_remaining}), skipping solver")
+                        logger.debug(f"Within pause window (remaining={self._pause_window_remaining}), skipping solver")
                         self._pause_window_remaining -= 1
                     else:
                         if self.paused:
-                            logger.info(f"RESTORE-PAUSED: bringing back {len(self.paused)} paused requests into decode candidates")
+                            logger.debug(f"RESTORE-PAUSED: bringing back {len(self.paused)} paused requests into decode candidates")
                             for pg in list(self.paused):
                                 scheduled = self._scheduled_seq_group_cache[self.cache_id].get_object()
                                 scheduled.seq_group = pg
@@ -832,7 +818,7 @@ class Scheduler:
                     if candidates: 
                         # candidates[1].get_seqs()[0].get_output_len()
                         pause_victim = max(candidates, key=lambda g: g.get_seqs()[0].get_output_len())
-                        logger.info(f"PAUSE: request {pause_victim.request_id} moved from RUNNING -> PAUSED; "
+                        logger.debug(f"PAUSE: request {pause_victim.request_id} moved from RUNNING -> PAUSED; "
                                     f"running_queue_size={len(self.running)-1}, paused_queue_size={len(self.paused)+1}")
 
                         self.running.remove(pause_victim)
