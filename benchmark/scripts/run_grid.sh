@@ -9,8 +9,10 @@ export VLLM_CONFIGURE_LOGGING=1
 LOGGING_LEVEL=CRITICAL
 ROOT="/home/xinyuema/vllm"
 
+FIGURE_ONLY=1
 EXP_LIST=(TestSolver)                         # ← your “experiments”
-METHOD_LIST=(DistNSingle Flexgen NextLayer NoPrefetch SelectN Static8)      # ← indexes into JSON above
+# METHOD_LIST=(DistNSingle Flexgen NextLayer NoPrefetch SelectN Static8)      # ← indexes into JSON above
+METHOD_LIST=(NoPrefetch)      # ← indexes into JSON above
 TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/sy_reproduce/"
 TRACE_LIST=(test_trace1_10_not_enough)
 
@@ -65,12 +67,16 @@ PY
       printf '%q ' "${EXP_ARGS[@]}"; echo            # newline
 
         ### execution
-      python "${ROOT}/examples/test_distN.py" \
-          --config-file "${TRACE_CFG_DIR}/${TRACE}.json" \
-          "${EXP_ARGS[@]}" \
-          --output-log "${RUN_DIR}/outputs.log"
+      if ((FIGURE_ONLY)); then
+        echo "  ↳ Skipping execution (FIGURE_ONLY)"
+      else
+        echo "  ↳ Running ${METHOD} on ${TRACE}"
+        python "${ROOT}/examples/test_distN.py" \
+            --config-file "${TRACE_CFG_DIR}/${TRACE}.json" \
+            "${EXP_ARGS[@]}" \
+            --output-log "${RUN_DIR}/outputs.log"
         ### execution
-
+      fi 
       CSV="${RUN_DIR}/outputs.csv"
       if [[ -f "$CSV" ]]; then         # sanity-check: file must exist
           echo "  ↳ Plotting stats and TBT for $(basename "$CSV")"
