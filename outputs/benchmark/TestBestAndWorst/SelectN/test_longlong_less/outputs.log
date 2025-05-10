@@ -1,0 +1,7 @@
+All requests completed. Now saving CSV...
+Metrics saved to /home/sychoy/vllm/outputs/benchmark/TestBestAndWorst/SelectN/test_longlong_less_mem/outputs.csv
+------Wall-clock stats (non-overlapping)------
+Overall runtime  : 1225.895 s
+Prefill time     : 14137 tokens over 22.882 s ( 617.82 t/s)
+Decode  time     : 27215 tokens over 1203.013 s ( 22.62 t/s)
+Preemptions  time     : 25

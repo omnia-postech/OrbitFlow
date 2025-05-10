@@ -1,0 +1,7 @@
+All requests completed. Now saving CSV...
+Metrics saved to /home/sychoy/vllm/outputs/benchmark/TestBestAndWorst/Flexgen/test_longlong_less_mem/outputs.csv
+------Wall-clock stats (non-overlapping)------
+Overall runtime  : 886.504 s
+Prefill time     : 14137 tokens over 22.650 s ( 624.15 t/s)
+Decode  time     : 27173 tokens over 863.854 s ( 31.46 t/s)
+Preemptions  time     : 28
