@@ -153,6 +153,8 @@ def plot_time_between_tokens_wallclock(df: pd.DataFrame, csv_path: Path) -> Path
     fig, ax = plt.subplots(figsize=(10, 4))
 
     for idx, (_, row) in enumerate(df.iterrows()):
+
+        rid       = row["request_id"]
         color      = palette[idx % 10]
         arrival    = row["arrival_time"]
         finished   = row["finished_time"]
@@ -174,15 +176,18 @@ def plot_time_between_tokens_wallclock(df: pd.DataFrame, csv_path: Path) -> Path
                 xs.append(cum - t0)
                 ys.append(dt)
                 cs.append(color)
-
+        ax.scatter(xs, ys, s=0.01, alpha=0.001, c=[color], label=rid, linewidths=0)
         # 3) draw SLO line (seconds per token = 1 / tokens-per-second)
         if isinstance(slo_thr, (int, float)) and slo_thr > 0:
-            slo_latency = 1.0 / slo_thr
-            ax.hlines(y=slo_latency,
+            x_start, x_end = arrival - t0, finished - t0
+            ax.hlines(y=slo_thr,
                       xmin=arrival - t0,
                       xmax=finished - t0,
                       colors=color, linewidth=1.0, alpha=0.8)
-
+            # Text slightly above the line at its midpoint
+            x_mid = (x_start + x_end) / 2
+            ax.text(x_mid, slo_thr + 0.01+idx*0.02, rid,
+                    color=color, fontsize=8, ha="center", va="bottom")
     # --- final plot settings -----------------------------------------------
     ax.scatter(xs, ys, s=6, alpha=0.6, c=cs, linewidths=0)
     ax.set_xlabel("Wall-clock time since start (s)")
@@ -190,8 +195,15 @@ def plot_time_between_tokens_wallclock(df: pd.DataFrame, csv_path: Path) -> Path
     ax.set_title("Inter-token latency over time (colored by request)")
     ax.grid(True, linewidth=0.3)
     ax.set_ylim(0, 0.5)
-    plt.tight_layout()
 
+    # Place legend outside plot if up to ten entries; otherwise inside upper right
+    if df.shape[0] <= 10:
+        ax.legend(title="request_id", bbox_to_anchor=(1.02, 1), loc="upper left", borderaxespad=0.)
+        fig.subplots_adjust(right=0.78)           # make space for legend
+    else:
+        ax.legend(title="request_id", loc="upper right", fontsize="small")
+
+    plt.tight_layout()
     out_file = csv_path.with_name(f"{csv_path.stem}_tbt_wallclock.png")
     fig.savefig(out_file, dpi=150, bbox_inches="tight")
     plt.close(fig)

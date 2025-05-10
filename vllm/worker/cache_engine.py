@@ -1179,11 +1179,14 @@ class FlattenedCacheEngine(CacheEngineBase):
         elif self.prefetch_mode == "static_req_wise": 
             dist = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10][:len(snapshot.candidates)] # FIXME Xinyue hard code
         elif self.prefetch_mode == "distn_single": 
+            
             dist = [-1] * len(snapshot.candidates) 
             if len(snapshot.prev_dist_dict) > 0:
                 prev_dist = list(snapshot.prev_dist_dict.values())[0]
             else: 
                 prev_dist = -1
+            logger.critical(f"prev_dist:{snapshot.prev_dist_dict}")
+
             # increase the distance by 1 if no free blocks available for next step 
             free_blocks = self.block_manager.get_num_free_gpu_blocks() 
             max_append_blocks = len(snapshot.candidates) * self.num_attention_layers 
@@ -1200,9 +1203,12 @@ class FlattenedCacheEngine(CacheEngineBase):
                 num_block_per_layer = 0
                 for ctx_len in total_context_lens:
                     num_block_per_layer += math.ceil(ctx_len / self.block_size)
-                num_layers_on_GPU = (self.num_gpu_blocks // num_block_per_layer) 
+                num_layers_on_GPU = min(32, (self.num_gpu_blocks // num_block_per_layer) )
                 num_layers_on_CPU = self.num_attention_layers- num_layers_on_GPU
-                dist = [self.num_attention_layers // num_layers_on_CPU] * len(snapshot.candidates)
+                if num_layers_on_CPU == 0:
+                    dist = [-1] * len(snapshot.candidates)
+                else:
+                    dist = [self.num_attention_layers // num_layers_on_CPU] * len(snapshot.candidates)
             else: 
                 dist = [prev_dist] * len(snapshot.candidates)
         else:
