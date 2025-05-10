@@ -638,9 +638,9 @@ class PoissonBurstyArrivalPattern(ArrivalPattern):
     - Each burst is separated by gap ~ Poisson(lambda_gap)
     """
 
-    def __init__(self, lambda_burst: float):
+    def __init__(self, lambda_burst: float, lambda_gap: float = 0):
         self.lambda_burst = lambda_burst
-        self.lambda_gap = 0
+        self.lambda_gap = lambda_gap
 
     @staticmethod
     def _sample_poisson(lmbd: float) -> int:
@@ -666,7 +666,7 @@ class PoissonBurstyArrivalPattern(ArrivalPattern):
             )
 
             for i in range(burst_size):
-                offset = random.randint(4, 10)
+                offset = random.randint(int(self.lambda_burst * 0.5), self.lambda_burst)
                 arrivals.append(current_time + offset)
 
             total_requests += burst_size
@@ -677,6 +677,10 @@ class PoissonBurstyArrivalPattern(ArrivalPattern):
             t += 1
 
         return sorted(arrivals)
+
+    def __str__(self):
+        return (f"PoissonBurstyArrivalPattern("
+                f"lambda_burst={self.lambda_burst}, lambda_gap={self.lambda_gap}")
 
 
 # -------------------------------------------------------
@@ -1214,7 +1218,7 @@ class TraceType:
             running_sum += p
             self.cumulative_probs.append((rt, running_sum))
 
-        if hasattr(self.arrival_pattern, "lambda_gap"):
+        if hasattr(self.arrival_pattern, "lambda_gap") and self.arrival_pattern.lambda_gap == 0:
             max_out_across_types = max(rt.max_out for rt in self.request_type_probs.keys())
             min_out_across_types = min(rt.min_out for rt in self.request_type_probs.keys())
 
@@ -1459,14 +1463,19 @@ def build_sched_save(
 def make_trace_default(
     filename: str = "benchmark_trace_test.json",
     request_type_probs: List = [0.25, 0.25, 0.25, 0.25],
-    num_requests: int = 100,
+    num_requests: int = 1000,
     batch_size: int = 1, 
     num_gpu_blocks: int = 6000, 
     block_size: int = 16,
     max_parallel: int = 4,
     arrival_pattern  = DiscretePoissonArrival(lambda_per_step=0.005, max_steps=100000)
 ):
-    arrival_pattern = PoissonBurstyArrivalPattern(lambda_burst=5)
+    max_model_len = 5000
+    block_size = 16
+    num_gpu_blocks = max_model_len//block_size
+    max_parallel = 4 # batch size 
+    
+    arrival_pattern = PoissonBurstyArrivalPattern(lambda_burst=7)
     # predefine some requests 
     shortshort = RequestType(
         category_name="Short-Short ShareGPT",
@@ -1504,13 +1513,13 @@ def make_trace_default(
         sampling_method="uniform",
         dataset_name="ShareGPT"
     )
-    probs_dict = {t:prob for (t,prob) in zip([shortshort, shortlong, longlong, longshort], request_type_probs)}
+    probs_dict = {t:prob for (t,prob) in zip([shortshort, shortlong], [0.3, 0.7])}
     for k,v in probs_dict.items():
         if v == 0:
             del probs_dict[k]
     skip_token_ids = True
     build_sched_save(
-        filename=filename,
+        filename="/home/sychoy/vllm/benchmark/test_traces/test_not_enough_more_bursty/test_1000_enough.json",
         request_type_dict=probs_dict,
         arrival=arrival_pattern,
         num_requests=num_requests,

@@ -1273,7 +1273,7 @@ class FlattenedCacheEngine(CacheEngineBase):
                 prev_dist = list(snapshot.prev_dist_dict.values())[0]
                 if prev_dist == -1:
                     dist = [self.num_attention_layers//2] * len(snapshot.candidates)
-                elif not prev_dist == 0:
+                elif prev_dist > 0:
                     dist = [prev_dist - 1] * len(snapshot.candidates) 
                 else: 
                     dist = [prev_dist] * len(snapshot.candidates)
@@ -1287,7 +1287,6 @@ class FlattenedCacheEngine(CacheEngineBase):
                 dist = [self.num_attention_layers // num_layers_on_CPU] * len(snapshot.candidates)
             else: 
                 dist = [prev_dist] * len(snapshot.candidates)
-                
         else:
             raise ValueError(f"unknown policy {self.prefetch_mode}")
         dist = self._normalise_prefetch_distance(spec=dist, candidates=snapshot.candidates)
