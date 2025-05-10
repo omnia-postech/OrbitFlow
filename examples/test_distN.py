@@ -221,7 +221,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
     import torch
     from vllm.sampling_params import SamplingParams
     logger = logging.getLogger("vllm")
-
+    consecutive_no_output = 0
     # 1) Convert Trace dictionary -> sorted list by arrival_time
     #    E.g. [("request_0", req0), ("request_1", req1), ...]
     #    We'll interpret arrival_time as "arrive_at_step".
@@ -372,6 +372,21 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                 decode_wall += step_end - step_start
             else: 
                 prefill_wall += step_end - step_start
+            consecutive_no_output = 0
+        else: 
+            consecutive_no_output += 1 
+            if consecutive_no_output > 5:
+                # pop everything in request_metadata into finished_requests 
+                # and stop the simulation
+                logger.critical("No output for 5 consecutive steps, stopping simulation.")
+                rids = list(request_metadata.keys())
+                for rid in rids:
+                    logger.critical(f"[finish] clearing deposit for {rid}: was {sim.deposit[rid]}")
+                    sim.finish(rid)
+                    request_metadata.pop(rid)
+                    logger.critical(f"[finish] removing last_time entry for {rid}")
+                    print(f"Failure (due to memory limits): {len(rids)}")
+                break
         for output in step_outputs:
             rid = output.request_id
             logger.debug("step %d  rid=%s", cumulative_steps, rid)
