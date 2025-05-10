@@ -737,6 +737,10 @@ class Scheduler:
 
             if self.cache_config.prefetch_mode == "solver":
                 if ret.decode_seq_groups and len(ret.decode_seq_groups)>0:
+                    if self._is_preemption(len(ret.decode_seq_groups)):
+                        logger.info(f"Preemption detected, trigger solver")                        
+                        self._pause_window_remaining = 0
+
                     if self._pause_window_remaining > 0:
                         logger.debug(f"Within pause window (remaining={self._pause_window_remaining}), skipping solver")
                         self._pause_window_remaining -= 1
@@ -755,7 +759,10 @@ class Scheduler:
                         requests = [g.seq_group.request_id for g in ret.decode_seq_groups]
                         len(ret.decode_seq_groups[0].seq_group.seqs[0].data._cached_all_token_ids)                        
 
-                        context_blocks = {req: group.seq_group.seqs[0].n_blocks for req, group in zip(requests, ret.decode_seq_groups)}
+                        if self._is_preemption(len(ret.decode_seq_groups)):
+                            context_blocks = {req: group.seq_group.seqs[0].n_blocks+1 for req, group in zip(requests, ret.decode_seq_groups)}
+                        else:
+                            context_blocks = {req: group.seq_group.seqs[0].n_blocks for req, group in zip(requests, ret.decode_seq_groups)}
 
                         layer_time = {}
                         SLO = {}
@@ -1551,6 +1558,12 @@ class Scheduler:
             return self._schedule_chunked_prefill()
         else:
             return self._schedule_default() # block allocations inside 
+
+    def _is_preemption(self, len_decode_seq: int):
+        if self.block_manager.check_next_step_preemption(len_decode_seq):
+            return True
+        else:
+            return False
 
     def _can_append_slots(self, seq_group: SequenceGroup,
                           enable_chunking: bool) -> bool:

@@ -751,6 +751,18 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
             self.cross_block_tables[request_id] = block_table # ignore
             
 
+    def check_next_step_preemption(self, len_decode_seq: int) -> bool:
+        num_touched_blocks_by_all_decoding_requets = 32 * len_decode_seq # 1(token at each step) * num_layer * num_requests
+
+        num_free_gpu_blocks = self.block_allocator.get_num_free_blocks(
+            Device.GPU)
+        
+        if num_touched_blocks_by_all_decoding_requets <= num_free_gpu_blocks:
+            logger.info(f"plenty of free blocks{num_free_gpu_blocks} for at least two decoding steps")
+        else:
+            logger.info(f"not enough free blocks{num_free_gpu_blocks} for at least two decoding steps")
+        return num_touched_blocks_by_all_decoding_requets > num_free_gpu_blocks
+    
     def can_append_slots(self, seq_group: SequenceGroup,
                          num_lookahead_slots: int) -> bool:
         """Determine if there is enough space in the GPU KV cache to continue

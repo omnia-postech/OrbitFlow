@@ -148,7 +148,7 @@ class DelaySimulator:
     def stats(self) -> dict:
         """현재 deposit 맵(rid→남은 토큰 수) 반환."""
         stats = dict(self.deposit)
-        logger.info(f"[stats] deposit map: {stats}")
+        # logger.info(f"[stats] deposit map: {stats}")
         return dict(stats)
 
 def load_prompts(path=None):
