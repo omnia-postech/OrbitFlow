@@ -4,17 +4,18 @@
 ###############################################################################
 # CONSTANTS (edit these lists only)                                           #
 ###############################################################################
-export CUDA_VISIBLE_DEVICES=3
+export CUDA_VISIBLE_DEVICES=2
 export VLLM_CONFIGURE_LOGGING=1
 LOGGING_LEVEL=CRITICAL
-ROOT="/home/xinyuema/vllm"
+ROOT="/home/sychoy/vllm"
 
 FIGURE_ONLY=1
-EXP_LIST=(TestSolver)                         # ← your “experiments”
-# METHOD_LIST=(DistNSingle Flexgen NextLayer NoPrefetch SelectN Static8)      # ← indexes into JSON above
-METHOD_LIST=(NoPrefetch)      # ← indexes into JSON above
-TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/sy_reproduce/"
-TRACE_LIST=(test_trace1_10_not_enough)
+EXP_LIST=(Enough)                         # ← your “experiments”
+# METHOD_LIST=(NoPrefetch)      # ← indexes into JSON above
+METHOD_LIST=(NoPrefetch Flexgen NextLayer Static8 SelectN Ours DistNSingle)      # ← indexes into JSON above
+# METHOD_LIST=(SelectN NextLayer)
+TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/test_trace1_1000_enough"
+TRACE_LIST=(test_trace1_10_enough)
 
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"

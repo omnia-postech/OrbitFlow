@@ -17,6 +17,12 @@
     "--flattened-cache",      "true",
     "--merge-prefetch-buffer", "true"
     ],
+    "Static1": [
+        "--prefetch-mode",        "static",
+        "--prefetch-distance",    "1",
+        "--flattened-cache",      "true",
+        "--merge-prefetch-buffer", "true"
+    ],
     "Static2": [
         "--prefetch-mode",        "static",
         "--prefetch-distance",    "2",
@@ -30,10 +36,10 @@
         "--merge-prefetch-buffer", "true"
         ],
     "SelectN": [
-    "--prefetch-mode",        "selectn",
-    "--prefetch-distance",    "1",
-    "--flattened-cache",      "true",
-    "--merge-prefetch-buffer", "true"
+        "--prefetch-mode",        "selectn",
+        "--prefetch-distance",    "1",
+        "--flattened-cache",      "true",
+        "--merge-prefetch-buffer", "true"
     ], 
     "DistNSingle": [
         "--prefetch-mode",        "distn_single",

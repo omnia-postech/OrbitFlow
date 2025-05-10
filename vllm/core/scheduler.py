@@ -795,7 +795,8 @@ class Scheduler:
                             case None:
                                 logger.info(f"No optimal solution found.")
                             case result:                 
-                                result[0].resume = False # For debugging
+                                # result[0].resume = False # For debugging
+                                self._pause_window_remaining = result[0].window
                                 self.resume_distances = [sol.n for sol in result if sol.resume]
                                 logger.info(f"Resume distances for each request: {self.resume_distances}")                                       
                                 pause_ids = {sol.id for sol in result if not sol.resume}
@@ -1920,7 +1921,7 @@ class Scheduler:
         seq_id = seq.seq_id
         seq_layers_to_drop = {seq_id:list(range(self.block_manager.num_attention_layers))}
         freed_gpu_blocks = self.block_manager.free_seq_by_layer(seq_layers_to_drop)
-        logger.info(f"Preemption by PAUSE: request {seq_group.request_id}, freed {freed_gpu_blocks} ")
+        logger.critical(f"Preemption by PAUSE: request {seq_group.request_id},")# freed {freed_gpu_blocks} ")
         return freed_gpu_blocks
     def _swap_in(
         self,

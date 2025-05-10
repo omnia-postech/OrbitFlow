@@ -493,6 +493,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
             f"({finished_prefill_tokens / prefill_wall: .2f} t/s)")
         print(f"Decode  time     : {finished_decode_tokens } tokens over {decode_wall:.3f} s "
             f"({finished_decode_tokens / decode_wall: .2f} t/s)")
+        print(f"Preemptions  time     : {engine.scheduler[0].num_cumulative_preemption}")
     else:
         print("No valid start/end time for throughput calculation.")
 def main(configs):
