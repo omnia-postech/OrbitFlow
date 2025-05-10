@@ -62,17 +62,13 @@ class CacheEngine(CacheEngineBase):
         self.is_monolithic_distn = cache_config.is_monolithic_distn
         self.prefetch_mode = cache_config.prefetch_mode
         self.prefetch_distance = cache_config.prefetch_distance 
-        
-        msg = f"Prefetch mode: {self.prefetch_mode}, prefetch distance: {self.prefetch_distance}"
-        logger.info(msg)
-        if self.prefetch_mode == "distn":
-            msg = "DistN mode:" + "monolithic" if self.is_monolithic_distn else "dynamic"
-            logger.info(msg)
-        free_mem, total_mem = torch.cuda.mem_get_info()
-        msg = f"Free Memory: {free_mem / 1024 / 1024} MB"
-        logger.info(msg)
-        msg = f"Total Memory: {total_mem / 1024 / 1024} MB"
-        logger.info(msg)
+                
+        logger.info(f"Cache engine initialize: prefetch mode: {self.prefetch_mode}, prefetch distance: {self.prefetch_distance}")
+        if self.prefetch_mode == "distn":            
+            logger.info("DistN mode:" + "monolithic" if self.is_monolithic_distn else "dynamic")
+        free_mem, total_mem = torch.cuda.mem_get_info()        
+        logger.info(f"Free Memory: {free_mem / 1024 / 1024} MB")        
+        logger.info(f"Total Memory: {total_mem / 1024 / 1024} MB")
 
     def _allocate_kv_cache_gpu(
         self,
@@ -117,8 +113,7 @@ class CacheEngine(CacheEngineBase):
         total_gpu_bytes += byte_size
 
         total_gpu_bytes = total_gpu_bytes / 1024 / 1024
-        msg = f"GPU cache allocated {total_gpu_bytes} MB -> per layer {2 * new_layer_kv_cache.numel()/1024/1024} MB"
-        logger.info(msg)
+        logger.info(f"GPU cache allocated {total_gpu_bytes} MB -> per layer {2 * new_layer_kv_cache.numel()/1024/1024} MB")
         return kv_cache
     
     def _allocate_kv_cache_cpu(
@@ -151,9 +146,8 @@ class CacheEngine(CacheEngineBase):
             kv_cache.append(new_layer_kv_cache)
             byte_size = 2 * new_layer_kv_cache.numel()
             total_cpu_bytes += byte_size
-        total_cpu_bytes = total_cpu_bytes / 1024 / 1024
-        msg = f"CPU allocated {total_cpu_bytes} MB -> per layer {byte_size/1024/1024} MB"
-        logger.info(msg)
+        total_cpu_bytes = total_cpu_bytes / 1024 / 1024    
+        logger.info(f"CPU allocated {total_cpu_bytes} MB -> per layer {byte_size/1024/1024} MB")
         return kv_cache
     
     """ Cache number in granularity of layers"""
@@ -175,9 +169,8 @@ class CacheEngine(CacheEngineBase):
         new_gpu_cpu_cache_map = gpu_cpu_cache_map.copy()
         if offloaded_num == 0:
             new_gpu_cpu_cache_map[self.num_attention_layers-1] = 0
-            new_gpu_cpu_cache_map[int(self.num_attention_layers / 2) - 1] = 0
-            msg = f"current ratio: no offload -> next ratio: {int(self.num_attention_layers / 2)}"
-            logger.info(msg)
+            new_gpu_cpu_cache_map[int(self.num_attention_layers / 2) - 1] = 0            
+            logger.degug(msg = f"current ratio: no offload -> next ratio: {int(self.num_attention_layers / 2)}")
         else:
             current_ratio = 0
             for i in range(self.num_attention_layers):
@@ -191,21 +184,18 @@ class CacheEngine(CacheEngineBase):
                 # num of actual offloaded layers might not decrease, e.g. 32//10 = 3, 32//9 = 3, in this case, decrease until it does
                 if self.num_attention_layers // (current_ratio + 1) != self.num_attention_layers // (next_ratio + 1):
                     break
-                next_ratio -= 1
-            msg = f"current ratio: {current_ratio} -> next ratio: {next_ratio}"
-            logger.info(msg)
+                next_ratio -= 1            
+            logger.debug(f"current ratio: {current_ratio} -> next ratio: {next_ratio}")
 
             target_map = [1,] * self.num_attention_layers
-            # msg = (f"target map: {target_map}\n"
-            msg = (f"current mapping: {self.gpu_cpu_cache_map}")
-            logger.info(msg)
+            # msg = (f"target map: {target_map}\n"            
+            logger.debug(f"current mapping: {self.gpu_cpu_cache_map}")
 
             for i in range(self.num_attention_layers):
                 if (i + 1) % (next_ratio + 1) == 0:
                     target_map[i] = 0
-            
-            msg = f"new map: {target_map}"
-            logger.info(msg)
+                        
+            logger.debug(f"new map: {target_map}")
 
             new_gpu_cpu_cache_map = target_map
 
@@ -224,18 +214,16 @@ class CacheEngine(CacheEngineBase):
                     current_ratio = i
                     break
 
-            next_ratio = current_ratio - 1
-            msg = f"next ratio: {next_ratio}"
-            logger.info(msg)
+            next_ratio = current_ratio - 1            
+            logger.debug(f"next ratio: {next_ratio}")
 
             while next_ratio > 0:
                 if self.num_attention_layers // (current_ratio + 1) != self.num_attention_layers // (next_ratio + 1):
                     break
                 next_ratio -= 1
 
-            target_map = [1,] * self.num_attention_layers
-            msg = f"target map: {target_map}"
-            logger.info(msg)
+            target_map = [1,] * self.num_attention_layers            
+            logger.debug(f"target map: {target_map}")
 
             for i in range(self.num_attention_layers):
                 if (i + 1) % (next_ratio + 1) == 0:
@@ -252,9 +240,8 @@ class CacheEngine(CacheEngineBase):
                         new_gpu_cpu_cache_map[i] = target_map[i]
                         break
                 new_gpu_cpu_cache_map[i] = target_map[i]
-            
-            msg = f"new map: {new_gpu_cpu_cache_map}"
-            logger.info(msg)
+                        
+            logger.debug(f"new map: {new_gpu_cpu_cache_map}")
 
         return new_gpu_cpu_cache_map
 
@@ -296,10 +283,8 @@ class CacheEngine(CacheEngineBase):
                     break
             if current_ratio == 1:
                 return self.cache_config.num_gpu_blocks
-            updated_num_gpu_cache = self.resize_cache_with_next_ratio()
-            msg = (f"cache ratio update at {len(cached_tokens['token_ids'])+1}th token; num_gpu_cache: {total_blocks} -> {updated_num_gpu_cache}")
-            # logger.info(f"allocated_blocks, num_required_blocks, total_blocks:{allocated_blocks,num_required_blocks,total_blocks}\n")
-            logger.info(msg)
+            updated_num_gpu_cache = self.resize_cache_with_next_ratio()            
+            logger.debug(f"cache ratio update at {len(cached_tokens['token_ids'])+1}th token; num_gpu_cache: {total_blocks} -> {updated_num_gpu_cache}")
             return updated_num_gpu_cache 
         else:
             return self.cache_config.num_gpu_blocks
@@ -310,11 +295,9 @@ class CacheEngine(CacheEngineBase):
         offloaded_num = self.num_attention_layers - self.gpu_cache_num
         if offloaded_num != 0 and self.num_attention_layers // offloaded_num == (prefetch_distance + 1): 
             return self.cache_config.num_gpu_blocks
-        
-        msg = "Setting static prefetch distance, this should happen only once."
-        target_map = [1,] * self.num_attention_layers
-        msg = f"target map: {target_map}"
-        logger.info(msg)
+                
+        target_map = [1,] * self.num_attention_layers        
+        logger.debug(f"target map: {target_map}")
 
         for i in range(self.num_attention_layers):
             if (i + 1) % (prefetch_distance + 1) == 0:
@@ -322,12 +305,9 @@ class CacheEngine(CacheEngineBase):
         new_gpu_cpu_cache_map = target_map
         _, new_gpu_cache_num = self.determine_cache_num_with_map(new_gpu_cpu_cache_map)
         
-        
-        free_mem, total_mem = torch.cuda.mem_get_info()
-        msg = f"Total Memory: {total_mem / 1024 / 1024} MB"
-        logger.info(msg)
-        msg = f"Free Memory before rearr: {free_mem / 1024 / 1024} MB"
-        logger.info(msg)
+        # free_mem, total_mem = torch.cuda.mem_get_info()
+        # logger.debug(f"Total Memory: {total_mem / 1024 / 1024} MB")
+        # logger.debug(f"Free Memory before rearr: {free_mem / 1024 / 1024} MB")
 
         gpu_cache_to_delete = []
 
@@ -357,9 +337,8 @@ class CacheEngine(CacheEngineBase):
                     self.gpu_cache[layer_num] = self.cpu_cache[layer_num][:, :self.num_gpu_blocks,:,:,:].to(self.device_config.device_type)
         
         
-        free_mem, total_mem = torch.cuda.mem_get_info()
-        msg = f"Free Memory after rearr: {free_mem / 1024 / 1024} MB"
-        logger.info(msg)
+        # free_mem, total_mem = torch.cuda.mem_get_info()        
+        # logger.debug(f"Free Memory after rearr: {free_mem / 1024 / 1024} MB")
         
         kv_cache_shape = list(self.attn_backend.get_kv_cache_shape(
             self.num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size))
@@ -399,14 +378,12 @@ class CacheEngine(CacheEngineBase):
         self.gpu_cpu_cache_map = new_gpu_cpu_cache_map
         self.gpu_cache_num = new_gpu_cache_num
 
-        free_mem, total_mem = torch.cuda.mem_get_info()
-        msg = f"Free Memory final: {free_mem / 1024 / 1024} MB"
-        logger.info(msg)
+        # free_mem, total_mem = torch.cuda.mem_get_info()        
+        # logger.debug(f"Free Memory final: {free_mem / 1024 / 1024} MB")
 
         torch.cuda.synchronize()
 
-        msg = f"cache rearr time: {time.time() - start} ms"
-        logger.info(msg)
+        logger.debug(f"cache rearr time: {time.time() - start} ms")
 
         return self.cache_config.num_gpu_blocks
     def resize_cache_with_next_ratio(self):
@@ -659,20 +636,18 @@ class FlattenedCacheEngine(CacheEngineBase):
         self.mapping = MappingTable(num_layers=self.num_attention_layers,cpu_offset=0, gpu_cpu_cache_map=self.gpu_cpu_cache_map)
         
         if self.prefetch_mode == "distn":
-            msg = "DistN mode:" + "monolithic" if self.is_monolithic_distn else "dynamic"
-            logger.info(msg)
+            logger.info("DistN mode:" + "monolithic" if self.is_monolithic_distn else "dynamic")
         
         free_mem, total_mem = torch.cuda.mem_get_info()
-        msg = f"Free Memory: {free_mem / 1024 / 1024} MB"
-        logger.info(msg)
-        msg = f"Total Memory: {total_mem / 1024 / 1024} MB"
-        logger.info(msg)
+        logger.info(f"Free Memory: {free_mem / 1024 / 1024} MB")        
+        logger.info(f"Total Memory: {total_mem / 1024 / 1024} MB")
 
         self._paused_layers_freed: Dict[int, List[int]] = defaultdict(list)
 
     def register_bm(self, block_manager): 
         self.block_manager = block_manager
-        logger.info(f"Linking block manager")
+        # logger.debug(f"Linking block manager")
+
     def _allocate_kv_cache_gpu(
         self,
         num_blocks: int,
@@ -822,55 +797,55 @@ class FlattenedCacheEngine(CacheEngineBase):
         """
         Step 2: Build pause and resume layer plans.
         """
-        # logger.info("===== pause_resume_cache_update START [driver process] =====")
+        logger.debug("===== pause_resume_cache_update START [driver process] =====")
         paused_gpu_seqs = [sid for sid in self.mapping.seq_row_order
                       if sid in self.mapping.paused_gpu_seqs]
-        # logger.info(f"[PAUSE] paused_gpu_seqs: {paused_gpu_seqs}")
+        logger.debug(f"[PAUSE] paused_gpu_seqs: {paused_gpu_seqs}")
         pause_layers: Dict[int, List[int]] = {}
         # pause_layers: Dict[int, List[int]] = {}
         for seq_id in paused_gpu_seqs:
-            # logger.info(f"[PAUSE] Processing seq_id={seq_id}")
+            logger.debug(f"[PAUSE] Processing seq_id={seq_id}")
             # if no GPU mapping exists, mark as CPU-only (handled by mapping.update earlier)
             layer_map = self.mapping.gpu_map.get(seq_id, {})
             if not layer_map:
-                # logger.info(f"[PAUSE] No gpu_map entry for seq_id={seq_id}, marking CPU-only in plan generation")
+                logger.debug(f"[PAUSE] No gpu_map entry for seq_id={seq_id}, marking CPU-only in plan generation")
                 # no plan for deallocation since mapping.update moved it to CPU
                 self.mapping.paused_gpu_seqs.discard(seq_id)
                 self.mapping.paused_cpu_seqs.add(seq_id)
                 continue
             # only offload the last alive layer
             alive_layers = [lyr for lyr, blks in layer_map.items() if blks]
-            # logger.info(f"[PAUSE] seq_id={seq_id} alive_layers: {alive_layers}")
+            logger.debug(f"[PAUSE] seq_id={seq_id} alive_layers: {alive_layers}")
 
             last_layer = max(alive_layers)
           
             if alive_layers:
-                # logger.info(f"[PAUSE] seq_id={seq_id} → offloading last_layer={max(alive_layers)}")
+                logger.debug(f"[PAUSE] seq_id={seq_id} → offloading last_layer={max(alive_layers)}")
                 self._paused_layers_freed[seq_id].append(last_layer)
                 pause_layers[seq_id] = [last_layer]
             else:
-                # logger.info(f"[PAUSE] seq_id={seq_id} has no alive GPU layers, moving to paused_cpu_seqs")
+                logger.debug(f"[PAUSE] seq_id={seq_id} has no alive GPU layers, moving to paused_cpu_seqs")
                 self.mapping.paused_gpu_seqs.discard(seq_id)
                 self.mapping.paused_cpu_seqs.add(seq_id)
-                # logger.info(f"[PAUSE] seq_id={seq_id} has no alive layers, skipping pause")
+                logger.debug(f"[PAUSE] seq_id={seq_id} has no alive layers, skipping pause")
             
             # block_manager로 해당 레이어 블록 해제 -> exeuction
             freed_block_ids = self.block_manager.free_seq_by_layer({seq_id: [last_layer]})
-            # logger.info(f"[PAUSE] seq_id={seq_id} freed_block_ids={freed_block_ids}")
+            logger.debug(f"[PAUSE] seq_id={seq_id} freed_block_ids={freed_block_ids}")
             
             # Clear mapping entry
             self.mapping.gpu_map[seq_id][last_layer] = []
-            # logger.info(f"[PAUSE] seq_id={seq_id} mapping.gpu_map[{seq_id}][{last_layer}] cleared")
+            logger.debug(f"[PAUSE] seq_id={seq_id} mapping.gpu_map[{seq_id}][{last_layer}] cleared")
 
             # Update per-sequence flag
             self.mapping._set_gpu_flag(seq_id, last_layer, False)
-            # logger.info(f"[PAUSE] seq_id={seq_id} mapping flag set to False for layer {last_layer}")
+            logger.debug(f"[PAUSE] seq_id={seq_id} mapping flag set to False for layer {last_layer}")
 
             remaining = [lyr for lyr, blks in self.mapping.gpu_map[seq_id].items() if blks]
-            # logger.info(f"[PAUSE] seq_id={seq_id} remaining_gpu_layers after offload: {remaining}")
+            logger.debug(f"[PAUSE] seq_id={seq_id} remaining_gpu_layers after offload: {remaining}")
 
             if not remaining:
-                # logger.info(f"[PAUSE] seq_id={seq_id} no GPU layers left → moving to paused_cpu_seqs")
+                logger.debug(f"[PAUSE] seq_id={seq_id} no GPU layers left → moving to paused_cpu_seqs")
                 self.mapping.paused_gpu_seqs.discard(seq_id)
                 self.mapping.paused_cpu_seqs.add(seq_id)
 
@@ -880,54 +855,54 @@ class FlattenedCacheEngine(CacheEngineBase):
         resume_ids = [sid for sid in self.mapping.seq_row_order
                       if sid in self._paused_layers_freed]
             
-        # logger.info(f"[pause_resume_cache_update] resume_ids: {resume_ids}")
+        logger.debug(f"[pause_resume_cache_update] resume_ids: {resume_ids}")
 
         resume_plan: List[Tuple[int, int, List[int], List[int]]] = []
 
         for seq_id in resume_ids:
             layers_to_restore = self._paused_layers_freed.pop(seq_id)
-            # logger.info(f"[RESUME] seq_id={seq_id}, restoring layers: {layers_to_restore}")
+            logger.debug(f"[RESUME] seq_id={seq_id}, restoring layers: {layers_to_restore}")
 
             for layer in layers_to_restore:
                 cpu_blocks = self.mapping.cpu_map.get(seq_id, {}).get(layer) or []
                 if not cpu_blocks:
-                    # logger.info(f"[RESUME] seq_id={seq_id} layer={layer} has no CPU blocks → skipping")
+                    logger.debug(f"[RESUME] seq_id={seq_id} layer={layer} has no CPU blocks → skipping")
                     continue
 
                 # Allocate new GPU blocks -> execution
                 new_gpu_blocks = self.block_manager.allocate_seq_by_layer(seq_id, layer, len(cpu_blocks))
-                # logger.info(f"[RESUME] seq_id={seq_id} layer={layer}, cpu_blocks={cpu_blocks}, re-allocated gpu_blocks={new_gpu_blocks}")
+                logger.debug(f"[RESUME] seq_id={seq_id} layer={layer}, cpu_blocks={cpu_blocks}, re-allocated gpu_blocks={new_gpu_blocks}")
                 resume_plan.append(seq_id, layer, cpu_blocks.copy(), new_gpu_blocks.copy())
 
                 # Update mapping
                 self.mapping.gpu_map.setdefault(seq_id, {})[layer] = new_gpu_blocks
 
                 # Copy KV from CPU → GPU using flattened cache layout
-                # logger.info(f"[RESUME] Copying KV from CPU→GPU for seq_id={seq_id}, layer={layer}")
+                logger.debug(f"[RESUME] Copying KV from CPU→GPU for seq_id={seq_id}, layer={layer}")
                 for src, dst in zip(cpu_blocks, new_gpu_blocks):
                     # key
                     self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][src], non_blocking=False)
                     # value
                     self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][src], non_blocking=False)
-                    # logger.info(f"[RESUME] seq_id={seq_id} CPU_block={src} → GPU_block={dst}")
+                    # logger.debug(f"[RESUME] seq_id={seq_id} CPU_block={src} → GPU_block={dst}")
 
                 # Update per-sequence flag
                 self.mapping._set_gpu_flag(seq_id, layer, True)
-                # logger.info(f"[RESUME] seq_id={seq_id} mapping flag set to True for layer {layer}")
+                logger.debug(f"[RESUME] seq_id={seq_id} mapping flag set to True for layer {layer}")
 
             # PAUSED-CPU 에서 완전 복귀했으니 상태 이동
             self.mapping.paused_cpu_seqs.discard(seq_id)
             self.mapping.active_gpu_seqs.add(seq_id)
-            # logger.info(f"[RESUME] seq_id={seq_id} moved to ACTIVE-GPU")
-           # logger.info(f"--- process end (RESUME): seq_id={seq_id} ---")   
+            logger.debug(f"[RESUME] seq_id={seq_id} moved to ACTIVE-GPU")
+            logger.debug(f"--- process end (RESUME): seq_id={seq_id} ---")   
 
         # ----------------- SYNCHRONIZE GLOBAL MAP -----------------
         # ---------------- sync ordered view -----------
         self._sync_active_gpu_cpu_map(self.mapping.seq_row_order)
         self.block_manager.cache_config = self.cache_config
-       # logger.info(f"[SYNC] global gpu_cpu_cache_map synchronized: {self.cache_config.gpu_cpu_cache_map}")     
+        # logger.debug(f"[SYNC] global gpu_cpu_cache_map synchronized: {self.cache_config.gpu_cpu_cache_map}")     
 
-       # logger.info("===== pause_resume_cache_update END =====")
+        logger.debug("===== pause_resume_cache_update END =====")
 
         return pause_layers, resume_plan
     
@@ -956,27 +931,17 @@ class FlattenedCacheEngine(CacheEngineBase):
             pause_layers: Dict[int, List[int]],
             resume_plan: List[Tuple[int, int, List[int], List[int]]], 
         ) -> None:
-       # logger.info("[worker] ===== pause_resume_cache_update START =====")
-
-        # ----------------- PAUSE -----------------
-        # keep the same row order the attention kernel uses
-        # for seq_id, last_layer in pause_layers.items():
-            # freed_block_ids = self.block_manager.free_seq_by_layer({seq_id: [last_layer]})
-            # logger.info(f"[worker][PAUSE] seq_id={seq_id} freed_block_ids={freed_block_ids}")
-
+        logger.debug("[worker] ===== pause_resume_cache_update START =====")
         # ----------------- RESUME -----------------
         for seq_id, layer, cpu_blocks, new_gpu_blocks in resume_plan:
-        #     new_gpu_blocks = self.block_manager.allocate_seq_by_layer(seq_id, layer, len(cpu_blocks))
-        #     logger.info(f"[worker][RESUME] seq_id={seq_id} layer={layer} re-allocated gpu_blocks={new_gpu_blocks}")
-
             for src, dst in zip(cpu_blocks, new_gpu_blocks):
-                    # key
-                    self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][src], non_blocking=False)
-                    # value
-                    self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][src], non_blocking=False)
-                   # logger.info(f"[worker][RESUME] seq_id={seq_id} CPU_block={src} → GPU_block={dst}")   
+                # key
+                self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][src], non_blocking=False)
+                # value
+                self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][src], non_blocking=False)
+                logger.debug(f"[worker][RESUME] seq_id={seq_id} CPU_block={src} → GPU_block={dst}")   
 
-       # logger.info("===== [worker] pause_resume_cache_update END [worker] =====")
+        logger.debug("===== [worker] pause_resume_cache_update END [worker] =====")
 
     # --- Cache Plan Execution ---
     def execute_cache_plan(
@@ -988,72 +953,44 @@ class FlattenedCacheEngine(CacheEngineBase):
     ) -> None:
         """
         Step 5: Execute cache reconfiguration plan.
-        """
-        # bm = self.block_manager 
-
+        """        
         # 새로 받은 GPU 블록 매핑을 (sid, layer) -> new_blocks 로 lookup 할 dict 생성
         blocks_map: Dict[Tuple[int,int], List[int]] = {
             (sid, layer): blocks for sid, layer, blocks in new_gpu_blocks
         }
-       # logger.info(f"[worker][execute_cache_plan] received new_gpu_blocks map keys: {list(blocks_map.keys())}")
-
-       # logger.info(f"[worker][execute_cache_plan] START plan: dealloc={plan.dealloc_layers}, alloc={plan.alloc_layers}, prefetch_resize={plan.prefetch_resize}")
-        # logger.info(f"[worker][execute_cache_plan] Current free GPU blocks before dealloc: {bm.get_num_free_gpu_blocks()}")
-        
-        
-        # freed = bm.free_seq_by_layer(plan.dealloc_layers)
-        # expected = list(chain.from_iterable(plan.expected_freed.values()))
-        # logger.info(f"[worker][execute_cache_plan] Freed blocks: {freed}, Expected to free: {expected}")
-        # if set(freed) != set(expected):
-        #     logger.warning(f"[worker] Mismatch freeing blocks: freed={freed}, expected={expected}")
-        # logger.info(f"[worker][execute_cache_plan] Free GPU blocks after dealloc: {bm.get_num_free_gpu_blocks()}")
-
-       # logger.info(f"[worker][execute_cache_plan] prefetch_resize={plan.prefetch_resize}")
-        if plan.prefetch_resize:
-            # logger.info(f"[worker][execute_cache_plan] Before resize window: {bm.prefetch_window if hasattr(bm, 'prefetch_window') else 'N/A'}")
-            self._maybe_resize_prefetch_window(plan.prefetch_resize)
-            # logger.info(f"[worker][execute_cache_plan] After resize window: {bm.prefetch_window if hasattr(bm, 'prefetch_window') else 'N/A'}")
+        if plan.prefetch_resize:            
+            self._maybe_resize_prefetch_window(plan.prefetch_resize)            
         
         # -- 2b. ALLOCATE ------------------------------------------------------- #
         is_prefill = attn_meta.num_prefills > 0
-       # logger.info(f"[worker][execute_cache_plan] is_prefill={is_prefill}, num_prefills={attn_meta.num_prefills}")
+        logger.debug(f"[worker][execute_cache_plan] is_prefill={is_prefill}, num_prefills={attn_meta.num_prefills}")
         for sid, layer, cpu_blocks in plan.alloc_layers:
-           # logger.info(f"[worker][execute_cache_plan] alloc_layers={plan.alloc_layers}")
+            logger.debug(f"[worker][execute_cache_plan] alloc_layers={plan.alloc_layers}")
 
             key = (sid, layer)
             if key not in blocks_map:
-                logger.error(f"[worker][execute_cache_plan] no new_gpu_blocks entry for sid={sid}, layer={layer}")
+                logger.debug(f"[worker][execute_cache_plan] no new_gpu_blocks entry for sid={sid}, layer={layer}")
                 continue
 
             new_blocks = blocks_map[key]
-
             n_blocks = len(cpu_blocks)
-           # logger.info(f"[worker][execute_cache_plan] alloc seq={sid}, layer={layer}: cpu_blocks={cpu_blocks} → new_gpu_blocks={new_blocks}")
-            # before_free = bm.get_num_free_gpu_blocks()
-            # new_gpu_blocks = bm.allocate_seq_by_layer(sid, layer, n_blocks)   # → List[int] 
-            # after_free = bm.get_num_free_gpu_blocks()
+            logger.debug(f"[worker][execute_cache_plan] alloc seq={sid}, layer={layer}: cpu_blocks={cpu_blocks} → new_gpu_blocks={new_blocks}")
 
-            # logger.info(f"[worker][execute_cache_plan]   before allocation free={before_free}, after allocation free={after_free}")
-            # logger.info(f"[worker][execute_cache_plan]   new_gpu_blocks={new_gpu_blocks}")
-            # logger.info(f"[worker][execute_cache_plan] free_blocks: {bm.get_num_free_gpu_blocks()}")
-           # logger.info(f"[worker][execute_cache_plan] cpu_blocks:{cpu_blocks}")
-           # logger.info(f"[worker][execute_cache_plan] new_gpu_blocks:{new_gpu_blocks}")
+            logger.debug(f"[worker][execute_cache_plan] new_gpu_blocks={new_gpu_blocks}")            
+            logger.debug(f"[worker][execute_cache_plan] cpu_blocks:{cpu_blocks}")            
             
             # copy payload CPU → GPU
             for dst, src in zip(new_blocks, cpu_blocks):
-               # logger.info(f"[worker][execute_cache_plan] copying CPU[{src}]→GPU[{dst}] for seq={sid}, layer={layer}")
+                logger.debug(f"[worker][execute_cache_plan] copying CPU[{src}]→GPU[{dst}] for seq={sid}, layer={layer}")
                 self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][src],non_blocking=False)
                 self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][src],non_blocking=False)
             
             if not is_prefill and sid in sid2row:
-                # row = sid2sgidx_[sid]
-                # seq_group_metadata[row].block_tables[sid][layer] = new_gpu_blocks   # local mapping
-
                 row = sid2row[sid]
                 tgt = attn_meta.block_tables[row, layer]             # view (2,)
-               # logger.info(f"[worker][execute_cache_plan]   Zeroing target block_tables at row={row}, layer={layer}, shape={tgt.shape}")
+                logger.debug(f"[worker][execute_cache_plan]   Zeroing target block_tables at row={row}, layer={layer}, shape={tgt.shape}")
                 tgt.zero_()
-               # logger.info(f"[worker][execute_cache_plan] alloc assign block table seq {sid}, layer {layer}, len(blt) {tgt.shape} cpu_blocks {cpu_blocks} -> gpu_blocks {new_gpu_blocks}")
+                logger.debug(f"[worker][execute_cache_plan] alloc assign block table seq {sid}, layer {layer}, len(blt) {tgt.shape} cpu_blocks {cpu_blocks} -> gpu_blocks {new_gpu_blocks}")
                 tgt[:n_blocks] = torch.as_tensor(new_blocks,
                                             dtype=tgt.dtype,
                                             device=tgt.device)
@@ -1061,13 +998,6 @@ class FlattenedCacheEngine(CacheEngineBase):
                 temp_mapping = attn_meta.slot_mapping[layer][row] % 16                
                 attn_meta.slot_mapping[layer][row] = temp_mapping + new_blocks[-1]*16
         
-        # ---------------- sync ordered view -----------
-        # self._sync_active_gpu_cpu_map(seq_row_order)        
-       # logger.info(f"[worker] Final attn_meta.block_tables: {attn_meta.block_tables}")
-       # logger.info(f"[worker] Final attn_meta.slot_mapping: {attn_meta.slot_mapping}")
-
-        # bm.cache_config = self.cache_config
-       # logger.info(f"[worker][execute_cache_plan] END")
         return self.cache_config
 
     def may_resize_gpu_cache(
@@ -1093,16 +1023,15 @@ class FlattenedCacheEngine(CacheEngineBase):
         plan = self._plan_cache_delta(snap, dist_dict)
         
         if plan.dealloc_layers or plan.alloc_layers or plan.prefetch_resize:
+            logger.debug("KV layout dosen't satisfies the target policy – change plan.")
             self.cache_config = self._execute_plan(plan, seq_group_metadata, attn_meta)
             self.mapping.prev_dist_dict = dist_dict
-        # else:
-           # logger.info("KV layout already satisfies the target policy – nothing to do.")
+        else:
+            logger.debug("KV layout already satisfies the target policy – nothing to do.")
             
         # ---------------- sync ordered view -----------
         self._sync_active_gpu_cpu_map(self.mapping.seq_row_order)
         return self.cache_config
-        # if self.should_reconfigure_offload(attn_meta, cached_tokens):
-        #     self.cache_config = self.reconfigure_offload(self.prefetch_distance, configure_paused=False, attn_meta=attn_meta, seq_group_metadata=seq_group_metadata)
 
     def _snapshot_and_log(self, configure_paused, seq_group_metadata) -> "Snapshot":
         m  = self.mapping
@@ -1124,8 +1053,8 @@ class FlattenedCacheEngine(CacheEngineBase):
             seq_group_metadata = seq_group_metadata,   # read-only pointer
             time             = time.time(),
         )
-       # logger.info("KV-snapshot: seqs=%d gpu_free=%d",
-                    # len(candidates), snap.free_gpu_blocks)
+        logger.debug("KV-snapshot: seqs=%d gpu_free=%d",
+                    len(candidates), snap.free_gpu_blocks)
         return snap
     
     def _compute_comm_time_per_block(self) -> float:
@@ -1140,16 +1069,11 @@ class FlattenedCacheEngine(CacheEngineBase):
         block_bytes      = per_token_bytes * self.block_size
         return block_bytes / bandwidth
 
-    def compute_comm_time_for_requests(self, total_context_lens) -> float:
-        # 블록당 전송 시간
+    def compute_comm_time_for_requests(self, total_context_lens) -> float:        
         t_per_block = self._compute_comm_time_per_block()
 
-        # 각 요청별 블록 수 계산
         total_blocks = 0
-        for tokens in total_context_lens:
-            # 토큰 수를 block_size로 나누고 올림
-            # TODO(HONG): need to change below part when modifying selectn to reconfigure at every in and out
-            # TODO(HONG): need to rethink how to get number of tokens -> is token_chunk_size correct at decoding phase?
+        for tokens in total_context_lens:                        
             blocks = math.ceil(tokens / self.block_size)
             total_blocks += blocks
 
@@ -1168,8 +1092,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             total_compute (float): naive 모드 전체 토큰 처리 시간 (초)
         Returns:
             float: numerator 값 (초)
-        """
-        # TODO(HONG): need to change from getting proper compute time of batched reqeusts from profiled record  
+        """        
         if not max_comp_time:
             max_comp_time = 0.12047052383422852
         num_layers = self.block_manager.num_attention_layers
@@ -1179,7 +1102,6 @@ class FlattenedCacheEngine(CacheEngineBase):
         delta = (slo_allowed - max_comp_time) / max_comp_time
         delta = max(delta, 0.0)
 
-        # numerator = t_layer * (1 + δ)
         return t_layer * (1 + delta)
 
     def prefetch_distance_for_seletcn(self, comm_time: float, comp_time: float):
@@ -1189,12 +1111,8 @@ class FlattenedCacheEngine(CacheEngineBase):
         return selectn_prefetch_distance
 
     def get_KV_cache_size_for_single_layers(self, total_context_lens):
-        # 각 요청별 블록 수 계산
         total_blocks = 0
-        for tokens in total_context_lens:
-            # 토큰 수를 block_size로 나누고 올림
-            # TODO(HONG): need to change below part when modifying selectn to reconfigure at every in and out
-            # TODO(HONG): need to rethink how to get number of tokens -> is token_chunk_size correct at decoding phase?
+        for tokens in total_context_lens:            
             blocks = math.ceil(tokens / self.block_size)
             total_blocks += blocks
 
@@ -1342,8 +1260,8 @@ class FlattenedCacheEngine(CacheEngineBase):
                     alloc_layers,
                     prefetch_resize)
     def _execute_plan(self, plan, seq_group_metadata, attn_meta):
-        logger.info(f"[driver] _execute_plan started")
-        logger.info(f"[driver] Received plan: {plan}")
+        logger.debug(f"[driver] _execute_plan started")
+        logger.debug(f"[driver] Received plan: {plan}")
 
         bm = self.block_manager 
         mapping = self.mapping 
@@ -1351,19 +1269,19 @@ class FlattenedCacheEngine(CacheEngineBase):
         # sequence order as appears in the attention kernel 
         seq_row_order: list[int] = mapping.seq_row_order  # [sid0, sid1,...]
         sid2row: dict[int, int]  = mapping.sid2row        # {sid: row}
-        logger.info(f"[driver] Sequence row order: {seq_row_order}")
-        logger.info(f"[driver] SID to row mapping: {sid2row}")
+        logger.debug(f"[driver] Sequence row order: {seq_row_order}")
+        logger.debug(f"[driver] SID to row mapping: {sid2row}")
 
         to_worker_new_gpu_blocks: List[Tuple[int, int, List[int]]] = []
         
         freed = bm.free_seq_by_layer(plan.dealloc_layers)
-        logger.info(f"[driver] Blocks freed by layer: {plan.dealloc_layers}")
-        logger.info(f"[driver] Returned freed list: {freed}")
+        logger.debug(f"[driver] Blocks freed by layer: {plan.dealloc_layers}")
+        logger.debug(f"[driver] Returned freed list: {freed}")
         assert set(freed) == set(chain.from_iterable(plan.expected_freed.values()))
 
         # ---------- clear bookkeeping for layers we just evicted -----------
         for sid, layers in plan.dealloc_layers.items():
-            logger.info(f"[driver] Clearing metadata for SID {sid}, layers {layers}")
+            logger.debug(f"[driver] Clearing metadata for SID {sid}, layers {layers}")
             for lyr in layers:
                 # (1) no GPU block ids left
                 mapping.gpu_map[sid][lyr] = []
@@ -1375,58 +1293,58 @@ class FlattenedCacheEngine(CacheEngineBase):
 
 
         if plan.prefetch_resize:
-            logger.info(f"[driver] Resizing prefetch window by {plan.prefetch_resize}")
+            logger.debug(f"[driver] Resizing prefetch window by {plan.prefetch_resize}")
             self._maybe_resize_prefetch_window(plan.prefetch_resize)
-            logger.info("[driver] Prefetch window resize complete.")
+            logger.debug("[driver] Prefetch window resize complete.")
         
         # -- 2b. ALLOCATE ------------------------------------------------------- #
         is_prefill = attn_meta.num_prefills > 0
         for sid, layer, cpu_blocks in plan.alloc_layers:
             n_blocks = len(cpu_blocks)
             new_gpu_blocks = bm.allocate_seq_by_layer(sid, layer, n_blocks)   # → List[int]             
-            logger.info(f"[driver] free_blocks: {bm.get_num_free_gpu_blocks()}")
-            logger.info(f"[driver] cpu_blocks:{cpu_blocks}")
-            logger.info(f"[driver] new_gpu_blocks:{new_gpu_blocks}")
+            logger.debug(f"[driver] free_blocks: {bm.get_num_free_gpu_blocks()}")
+            logger.debug(f"[driver] cpu_blocks:{cpu_blocks}")
+            logger.debug(f"[driver] new_gpu_blocks:{new_gpu_blocks}")
             
             # copy payload CPU → GPU
             for dst, src in zip(new_gpu_blocks, cpu_blocks):
-                logger.info(f"[driver] copying CPU[{src}] to GPU[{dst}]")
+                logger.debug(f"[driver] copying CPU[{src}] to GPU[{dst}]")
                 self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][src],non_blocking=False)
                 self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][src],non_blocking=False)
-                logger.info(f"Copy complete for dst={dst}, src={src}")
+                logger.debug(f"Copy complete for dst={dst}, src={src}")
             
             mapping.gpu_map.setdefault(sid, {})[layer] = new_gpu_blocks
             to_worker_new_gpu_blocks.append((sid, layer, new_gpu_blocks.copy()))
 
             # keep the 1/0 bitmap in sync
             mapping._set_gpu_flag(sid, layer, True)
-            logger.info(f"[driver] Updated mapping.gpu_map[{sid}][{layer}] = {new_gpu_blocks}")
+            logger.debug(f"[driver] Updated mapping.gpu_map[{sid}][{layer}] = {new_gpu_blocks}")
             
             if not is_prefill and sid in sid2row:
                 row = sid2sgidx_[sid]
                 seq_group_metadata[row].block_tables[sid][layer] = new_gpu_blocks   # local mapping
-                logger.info(f"[driver] Updated seq_group_metadata[{row}].block_tables for SID {sid}, layer {layer}")
+                logger.debug(f"[driver] Updated seq_group_metadata[{row}].block_tables for SID {sid}, layer {layer}")
 
                 row = sid2row[sid]
                 tgt = attn_meta.block_tables[row, layer]             # view (2,)
                 tgt.zero_()
-                logger.info(f"[driver] alloc assign block table seq {sid}, layer {layer}, len(blt) {tgt.shape} cpu_blocks {cpu_blocks} -> gpu_blocks {new_gpu_blocks}")
+                logger.debug(f"[driver] alloc assign block table seq {sid}, layer {layer}, len(blt) {tgt.shape} cpu_blocks {cpu_blocks} -> gpu_blocks {new_gpu_blocks}")
                 tgt[:n_blocks] = torch.as_tensor(new_gpu_blocks,
                                             dtype=tgt.dtype,
                                             device=tgt.device)
                 # for resumed requests... they may came with their old slot mappings... 
                 temp_mapping = attn_meta.slot_mapping[layer][row] % 16 
                 attn_meta.slot_mapping[layer][row] = temp_mapping + new_gpu_blocks[-1]*16
-                logger.info(f"[driver] Updated slot_mapping[{layer}][{row}] = {attn_meta.slot_mapping[layer][row]}")
-        logger.info(f"[driver] mapping after resize: {mapping}")
-        logger.info(f"[driver] GPU map after resize:{mapping.gpu_map}")
-        logger.info(f"[driver] gpu_cpu_cache_map after resize:{mapping.gpu_cpu_cache_map}")
+                logger.debug(f"[driver] Updated slot_mapping[{layer}][{row}] = {attn_meta.slot_mapping[layer][row]}")
+        logger.debug(f"[driver] mapping after resize: {mapping}")
+        logger.debug(f"[driver] GPU map after resize:{mapping.gpu_map}")
+        logger.debug(f"[driver] gpu_cpu_cache_map after resize:{mapping.gpu_cpu_cache_map}")
         # ---------------- sync ordered view -----------
         self._sync_active_gpu_cpu_map(seq_row_order)
-        # logger.info(f"[driver] Final attn_meta.block_tables: {attn_meta.block_tables}")
-        # logger.info(f"[driver] Final attn_meta.slot_mapping: {attn_meta.slot_mapping}")
+        # logger.debug(f"[driver] Final attn_meta.block_tables: {attn_meta.block_tables}")
+        # logger.debug(f"[driver] Final attn_meta.slot_mapping: {attn_meta.slot_mapping}")
         bm.cache_config = self.cache_config
-        logger.info("[driver] _execute_plan completed")
+        logger.debug("[driver] _execute_plan completed")
         return to_worker_new_gpu_blocks
      
     def pause_resume_cache_update(self) -> None:
@@ -1435,7 +1353,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         and resume any sequences that have returned to active-GPU by reloading
         their previously offloaded layers.
         """
-        logger.info("===== pause_resume_cache_update START =====")
+        logger.debug("===== pause_resume_cache_update START =====")
 
         # ----------------- PAUSE -----------------
         # keep the same row order the attention kernel uses
@@ -1443,52 +1361,52 @@ class FlattenedCacheEngine(CacheEngineBase):
             sid for sid in self.mapping.seq_row_order
             if sid in self.mapping.paused_gpu_seqs
         ]
-        logger.info(f"[PAUSE] paused_gpu_seqs: {paused_gpu_seqs}")
+        logger.debug(f"[PAUSE] paused_gpu_seqs: {paused_gpu_seqs}")
 
         for seq_id in paused_gpu_seqs:
-            logger.info(f"[PAUSE] Processing seq_id={seq_id}")
+            logger.debug(f"[PAUSE] Processing seq_id={seq_id}")
             layer_map = self.mapping.gpu_map.get(seq_id, {})
             if not layer_map:
-                logger.info(f"[PAUSE] No gpu_map entry for seq_id={seq_id}, marking CPU-only")
+                logger.debug(f"[PAUSE] No gpu_map entry for seq_id={seq_id}, marking CPU-only")
                 self.mapping.paused_gpu_seqs.discard(seq_id)
                 self.mapping.paused_cpu_seqs.add(seq_id)
                 continue
 
             # 실제로 블록이 남아있는 레이어만 뽑아냄
             alive_layers = [lyr for lyr, blks in layer_map.items() if blks]
-            logger.info(f"[PAUSE] seq_id={seq_id} alive_layers: {alive_layers}")
+            logger.debug(f"[PAUSE] seq_id={seq_id} alive_layers: {alive_layers}")
 
             if not alive_layers:
-                logger.info(f"[PAUSE] seq_id={seq_id} has no alive GPU layers, moving to paused_cpu_seqs")
+                logger.debug(f"[PAUSE] seq_id={seq_id} has no alive GPU layers, moving to paused_cpu_seqs")
                 self.mapping.paused_gpu_seqs.discard(seq_id)
                 self.mapping.paused_cpu_seqs.add(seq_id)
                 continue
 
             # 마지막 레이어 선택
             last_layer = max(alive_layers)
-            logger.info(f"[PAUSE] seq_id={seq_id} → offloading last_layer={last_layer}")
+            logger.debug(f"[PAUSE] seq_id={seq_id} → offloading last_layer={last_layer}")
 
             # Record for later resume
             self._paused_layers_freed[seq_id].append(last_layer)
-            logger.info(f"[PAUSE] Recorded layer {last_layer} for seq_id={seq_id} in _paused_layers_freed")
+            logger.debug(f"[PAUSE] Recorded layer {last_layer} for seq_id={seq_id} in _paused_layers_freed")
             
             # block_manager로 해당 레이어 블록 해제 -> exeuction
             freed_block_ids = self.block_manager.free_seq_by_layer({seq_id: [last_layer]})
-            logger.info(f"[PAUSE] seq_id={seq_id} freed_block_ids={freed_block_ids}")
+            logger.debug(f"[PAUSE] seq_id={seq_id} freed_block_ids={freed_block_ids}")
 
             # Clear mapping entry
             self.mapping.gpu_map[seq_id][last_layer] = []
-            logger.info(f"[PAUSE] seq_id={seq_id} mapping.gpu_map[{seq_id}][{last_layer}] cleared")
+            logger.debug(f"[PAUSE] seq_id={seq_id} mapping.gpu_map[{seq_id}][{last_layer}] cleared")
 
             # Update per-sequence flag
             self.mapping._set_gpu_flag(seq_id, last_layer, False)
-            logger.info(f"[PAUSE] seq_id={seq_id} mapping flag set to False for layer {last_layer}")
+            logger.debug(f"[PAUSE] seq_id={seq_id} mapping flag set to False for layer {last_layer}")
 
             remaining = [lyr for lyr, blks in self.mapping.gpu_map[seq_id].items() if blks]
-            logger.info(f"[PAUSE] seq_id={seq_id} remaining_gpu_layers after offload: {remaining}")
+            logger.debug(f"[PAUSE] seq_id={seq_id} remaining_gpu_layers after offload: {remaining}")
 
             if not remaining:
-                logger.info(f"[PAUSE] seq_id={seq_id} no GPU layers left → moving to paused_cpu_seqs")
+                logger.debug(f"[PAUSE] seq_id={seq_id} no GPU layers left → moving to paused_cpu_seqs")
                 self.mapping.paused_gpu_seqs.discard(seq_id)
                 self.mapping.paused_cpu_seqs.add(seq_id)
 
@@ -1497,51 +1415,51 @@ class FlattenedCacheEngine(CacheEngineBase):
         resume_ids = [sid for sid in self.mapping.seq_row_order
                       if sid in self._paused_layers_freed]
             
-        logger.info(f"[pause_resume_cache_update] resume_ids: {resume_ids}")
+        logger.debug(f"[pause_resume_cache_update] resume_ids: {resume_ids}")
 
         for seq_id in resume_ids:
             layers_to_restore = self._paused_layers_freed.pop(seq_id)
-            logger.info(f"[RESUME] seq_id={seq_id}, restoring layers: {layers_to_restore}")
+            logger.debug(f"[RESUME] seq_id={seq_id}, restoring layers: {layers_to_restore}")
 
             for layer in layers_to_restore:
                 cpu_blocks = self.mapping.cpu_map.get(seq_id, {}).get(layer) or []
                 if not cpu_blocks:
-                    logger.info(f"[RESUME] seq_id={seq_id} layer={layer} has no CPU blocks → skipping")
+                    logger.debug(f"[RESUME] seq_id={seq_id} layer={layer} has no CPU blocks → skipping")
                     continue
 
                 # Allocate new GPU blocks -> execution
                 new_gpu_blocks = self.block_manager.allocate_seq_by_layer(seq_id, layer, len(cpu_blocks))
-                logger.info(f"[RESUME] seq_id={seq_id} layer={layer} re-allocated gpu_blocks={new_gpu_blocks}")
+                logger.debug(f"[RESUME] seq_id={seq_id} layer={layer} re-allocated gpu_blocks={new_gpu_blocks}")
 
                 # Update mapping
                 self.mapping.gpu_map.setdefault(seq_id, {})[layer] = new_gpu_blocks
 
                 # Copy KV from CPU → GPU using flattened cache layout
-                logger.info(f"[RESUME] Copying KV from CPU→GPU for seq_id={seq_id}, layer={layer}")
+                logger.debug(f"[RESUME] Copying KV from CPU→GPU for seq_id={seq_id}, layer={layer}")
                 for src, dst in zip(cpu_blocks, new_gpu_blocks):
                     # key
                     self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][src], non_blocking=False)
                     # value
                     self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][src], non_blocking=False)
-                    logger.info(f"[RESUME] seq_id={seq_id} CPU_block={src} → GPU_block={dst}")
+                    logger.debug(f"[RESUME] seq_id={seq_id} CPU_block={src} → GPU_block={dst}")
 
                 # Update per-sequence flag
                 self.mapping._set_gpu_flag(seq_id, layer, True)
-                logger.info(f"[RESUME] seq_id={seq_id} mapping flag set to True for layer {layer}")
+                logger.debug(f"[RESUME] seq_id={seq_id} mapping flag set to True for layer {layer}")
 
             # PAUSED-CPU 에서 완전 복귀했으니 상태 이동
             self.mapping.paused_cpu_seqs.discard(seq_id)
             self.mapping.active_gpu_seqs.add(seq_id)
-            logger.info(f"[RESUME] seq_id={seq_id} moved to ACTIVE-GPU")
-            logger.info(f"--- process end (RESUME): seq_id={seq_id} ---")   
+            logger.debug(f"[RESUME] seq_id={seq_id} moved to ACTIVE-GPU")
+            logger.debug(f"--- process end (RESUME): seq_id={seq_id} ---")   
 
         # ----------------- SYNCHRONIZE GLOBAL MAP -----------------
         # ---------------- sync ordered view -----------
         self._sync_active_gpu_cpu_map(self.mapping.seq_row_order)
         self.block_manager.cache_config = self.cache_config
-        logger.info(f"[SYNC] global gpu_cpu_cache_map synchronized: {self.cache_config.gpu_cpu_cache_map}")     
+        logger.debug(f"[SYNC] global gpu_cpu_cache_map synchronized: {self.cache_config.gpu_cpu_cache_map}")     
 
-        logger.info("===== pause_resume_cache_update END =====")
+        logger.debug("===== pause_resume_cache_update END =====")
     
     @staticmethod
     def _should_live_on_gpu(layer_id: int, prefetch_distance: int) -> bool:
@@ -1654,7 +1572,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         if grow_by == 0:
             return
 
-        logger.info(
+        logger.debug(
             "Prefetch resize: have=%d need=%d  → +%d blocks",
             cur_prefetch, need_blocks, grow_by,
         )
@@ -1755,8 +1673,8 @@ class MappingTable:
     prev_dist_dict: dict[int, int] = field(default_factory=dict, init=False)  # {sid: distance}
     def update_mapping_table(self, attn_meta, seq_group_metadata, finished_requests: List[str], paused_cpu_seq_groups:List=[] ):
         """ update seq dicts and maps; Ignore prefetch map for now"""
-        logger.info(f"===== start update_mapping_table =====")
-        logger.info(f"update_mapping_table {seq_group_metadata}")
+        logger.debug(f"===== start update_mapping_table =====")
+        logger.debug(f"update_mapping_table {seq_group_metadata}")
 
         if len(finished_requests) > 0:
             finished_requests = set(finished_requests)
@@ -1796,7 +1714,7 @@ class MappingTable:
                     for lyr in range(self.num_layers):
                         self.gpu_map[seq.seq_id][lyr] = []
                         self._set_gpu_flag(seq.seq_id, lyr, False) 
-                    logger.info(f"cache_engine pausing seq {seq.seq_id} {self.gpu_map[seq.seq_id]}")
+                    logger.debug(f"cache_engine pausing seq {seq.seq_id} {self.gpu_map[seq.seq_id]}")
         self.seq_row_order = [
             sid 
             for group in seq_group_metadata
@@ -1827,7 +1745,7 @@ class MappingTable:
         # HACK (xinyue) exempt preempt decode sequences due to continuous batchd prefill 
         # is_prefill_phase = getattr(attn_meta, "prefill_metadata", None) is not None
         is_prefill_phase = attn_meta.num_prefills > 0        
-        logger.info(f"MappingTable.update: is_prefill_phase={is_prefill_phase}, finished_requests={finished_requests}, paused_cpu_seq_groups={paused_cpu_seq_groups}")
+        logger.debug(f"MappingTable.update: is_prefill_phase={is_prefill_phase}, finished_requests={finished_requests}, paused_cpu_seq_groups={paused_cpu_seq_groups}")
         prev_active_gpu = self.active_gpu_seqs.copy()
         # --------------------------------------------------------------------------- #
         # Reset the *seq-level* placement sets
@@ -1882,8 +1800,7 @@ class MappingTable:
             and sid in self.gpu_cpu_cache_map
         )
 
-        logger.info(f"update_mapping table {self.__repr__()}")
-       # logger.info(f"===== start update_mapping_table =====")
+        logger.debug(f"update_mapping table {self.__repr__()}")       
 
     def _validate_cache(self, gpu_slot_mapping, cpu_slot_mapping, cpu_offset):
         # check if the mapping is valid 

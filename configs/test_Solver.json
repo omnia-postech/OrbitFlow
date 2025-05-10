@@ -13,7 +13,7 @@
         "class": "logging.FileHandler",
         "formatter": "vllm",
         "level": "INFO",
-        "filename": "../outputs/Solver/TP_test/vllm_msg.log"
+        "filename": "../outputs/heelim/Solver/TP_test/vllm_msg.log"
       }
     },
     "loggers": {
