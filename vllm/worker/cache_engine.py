@@ -1768,7 +1768,8 @@ class MappingTable:
         def _has_blocks(cache_map: dict[int, dict[int, Optional[list]]], sid: int) -> bool:
             return sid in cache_map and any(cache_map[sid].values())
 
-        for sid in self.seq_row_order: 
+        # for sid in self.seq_row_order: # -> NOTE(HONG): this only showes the current active seqs
+        for sid in self.all_seqs:   # -> NOTE(HONG): this shows all the seqs including paused seqs 
             has_gpu = _has_blocks(self.gpu_map, sid)
             has_cpu = _has_blocks(self.cpu_map, sid)
             considered_active = (
