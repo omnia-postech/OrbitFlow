@@ -1,23 +1,15 @@
 {
-  "arrival_pattern": {
-    "type": "DiscretePoissonArrival",
-    "params": {
-      "lambda_per_step": 0.01,
-      "max_steps": 4000
-    }
-  },
-  "batch_size": 2,
-  "request_type_probs": [
-    ["ChatBot Q&A", 0.7],
-    ["Creative Generation", 0.3]
-  ],
-  "num_gpu_blocks_override": 600,
-  "vocab": [200, 30000],
-  "max_model_len": 5000,
-  "requests": {
-    "request_0":  {"category":"ChatBot Q&A","input_length":1400,"output_length":3,"arrival_time":0,"sched_time":0,"wait_time":0},
-    "request_1":  {"category":"ChatBot Q&A","input_length":10,"output_length":2,"arrival_time":0,"sched_time":0,"wait_time":0},
-    "request_2":  {"category":"ChatBot Q&A","input_length":4000,"output_length":3,"arrival_time":0,"sched_time":0,"wait_time":0},
-    "request_3":  {"category":"ChatBot Q&A","input_length":10,"output_length":5,"arrival_time":0,"sched_time":0,"wait_time":0}
+  "arrival_pattern":{"type":"<main.PoissonBurstyArrivalPattern object at 0x7f4141fdcf50>"},
+  "batch_size":4,
+  "max_model_len":4992,
+  "num_gpu_blocks_override":312,
+  "request_type_probs":[["Short-Short ShareGPT",0.3],["Short-Long ShareGPT",0.7]],
+  "vocab":[200,30000],
+  "requests":{
+    "request_0":{"category":"Short-Long ShareGPT","input_length":122,"output_length":1882,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_1":{"category":"Short-Long ShareGPT","input_length":114,"output_length":7724,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_2":{"category":"Short-Long ShareGPT","input_length":201,"output_length":2867,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_3":{"category":"Short-Long ShareGPT","input_length":123,"output_length":1431,"arrival_time":59,"sched_time":59,"wait_time":0},
+    "request_4":{"category":"Short-Short ShareGPT","input_length":228,"output_length":579,"arrival_time":1492,"sched_time":1492,"wait_time":0}
   }
 }
