@@ -170,7 +170,7 @@ class CacheEngine(CacheEngineBase):
         if offloaded_num == 0:
             new_gpu_cpu_cache_map[self.num_attention_layers-1] = 0
             new_gpu_cpu_cache_map[int(self.num_attention_layers / 2) - 1] = 0            
-            logger.degug(msg = f"current ratio: no offload -> next ratio: {int(self.num_attention_layers / 2)}")
+            logger.debug(msg = f"current ratio: no offload -> next ratio: {int(self.num_attention_layers / 2)}")
         else:
             current_ratio = 0
             for i in range(self.num_attention_layers):

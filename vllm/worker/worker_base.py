@@ -247,10 +247,10 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         assert not self.is_driver_worker
         broadcast_data = broadcast_tensor_dict(src=0)
         if not broadcast_data:
-            logger.degug("[worker] received empty broadcast data")
+            logger.debug("[worker] received empty broadcast data")
             return None
         
-        logger.degug(f"[worker][broadcast_data keys] {list(broadcast_data.keys())}")
+        logger.debug(f"[worker][broadcast_data keys] {list(broadcast_data.keys())}")
         worker_input = WorkerInput.from_broadcasted_tensor_dict(broadcast_data)
     
         pause_layers = broadcast_data.pop('pause_layers')
@@ -262,14 +262,14 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         new_gpu_blocks = broadcast_data.pop('new_gpu_blocks')
         cached_all_token_ids  = broadcast_data.pop('cached_all_token_ids')
 
-        logger.degug(f"[worker][pause_layers ] {pause_layers}")
-        logger.degug(f"[worker][resume_layers] {resume_layers}")
-        logger.degug(f"[worker][cache_plan   ] dealloc={cache_plan.dealloc_layers}, alloc={cache_plan.alloc_layers}, resize={cache_plan.prefetch_resize}")
-        logger.degug(f"[worker][dist_dict    ] {dist_dict}")
-        logger.degug(f"[worker][sid2row      ] {sid2row}")
-        # logger.degug(f"[worker][bm           ] {bm}")
-        logger.degug(f"[worker][new_gpu_blocks] {new_gpu_blocks}")
-        logger.degug(f"[worker][cached_ids   ] {cached_all_token_ids['mappings'].keys()} -> token count {len(cached_all_token_ids['token_ids'])}")
+        logger.debug(f"[worker][pause_layers ] {pause_layers}")
+        logger.debug(f"[worker][resume_layers] {resume_layers}")
+        logger.debug(f"[worker][cache_plan   ] dealloc={cache_plan.dealloc_layers}, alloc={cache_plan.alloc_layers}, resize={cache_plan.prefetch_resize}")
+        logger.debug(f"[worker][dist_dict    ] {dist_dict}")
+        logger.debug(f"[worker][sid2row      ] {sid2row}")
+        # logger.debug(f"[worker][bm           ] {bm}")
+        logger.debug(f"[worker][new_gpu_blocks] {new_gpu_blocks}")
+        logger.debug(f"[worker][cached_ids   ] {cached_all_token_ids['mappings'].keys()} -> token count {len(cached_all_token_ids['token_ids'])}")
 
         model_input = (
             self.model_runner.make_model_input_from_broadcasted_tensor_dict(
@@ -279,18 +279,18 @@ class LocalOrDistributedWorkerBase(WorkerBase):
 
         cache_engine = self.cache_engine[worker_input.virtual_engine]
 
-        # logger.degug(f"[worker] registering block_manager to cache_engine#{worker_input.virtual_engine}")
+        # logger.debug(f"[worker] registering block_manager to cache_engine#{worker_input.virtual_engine}")
         # cache_engine.register_bm(bm)
 
         if cache_engine.pause_and_resume:
             if pause_layers or resume_layers:
-                logger.degug(f"[worker] executing pause/resume on engine")
+                logger.debug(f"[worker] executing pause/resume on engine")
                 cache_engine.execute_pause_resume(
                     pause_layers, resume_layers
                 )
 
         if cache_plan.dealloc_layers or cache_plan.alloc_layers or cache_plan.prefetch_resize:
-            logger.degug(f"[worker] executing cache_plan on engine#{worker_input.virtual_engine}")
+            logger.debug(f"[worker] executing cache_plan on engine#{worker_input.virtual_engine}")
             cache_engine.execute_cache_plan(cache_plan, model_input.attn_metadata, sid2row, new_gpu_blocks)
         
         return model_input, worker_input, kwargs, cached_all_token_ids
@@ -310,7 +310,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         if cache_engine.pause_and_resume:
             pause_plan, resume_plan = cache_engine.build_pause_resume_plan()
         else:
-            logger.degug(f"[driver] pause and resume feature => false")
+            logger.debug(f"[driver] pause and resume feature => false")
             pause_plan = resume_plan = None
         # 3. build cache plan
         total_context_lens = attn_meta.seq_lens
