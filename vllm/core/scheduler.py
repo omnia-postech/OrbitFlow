@@ -745,7 +745,7 @@ class Scheduler:
                         self._pause_window_remaining = 0
 
                     if self._pause_window_remaining > 0:
-                        logger.deubg(f"Within pause window (remaining={self._pause_window_remaining}), skipping solver")
+                        logger.debug(f"Within pause window (remaining={self._pause_window_remaining}), skipping solver")
                         self._pause_window_remaining -= 1
                     else:                        
                         if self.paused:
