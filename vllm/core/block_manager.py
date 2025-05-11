@@ -758,9 +758,9 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
             Device.GPU)
         
         if num_touched_blocks_by_all_decoding_requets <= num_free_gpu_blocks:
-            logger.info(f"plenty of free blocks{num_free_gpu_blocks} for at least two decoding steps")
+            logger.info(f"plenty of free blocks {num_free_gpu_blocks} for at least two decoding steps")
         else:
-            logger.info(f"not enough free blocks{num_free_gpu_blocks} for at least two decoding steps")
+            logger.info(f"not enough free blocks {num_free_gpu_blocks} for at least two decoding steps")
         return num_touched_blocks_by_all_decoding_requets > num_free_gpu_blocks
     
     def can_append_slots(self, seq_group: SequenceGroup,

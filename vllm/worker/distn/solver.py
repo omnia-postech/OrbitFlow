@@ -125,7 +125,7 @@ class Solver:
         model.optimize()
 
 # === 7. 결과 출력 ===
-        if model.Status == GRB.OPTIMAL:
+        if model.Status == GRB.OPTIMAL or model.Status == GRB.TIME_LIMIT or model.Status == GRB.SUBOPTIMAL:
             print("\n--- Optimal Solution ---")
             print(" r | resume | offload_num | slo_fail | actual_time")
             print("---|--------|-------------|----------|-------------")

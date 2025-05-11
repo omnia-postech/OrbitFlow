@@ -738,13 +738,16 @@ class Scheduler:
             if self.cache_config.prefetch_mode == "solver":
                 if ret.decode_seq_groups and len(ret.decode_seq_groups)>0:
                     if self._is_preemption(len(ret.decode_seq_groups)):
-                        logger.info(f"Preemption detected, trigger solver")                        
+                        logger.debug(f"Preemption detected, trigger solver")
+                        seq_ids = [sg.seq_group.get_seqs()[0].seq_id for sg in ret.decode_seq_groups]                                                
+                        blocks_allocated = {seq_id: sg.seq_group.get_seqs()[0].n_blocks for seq_id, sg in zip(seq_ids, ret.decode_seq_groups)}
+                        logger.debug(f"@@@@@@@@@@ total blocks/free_blocks: {self.block_manager.num_total_gpu_blocks//32}/{blocks_allocated} @@@@@@@@@@")
                         self._pause_window_remaining = 0
 
                     if self._pause_window_remaining > 0:
-                        logger.debug(f"Within pause window (remaining={self._pause_window_remaining}), skipping solver")
+                        logger.deubg(f"Within pause window (remaining={self._pause_window_remaining}), skipping solver")
                         self._pause_window_remaining -= 1
-                    else:
+                    else:                        
                         if self.paused:
                             logger.debug(f"RESTORE-PAUSED: bringing back {len(self.paused)} paused requests into decode candidates")
                             for pg in list(self.paused):
@@ -756,26 +759,24 @@ class Scheduler:
                             self.paused.clear() 
 
                         request_list = []
-                        requests = [g.seq_group.request_id for g in ret.decode_seq_groups]
-                        len(ret.decode_seq_groups[0].seq_group.seqs[0].data._cached_all_token_ids)                        
+                        seq_ids = [sg.seq_group.get_seqs()[0].seq_id for sg in ret.decode_seq_groups]                        
 
-                        if self._is_preemption(len(ret.decode_seq_groups)):
-                            context_blocks = {req: group.seq_group.seqs[0].n_blocks+1 for req, group in zip(requests, ret.decode_seq_groups)}
-                        else:
-                            context_blocks = {req: group.seq_group.seqs[0].n_blocks for req, group in zip(requests, ret.decode_seq_groups)}
+                        # NOTE(HONG): we give buffer here as adding +1 blocks per requests 
+                        context_blocks = {seq_id: sg.seq_group.get_seqs()[0].n_blocks + 1 for seq_id, sg in zip(seq_ids, ret.decode_seq_groups)}
 
                         layer_time = {}
                         SLO = {}
                         for sg in ret.decode_seq_groups:
                             req_id = sg.seq_group.request_id
-                            # 토큰 개수: _cached_all_token_ids 리스트 길이
-                            num_tokens = len(sg.seq_group.seqs[0].data._cached_all_token_ids)
-                            layer_time[req_id] = (1.001743183e-06 * num_tokens + 0.0495196) / 32
-                            SLO[req_id] = 1/self.slo_from_delaysim[req_id]
+                            seq = sg.seq_group.get_seqs()[0]
+                            seq_id = seq.seq_id
+                            num_tokens = len(seq.data._cached_all_token_ids)
+                            layer_time[seq_id] = (1.001743183e-06 * num_tokens + 0.0495196) / 32
+                            SLO[seq_id] = 1 / self.slo_from_delaysim[req_id]
                         
-                        deposit_count = {req: self.deposit_map.get(req, 0) for req in requests}                        
-
-                        request_list = [Request(req, context_blocks[req], layer_time[req], deposit_count[req], SLO[req]) for req in requests]
+                        seq_ids = [sg.seq_group.get_seqs()[0].seq_id for sg in ret.decode_seq_groups]
+                        deposit_count = {seq_id: self.deposit_map.get(str(seq_id), 0) for seq_id in seq_ids}
+                        request_list = [Request(seq_id, context_blocks[seq_id], layer_time[seq_id], deposit_count[seq_id], SLO[seq_id],) for seq_id in seq_ids]
 
                         bandwidth = 25.19 * 1024**3  # B/s
                         head_size = 128
@@ -784,14 +785,15 @@ class Scheduler:
                         block_bytes      = per_token_bytes * self.block_manager.block_size
                         block_bandwidth = block_bytes / bandwidth
                             
+                        logger.debug(f"######## Run solver with request_list: {request_list} ########")
                         match Solver.solve(request_list, block_bandwidth = block_bandwidth, gpu_block_capacity = self.block_manager.num_total_gpu_blocks):
                             case None:
                                 logger.info(f"No optimal solution found.")
                             case result:                 
                                 # result[0].resume = False # For debugging
                                 self._pause_window_remaining = result[0].window
-                                self.resume_distances = [sol.n for sol in result if sol.resume]
-                                logger.info(f"Resume distances for each request: {self.resume_distances}")                                       
+                                self.resume_distances = {sol.id: sol.n for sol in result if sol.resume}
+                                logger.debug(f"Resume distances for each request: {self.resume_distances}")                                       
                                 pause_ids = {sol.id for sol in result if not sol.resume}
                                 # NOTE(HONG): we need to pause that are not resume status
                                 # get scheduled_seq_group and seq_group that matches with sol.request_id
@@ -802,10 +804,10 @@ class Scheduler:
                                 new_decodes: List[ScheduledSequenceGroup] = []
                                 new_decode_list: List[SequenceGroup] = []
                                 for sg in ret.decode_seq_groups:
-                                    rid = sg.seq_group.request_id
-                                    if rid in pause_ids:
+                                    seq_id = sg.seq_group.get_seqs()[0].seq_id
+                                    if seq_id in pause_ids:
                                         self.paused.append(sg.seq_group)                                    
-                                        logger.info(f"Paused ScheduledSequenceGroup for '{rid}'")
+                                        logger.debug(f"Paused ScheduledSequenceGroup for '{seq_id}'")
                                     else:
                                         new_decodes.append(sg)
                                         new_decode_list.append(sg.seq_group)
