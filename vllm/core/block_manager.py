@@ -947,6 +947,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         return block_table
 
     def allocate_seq_by_layer(self, seq_id, layer_id, n_blocks): 
+        
         assert(seq_id in self.block_tables) # will this be true for paused or preempt requests 
         cpu_layer_table = self.cpu_block_tables[seq_id][layer_id]
         assert(n_blocks == len(cpu_layer_table._blocks)) 
@@ -967,6 +968,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         assert(n_blocks == len(block_table._blocks)) 
 
         self.block_tables[seq_id][layer_id] = block_table
+        logger.critical(f"bm check free blocks {self.block_allocator.get_num_free_blocks(Device.GPU)}")
         return self.block_tables[seq_id][layer_id].physical_block_ids
     def free_cross(self, seq_group: SequenceGroup) -> None:
         request_id = seq_group.request_id

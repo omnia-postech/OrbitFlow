@@ -913,7 +913,6 @@ class FlattenedCacheEngine(CacheEngineBase):
         dist_dict, _ = self._select_prefetch_distance(snap, self.prefetch_distance, total_context_lens, is_decoding)
         logger.critical(f"dist:{dist_dict}")
         plan = self._plan_cache_delta(snap, dist_dict)
-
         return plan, dist_dict
 
     def execute_pause_resume(
@@ -1178,7 +1177,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             else: 
                 prev_dist = -1
             logger.critical(f"prev_dist:{snapshot.prev_dist_dict}")
-
+                
             # increase the distance by 1 if no free blocks available for next step 
             free_blocks = self.block_manager.get_num_free_gpu_blocks() 
             max_append_blocks = len(snapshot.candidates) * self.num_attention_layers 
@@ -1187,7 +1186,14 @@ class FlattenedCacheEngine(CacheEngineBase):
                 if prev_dist == -1:
                     dist = [self.num_attention_layers//2] * len(snapshot.candidates)
                 elif prev_dist > 0:
-                    dist = [prev_dist - 1] * len(snapshot.candidates) 
+                    # should change until the num_gpu_layers change! 
+                    new_dist = prev_dist -1 
+                    num_layers_on_GPU_prev = self.num_attention_layers // prev_dist 
+                    num_layers_on_GPU = self.num_attention_layers // (new_dist)
+                    while num_layers_on_GPU_prev == num_layers_on_GPU:
+                        new_dist -= 1
+                        num_layers_on_GPU = self.num_attention_layers // (new_dist)
+                    dist = [new_dist] * len(snapshot.candidates) 
                 else: 
                     dist = [prev_dist] * len(snapshot.candidates)
             elif free_blocks > self.num_gpu_blocks * 0.3 and prev_dist > -1: # some offload  
