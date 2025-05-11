@@ -1,0 +1,7 @@
+All requests completed. Now saving CSV...
+Metrics saved to /home/sychoy/vllm/outputs/benchmark/TestBestAndWorst/Static2/test_fit_static_2/outputs.csv
+------Wall-clock stats (non-overlapping)------
+Overall runtime  : 346.230 s
+Prefill time     : 18774 tokens over 30.408 s ( 617.40 t/s)
+Decode  time     : 6979 tokens over 315.744 s ( 22.10 t/s)
+Preemptions  time     : 1

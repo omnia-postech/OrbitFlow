@@ -1,0 +1,10 @@
+Failure (due to memory limits): 3
+Failure (due to memory limits): 3
+Failure (due to memory limits): 3
+All requests completed. Now saving CSV...
+Metrics saved to /home/sychoy/vllm/outputs/benchmark/TestBestAndWorst/Flexgen/test_longshort_less/outputs.csv
+------Wall-clock stats (non-overlapping)------
+Overall runtime  : 315.984 s
+Prefill time     : 75696 tokens over 119.539 s ( 633.23 t/s)
+Decode  time     : 7241 tokens over 196.407 s ( 36.87 t/s)
+Preemptions  time     : 16

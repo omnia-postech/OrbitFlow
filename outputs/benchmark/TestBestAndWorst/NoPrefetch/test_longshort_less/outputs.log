@@ -1,0 +1,10 @@
+Failure (due to memory limits): 3
+Failure (due to memory limits): 3
+Failure (due to memory limits): 3
+All requests completed. Now saving CSV...
+Metrics saved to /home/sychoy/vllm/outputs/benchmark/TestBestAndWorst/NoPrefetch/test_longshort_less/outputs.csv
+------Wall-clock stats (non-overlapping)------
+Overall runtime  : 314.432 s
+Prefill time     : 75696 tokens over 120.256 s ( 629.46 t/s)
+Decode  time     : 7241 tokens over 194.138 s ( 37.30 t/s)
+Preemptions  time     : 16
