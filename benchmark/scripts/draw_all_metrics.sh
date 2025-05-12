@@ -3,11 +3,11 @@
 source /home/sychoy/anaconda3/etc/profile.d/conda.sh
 conda activate vllm
 
-export CUDA_VISIBLE_DEVICES=2
+export CUDA_VISIBLE_DEVICES=0
 export VLLM_CONFIGURE_LOGGING=1
 
 # 설정
-ROOT="/home/sychoy/vllm"
+ROOT="/home/heelim/vllm"
 OUTPUT_BASE="${ROOT}/outputs/benchmark"
 PYTHON_SCRIPT="${ROOT}/benchmark/data_analysis/plots_per_metric.py"
 

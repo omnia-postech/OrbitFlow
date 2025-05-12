@@ -13,7 +13,7 @@
         "class": "logging.FileHandler",
         "formatter": "vllm",
         "level": "CRITICAL",
-        "filename": "/home/xinyuema/vllm/outputs/benchmark/Debug/Ours/test_shortlong_less/vllm_msg.log"
+        "filename": "/home/heelim/vllm/outputs/benchmark/Debug/Ours/test_shortlong_less/vllm_msg.log"
       }
     },
     "loggers": {
