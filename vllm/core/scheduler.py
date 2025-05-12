@@ -353,6 +353,9 @@ class Scheduler:
 
         self._pause_window_remaining: int = 0
         self.slo_from_delaysim = {}
+        
+        self.gpu_blocks_per_layer = {}
+        self.gpu_layers_per_seq = {}
 
         version = "selfattn"
         if (self.scheduler_config.runner_type == "pooling"
@@ -785,7 +788,11 @@ class Scheduler:
                         
                         seq_ids = [sg.seq_group.get_seqs()[0].seq_id for sg in ret.decode_seq_groups]
                         deposit_count = {seq_id: self.deposit_map.get(str(seq_id), 0) for seq_id in seq_ids}
-                        request_list = [Request(seq_id, context_blocks[seq_id], layer_time[seq_id], deposit_count[seq_id], SLO[seq_id],) for seq_id in seq_ids]
+                        
+                        
+                        # cur_gpu_blocks_per_layer = {seq_id: self.gpu_blocks_per_layer.get(seq_id, 0) for seq_id in seq_ids}   # NOTE(HONG): -> num blocks per layer(+1 for buffer) == context_blocks
+                        cur_gpu_layers_per_seq = {seq_id: self.gpu_layers_per_seq.get(seq_id, 0) for seq_id in seq_ids} # NOTE(HONG): -> num layers per seq
+                        request_list = [Request(seq_id, context_blocks[seq_id], layer_time[seq_id], deposit_count[seq_id], SLO[seq_id], cur_gpu_layers_per_seq[seq_id]) for seq_id in seq_ids]
 
                         bandwidth = 25.19 * 1024**3  # B/s
                         head_size = 128

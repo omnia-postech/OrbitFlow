@@ -4,12 +4,16 @@ from gurobipy import GRB
 from typing import Optional
 
 class Request:
-    def __init__(self, id: str, context_len_in_blocks: int, layer_time: float, deposit_count: int, slo: float):
+    def __init__(self, id: str, context_len_in_blocks: int,
+                 layer_time: float, deposit_count: int, slo: float,
+                 gpu_layers_on_gpu: int):
         self.id = id
         self.context_len_in_blocks = context_len_in_blocks
         self.layer_time = layer_time
         self.deposit_count = deposit_count
         self.slo = slo
+        # self.gpu_blocks_per_layer = gpu_blocks_per_layer
+        self.gpu_layers_on_gpu = gpu_layers_on_gpu
 
 class Result:
     def __init__(self, id: str, resume: bool, n: int, offload_num: int, slo_fail: float, actual_time: float, window: int):
@@ -30,6 +34,12 @@ class Solver:
         layer_time = {r.id: r.layer_time for r in requests_list}
         deposit_count = {r.id: r.deposit_count for r in requests_list}
         SLO = {r.id: r.slo for r in requests_list}
+        gpu_layers = {r.id: r.gpu_layers_on_gpu for r in requests_list}
+        # blocks_per_layer = {r.id: r.gpu_layers_per_seq   for r in requests_list}
+        # gpu_cur_blocks = {
+        #     rid: gpu_layers[rid] * blocks_per_layer[rid]   # (#레이어)×(블록/레이어)
+        #     for rid in requests
+        # }
 
         L = layer_num 
         M = 1e6                     # big-M
@@ -51,12 +61,16 @@ class Solver:
 
         offload_num_constr = {(r, i): model.addVar(vtype=GRB.BINARY, name=f"onc_{i}") for i in range(1, L+2) for r in requests}
 
+        move_blocks   = model.addVars(requests, lb=0, ub=L,
+                                      vtype=GRB.INTEGER, name='move_blocks')
+
         print(floor_val)
 
         for r in requests:
             model.addConstr(gp.quicksum(offload_num_constr[(r, i)] for i in range(1, L+2)) == 1)
             model.addConstr(gp.quicksum(offload_num_constr[(r, i)] * i for i in range(1, L+2)) == prefetch_dist[r])
             model.addConstr(gp.quicksum(offload_num_constr[(r, i)] * floor_val[i] for i in range(1, L+2)) == offload_num[r])
+            model.addConstr(move_blocks[r] >= offload_num[r] - gpu_layers[r], name=f"mv_pos_{r}")
 
         batch_layer  = model.addVar(lb=0, name='batch_layer')
         comm_time    = model.addVar(lb=0, name='comm_time')
@@ -86,6 +100,16 @@ class Solver:
 
 # 5.4 comp_time = batch_layer * L
         model.addConstr(comp_time == batch_layer * L, name="comp_time_def")
+
+# 5.4.1 move_overhead = max(0, move_blocks[r] * context_blocks[r] / block_bandwidth)        
+        move_overhead = model.addVar(lb=0, name='move_overhead')
+        model.addConstr(
+        move_overhead == gp.quicksum(
+            resume[r] * move_blocks[r] * context_blocks[r]
+            for r in requests
+        ) / block_bandwidth,
+        name="move_overhead_def"
+        )
 
 # 5.5 token_time = max(comm_time, comp_time)
         model.addGenConstrMax(token_time, [comm_time, comp_time], name="token_time_max")
@@ -117,9 +141,14 @@ class Solver:
             name="memory_limit"
         )
 
+        # 🆕 goodput 분모: token_time + move_overhead
+        eff_latency = model.addVar(lb=0, name='effective_latency')
+        model.addConstr(eff_latency == token_time + move_overhead,
+                        name="eff_lat_def")
+
 # === 6. 목적함수 및 최적화 ===
         goodput = model.addVar(lb=0, name='obj')
-        model.addConstr(goodput * token_time == gp.quicksum(resume[r] for r in requests) - slo_fail_per_decode.sum())
+        model.addConstr(goodput * eff_latency == gp.quicksum(resume[r] for r in requests) - slo_fail_per_decode.sum())
         model.setObjective(goodput, GRB.MAXIMIZE)
         model.Params.OutputFlag = 1
         model.optimize()
