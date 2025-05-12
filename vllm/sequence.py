@@ -680,6 +680,7 @@ class SequenceGroup:
 
         self.cached_request_output = None
 
+        self.solver_time = 0.0
     @property
     def prompt(self) -> Optional[str]:
         return self.first_seq.prompt
@@ -788,6 +789,9 @@ class SequenceGroup:
         if (self.metrics.first_token_time is None
                 and self.first_seq.get_output_len() == 1):
             self.metrics.first_token_time = time
+    def set_solver_time(self, time: float) -> None:
+        """Sets the set_solver_time for Request level timings."""
+        self.solver_time = time
 
     def maybe_set_first_scheduled_time(self, time: float) -> None:
         """Sets the first scheduled time and time in queue for Request
@@ -1332,8 +1336,9 @@ class ExecuteModelRequest(
             finished_requests_ids=self.finished_requests_ids,
             last_sampled_token_ids=self.last_sampled_token_ids.clone()
             if self.last_sampled_token_ids is not None else None,
-            async_callback=self.async_callback)
-
+            async_callback=self.async_callback,
+            paused_cpu_seq_groups=self.paused_cpu_seq_groups.copy(),
+        )
 
 @dataclass
 class SequenceGroupBase:

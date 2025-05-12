@@ -264,7 +264,10 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                 "first_token_time": None,
                 "finished_time": None,
                 "token_timestamps": [],
+                "profiled_tbt": [],
+                "time_between_tokens": [],
                 "decode_length": 0,
+                "expected_output_length": req_obj.output_length,
                 "stall_times": [],
                 "stall_durations": [],
                 "stall_duration": 0,
@@ -318,6 +321,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
         "stall_duration", "decode_length",
         "end_to_end_time", "decode_time",
         "time_per_output_token", "time_between_tokens",
+        "finish_reason", "profiled_tbt", "expected_output_length",
         "stall_durations",
     ])
     if write_header:
@@ -352,26 +356,34 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
         step_start = time.time()
         step_outputs = engine.step()
         step_end = time.time()
-        overall_wall += step_end - step_start
+        elapsed_time_step = step_end - step_start
+        overall_wall += elapsed_time_step
+        
+        # sim.last_decode_time = elapsed_time_step
         # If no outputs come back, we still increment steps
         cumulative_steps += 1
         
         # NOTE(HONG): neet to use step_time to unify the time for all events at step-level
         torch.cuda.synchronize()
-        step_time = time.time()
 
         # 6) Process each output
         # gather rids so we can log them in one line
         prefill_rids: list[str] = []
         decode_rids:  list[str] = []
-
+        finished_rids: list[str] = []
         step_tokens = 0
         # to test whether it was decode 
         if len(step_outputs) > 0:
             if step_outputs[0].request_id in received_requests:
-                decode_wall += step_end - step_start
+                decode_rids = list(set([output.request_id for output in step_outputs])) 
+                decode_wall += elapsed_time_step
+                step_tokens = sum([request_metadata[rid]["prompt_length"] + request_metadata[rid]['decode_length']+1 for rid in decode_rids])
+                profiled_res = PROFILED_A * step_tokens + PROFILED_B 
             else: 
-                prefill_wall += step_end - step_start
+                prefill_rids = list(set([output.request_id for output in step_outputs])) 
+                prefill_wall += elapsed_time_step
+                profiled_res = PROFILED_A * step_tokens + PROFILED_B 
+                step_tokens = sum([request_metadata[rid]["prompt_length"] for rid in prefill_rids])
             consecutive_no_output = 0
         else: 
             consecutive_no_output += 1 
@@ -387,11 +399,19 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                     logger.critical(f"[finish] removing last_time entry for {rid}")
                     print(f"Failure (due to memory limits): {len(rids)}")
                 break
+
+
         for output in step_outputs:
             rid = output.request_id
+            if hasattr(output, "solver_time"):
+                logger.critical("test_distn_solver_time: %s", output.solver_time)
+            else: 
+                logger.critical("test_distn_solver_time: non exist")
             logger.debug("step %d  rid=%s", cumulative_steps, rid)
             # Prefill
-            if rid not in received_requests:
+            if len(prefill_rids) > 0:
+            # if rid not in received_requests:
+                sim.last_decode_time = 0
                 # This is the first token for that request
                 received_requests.append(rid)
                 prefill_rids.append(rid)
@@ -402,26 +422,36 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                 running_requests.add(rid)
             # Decoding
             else:
+                sim.last_decode_time = elapsed_time_step
                 # Another token
                 decode_rids.append(rid)
                 # now = time.time()
 
-                sim.on_token(rid, step_time)
+                sim.on_token(rid, step_end)
 
                 # NOTE(HONG): not useing output.metrics.last_token_time since we are using step_time
-                request_metadata[rid]["token_timestamps"].append(step_time)
+                request_metadata[rid]["token_timestamps"].append(step_end)
+                request_metadata[rid]["time_between_tokens"].append(elapsed_time_step)
+                request_metadata[rid]["profiled_tbt"].append(profiled_res)
                 request_metadata[rid]["decode_length"] += 1
                 finished_tokens += 1
                 finished_decode_tokens += 1
                 request_output[rid].append(output)
+                
             step_tokens += request_metadata[rid]["prompt_length"]
             step_tokens += request_metadata[rid]["decode_length"]
 
             # If the request is finished:
             if output.finished:
-                logger.critical(f"Finished request {rid} at step {cumulative_steps}, finish_reason={output.outputs[0].finish_reason}")
+
+                if len(output.outputs[0].token_ids) < request_metadata[rid]["expected_output_length"]:
+                    logger.critical(f"{rid} output: {len(output.outputs[0].token_ids)} tokens; {output.outputs[0].token_ids[:20]}")
+                    finish_reason = "length_capped"
+                else: 
+                    finish_reason = output.outputs[0].finish_reason
+                logger.critical(f"Finished request {rid} at step {cumulative_steps}, finish_reason={finish_reason}")
                 logger.critical(f"{rid} prompt: {len(output.prompt_token_ids)} tokens; {output.prompt_token_ids[:20]}")
-                logger.critical(f"{rid} output: {len(output.prompt_token_ids)} {output.outputs[0].token_ids[:20]}")
+                logger.critical(f"{rid} output: {len(output.outputs[0].token_ids)} {output.outputs[0].token_ids[:20]}")
                 logger.critical(f"{rid} text: {output.outputs[0].text[:20]}")
                 running_requests.remove(rid)
 
@@ -429,7 +459,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                 # LOCAL WALL‑CLOCK MEASUREMENTS (no out.metrics)
                 # ------------------------------------------------------------------
                 arrival_time_local = request_metadata[rid]["arrival_time"]
-                finished_time_local = step_time
+                finished_time_local = step_end
                 m = output.metrics
 
                 token_ts = request_metadata[rid]["token_timestamps"]
@@ -463,14 +493,17 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                     "end_to_end_time": finished_time_local - arrival_time_local,
                     "decode_time": finished_time_local - first_token_time_local,
                     "time_per_output_token": avg_token_latency,
-                    "time_between_tokens": json.dumps(per_token_latencies),
+                    "finish_reason": finish_reason,
+                    # "time_between_tokens": json.dumps(per_token_latencies),
+                    "time_between_tokens": json.dumps(request_metadata[rid]["time_between_tokens"]),
+                    "profiled_tbt": request_metadata[rid]["profiled_tbt"],
+                    "expected_output_length": request_metadata[rid]["expected_output_length"],
                     "stall_durations": json.dumps(request_metadata[rid]["stall_durations"]),
                 }
                 metrics_data.append(row)
                 csv_writer.writerow(row)
                 csv_fh.flush()  
-
-                request_metadata.pop(rid)
+                finished_rids.append(rid)
                 logger.info(f"Finished request {rid} with {decode_length} decode tokens")
                 sim.finish(rid)
         if prefill_rids:
@@ -480,9 +513,11 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
             logger.info("Decode  step %d: %s",
                         cumulative_steps, ", ".join(map(str, decode_rids)))
         engine.scheduler[0].last_decode_time = sim.last_decode_time
-        engine.scheduler[0].step_tokens = step_tokens
-       
-        tokens_to_release = sim.pop(step_time)
+        engine.scheduler[0].step_tokens = step_tokens          
+        
+        for rid in finished_rids:
+            request_metadata.pop(rid)
+        tokens_to_release = sim.pop(step_end)
         
 
     # 7) After all requests are done, save to CSV
