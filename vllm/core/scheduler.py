@@ -696,8 +696,10 @@ class Scheduler:
                     elif preempted_mode == PreemptionMode.PAUSE:                        
                         paused_cpu.append(victim_seq_group)
                         self.paused_cpu.append(victim_seq_group)
+                        preempted.append(victim_seq_group)
                     else:
                         swapped_out.append(victim_seq_group)
+                        preempted.append(victim_seq_group)
 
                 if not cont_loop:
                     break
@@ -728,11 +730,9 @@ class Scheduler:
                     budget.add_num_seqs(seq_group.request_id, num_running_seqs)
                 if curr_loras is not None and seq_group.lora_int_id > 0:
                     curr_loras.add(seq_group.lora_int_id)
-
         if self.cache_config.pause_and_resume:
             # save self.paused seq ids
             previous_paused_ids = {seq_group.get_seqs()[0].seq_id for seq_group in self.paused}            
-
             if not self.running and not self.waiting and self.paused:
                 logger.debug(f"No running or waiting seqs; restoring {len(self.paused)} paused requests")
                 for pg in list(self.paused):                    
@@ -979,6 +979,7 @@ class Scheduler:
         budget: SchedulingBudget,
         curr_loras: Optional[Set[int]],
         enable_chunking: bool = False,
+        preempted: list = [],
     ) -> SchedulerSwappedInOutputs: # reuse this for now
         """Schedule sequence groups that are paused due to preemption. Sequence groups 
         that are proactively paused are not scheduld here, but resumed in _schedule_running. 
@@ -1009,11 +1010,13 @@ class Scheduler:
         infeasible_seq_groups: List[SequenceGroup] = []
 
         paused_queue = self.paused_cpu # HERE! 
-
         leftover_swapped: Deque[SequenceGroup] = deque()
         total_touched_blocks = 0
         while paused_queue:
             seq_group = paused_queue[0]
+            if len(preempted) > 0:
+                if seq_group in preempted: 
+                    break # same as later
             # If the sequence group cannot be swapped in, stop.
             is_prefill = seq_group.is_prefill()
             touched_blocks, alloc_status = self.block_manager.can_resume(
@@ -1066,7 +1069,8 @@ class Scheduler:
             paused_queue.popleft()
             
             self._reuse(seq_group)
-            self._append_slots(seq_group, [], enable_chunking)
+            # self._append_slots(seq_group, [], enable_chunking)
+            
             logger.info(f"RESUME: {seq_group}")
             is_prefill = seq_group.is_prefill()
             if is_prefill:
@@ -1229,9 +1233,12 @@ class Scheduler:
             seq_group = waiting_queue[0]
 
             waiting_seqs = seq_group.get_seqs(status=SequenceStatus.WAITING)
+            if len(waiting_seqs) == 0: # FIXME temporary
+                waiting_queue.popleft()
+                continue
             assert len(waiting_seqs) == 1, (
                 "Waiting sequence group should have only one prompt "
-                "sequence.")
+                f"sequence. {waiting_seqs}")
             num_new_tokens_uncached, num_new_tokens_cached = (
                 self._get_num_new_uncached_and_cached_tokens(
                     seq_group, SequenceStatus.WAITING, enable_chunking,
@@ -1404,7 +1411,6 @@ class Scheduler:
             running_scheduled, is_paused_to_resume = self._schedule_running(budget,
                                                        curr_loras,
                                                        enable_chunking=False)
-
             # If any sequence group is preempted, do not swap in any sequence
             # group. because it means there's no slot for new running requests.
             cond1 = len(running_scheduled.preempted) + len(
@@ -1412,18 +1418,17 @@ class Scheduler:
                     running_scheduled.paused) == 0
             # if there are no scheduled requests, we can swap in 
             cond2 = len(running_scheduled.prefill_seq_groups) + len(running_scheduled.decode_seq_groups) == 0
-            logger.debug(f"GU: {cond1}, cond2: {cond2}")
-            logger.debug(f"is_paused_to_resume: {is_paused_to_resume}")
             if cond1 or cond2: 
                 if not is_paused_to_resume:
-                    swapped_in = self._schedule_paused(budget, curr_loras)
-                    logger.critical(f"swapped_in ignored: {swapped_in.infeasible_seq_groups}")
+                    swapped_in = self._schedule_paused(budget, curr_loras, running_scheduled.preempted)
                     # prioritize swapped requests over preempted requests. 
                     # TODO resume and swap in cannot happend at the same time
                     # if len(swapped_in.decode_seq_groups) == 0 and len(swapped_in.prefill_seq_groups) == 0:
                     #     swapped_in = self._schedule_swapped(budget, curr_loras)
-        logger.critical(f"swapped_in ignored: {swapped_in.infeasible_seq_groups}")
-
+            # elif cond2: # its possible that a request is preempted, but it should be set to NEVER in the next step. But it is the only thing in the waiting queue, cauing an error
+            #     if (running_scheduled.preempted) > 0: 
+                    
+                
         assert (budget.num_batched_tokens <=
                 self.scheduler_config.max_num_batched_tokens)
         assert budget.num_curr_seqs <= self.scheduler_config.max_num_seqs
@@ -1462,10 +1467,7 @@ class Scheduler:
         blocks_to_copy.extend(swapped_in.blocks_to_copy)
 
         ignored_seq_groups = prefills.ignored_seq_groups
-        logger.critical(f"swapped_in ignored: {swapped_in.infeasible_seq_groups}")
-        logger.critical(f"ignored_seq_groups before : {ignored_seq_groups}")
         ignored_seq_groups.extend(swapped_in.infeasible_seq_groups)
-        logger.critical(f"adding to ignored_seq: {ignored_seq_groups}")
 
         logger.debug(f"!!!!!!!!!!!!!!! SchedulerOutputs.paused: {running_scheduled.paused}")
 
@@ -1636,7 +1638,6 @@ class Scheduler:
 
         # block allocation inside _schedule
         scheduler_outputs: SchedulerOutputs = self._schedule()
-        logger.critical(f"scheduler_outputs ignored: {scheduler_outputs.ignored_seq_groups}")
         now = time.time()
 
         if not self.cache_config.enable_prefix_caching:
@@ -1951,7 +1952,6 @@ class Scheduler:
         seq_id = seq.seq_id
         seq_layers_to_drop = {seq_id:list(range(self.block_manager.num_attention_layers))}
         freed_gpu_blocks = self.block_manager.free_seq_by_layer(seq_layers_to_drop)
-        logger.critical(f"Preemption by PAUSE: request {seq_group.request_id}, freed {freed_gpu_blocks} ")# freed {freed_gpu_blocks} ")
         return freed_gpu_blocks
     def _swap_in(
         self,
@@ -1968,7 +1968,9 @@ class Scheduler:
         # only used for requests paused by preemption
         for seq in seq_group.get_seqs(status=SequenceStatus.SWAPPED):
             seq.status = SequenceStatus.RUNNING
-
+            # num_blocks = seq.get_num_computed_tokens()//16
+            # self.block_manager.allocate_seq_by_layer(seq.seq_id,0,num_blocks)
+            
     def _swap_out(
         self,
         seq_group: SequenceGroup,

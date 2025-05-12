@@ -13,7 +13,7 @@ python metrics_plots.py stats  /path/to/log.csv
 python metrics_plots.py tbt    /path/to/log.csv
 """
 from __future__ import annotations
-
+import numpy as np          
 import ast
 import sys
 from pathlib import Path
@@ -208,6 +208,93 @@ def plot_time_between_tokens_wallclock(df: pd.DataFrame, csv_path: Path) -> Path
     fig.savefig(out_file, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return out_file
+
+def plot_tbt_relerr(df: pd.DataFrame, csv_path: Path) -> Path:
+    """
+    Scatter of relative error (%) between profile-estimated Δt and actual Δt.
+
+    X-axis: token index within a request.
+    Y-axis: error percentage. 0 % = perfect estimate.
+    """
+    req_cols = ("time_between_tokens", "profiled_tbt")
+    if any(c not in df.columns for c in req_cols):
+        raise KeyError(f"Missing column(s): {req_cols}")
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    for _, row in df.iterrows():
+        tbt, prof = (row["time_between_tokens"]), eval(row["profiled_tbt"])
+        # assert(len(tbt) == len(prof))/
+        if all(isinstance(x, (list, tuple)) for x in (tbt, prof)):
+            tbt_arr, prof_arr = map(np.asarray, (tbt, prof))
+            err = (prof_arr - tbt_arr) / tbt_arr * 100.0
+            ax.scatter(range(len(err)), err, s=8, alpha=0.6)
+
+    ax.axhline(0, ls="--", lw=0.8, color="k")
+    ax.set_xlabel("Output-token index")
+    ax.set_ylabel("Relative error (%)")
+    ax.set_title("Profiled vs. actual Δt (token-index domain)")
+    ax.grid(True, linewidth=0.3)
+    plt.tight_layout()
+
+    out_file = csv_path.with_name(f"{csv_path.stem}_tbt_relerr.png")
+    fig.savefig(out_file, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out_file
+
+def plot_tbt_relerr_wallclock(df: pd.DataFrame, csv_path: Path) -> Path:
+    """
+    Scatter of relative error (%) on a wall-clock timeline.
+
+    • Each request gets its own colour (Tab10 repeats).
+    • X-axis: seconds since the earliest arrival.
+    """
+    req_cols = ("arrival_time", "time_between_tokens",
+                "profiled_tbt", "time_to_first_token")
+    if any(c not in df.columns for c in req_cols):
+        raise KeyError(f"Missing column(s): {req_cols}")
+
+    t0      = df["arrival_time"].min()
+    palette = list(plt.cm.tab10.colors)
+    xs, ys, cs = [], [], []
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    for idx, (_, row) in enumerate(df.iterrows()):
+        color = palette[idx % 10]
+        arrival = row["arrival_time"]
+        ttf     = row["time_to_first_token"]
+        
+        tbt, prof = (row["time_between_tokens"]), eval(row["profiled_tbt"])
+        # assert(len(tbt) == len(prof))
+        if all(isinstance(x, (list, tuple)) for x in (tbt, prof)):
+            tbt_arr, prof_arr = map(np.asarray, (tbt, prof))
+            err = (prof_arr - tbt_arr) / tbt_arr * 100.0
+
+            # first token
+            cum = arrival + ttf
+            xs.append(cum - t0)
+            ys.append((ttf - prof_arr[0]) / ttf * 100.0)
+            cs.append(color)
+
+            # remaining tokens
+            for dt, e in zip(tbt_arr, err):
+                cum += dt
+                xs.append(cum - t0)
+                ys.append(e)
+                cs.append(color)
+
+    ax.scatter(xs, ys, s=6, alpha=0.6, c=cs, linewidths=0)
+    ax.axhline(0, ls="--", lw=0.8, color="k")
+    ax.set_xlabel("Wall-clock time since start (s)")
+    ax.set_ylabel("Relative error (%)")
+    ax.set_title("Profiled vs. actual Δt (wall-clock domain)")
+    ax.grid(True, linewidth=0.3)
+    plt.tight_layout()
+
+    out_file = csv_path.with_name(f"{csv_path.stem}_tbt_relerr_wallclock.png")
+    fig.savefig(out_file, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out_file
+
 # ──────────────────────────────────────────────────────────────────────────────
 # CLI
 # ──────────────────────────────────────────────────────────────────────────────
@@ -221,9 +308,14 @@ def _usage() -> None:
 
 def main(argv: List[str] | None = None) -> None:
     argv = argv or sys.argv[1:]
-    if len(argv) != 2 or argv[0] not in {"stats", "tbt", "tbt_wc"}:
+    valid = {
+        "stats", "tbt", "tbt_wc",
+        "tbt_err", "tbt_err_wc"          # NEW
+    }
+    if len(argv) != 2 or argv[0] not in valid:
         _usage()
         sys.exit(1)
+
 
     mode, csv = argv
     csv_path = Path(csv).expanduser().resolve()
@@ -241,8 +333,13 @@ def main(argv: List[str] | None = None) -> None:
         return
     elif mode == "stats":
         out_path = plot_stats_overview(df, csv_path)
+    elif mode == "tbt_err":
+        out_path = plot_tbt_relerr(df, csv_path)
+    elif mode == "tbt_err_wc":
+        out_path = plot_tbt_relerr_wallclock(df, csv_path)
     else: 
         raise ValueError(f"Unknown mode: {mode}")
+
     print(f"Figure written ➜ {out_path}")
 
 
