@@ -70,7 +70,7 @@ class Solver:
             model.addConstr(gp.quicksum(offload_num_constr[(r, i)] for i in range(1, L+2)) == 1)
             model.addConstr(gp.quicksum(offload_num_constr[(r, i)] * i for i in range(1, L+2)) == prefetch_dist[r])
             model.addConstr(gp.quicksum(offload_num_constr[(r, i)] * floor_val[i] for i in range(1, L+2)) == offload_num[r])
-            model.addConstr(move_blocks[r] >= offload_num[r] - gpu_layers[r], name=f"mv_pos_{r}")
+            model.addConstr(move_blocks[r] >= (L - offload_num[r]) - gpu_layers[r], name=f"mv_pos_{r}")
 
         batch_layer  = model.addVar(lb=0, name='batch_layer')
         comm_time    = model.addVar(lb=0, name='comm_time')
