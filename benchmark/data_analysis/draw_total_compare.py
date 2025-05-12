@@ -43,7 +43,7 @@ trace_labels = [
 ]
 
 def get_csv_path(exp: str, method: str, trace: str) -> Path:
-    return Path(f"/home/xinyuema/vllm/outputs/benchmark/{exp}/{method}/{trace}/outputs.csv")
+    return Path(f"/home/heelim/vllm/outputs/benchmark/{exp}/{method}/{trace}/outputs.csv")
 
 # 그래프에 나타나는 label naming
 static_methods_labels = ["No Prefetch", "Static0", "Static2"]
@@ -51,7 +51,7 @@ dynamic_methods_labels = ["Placeholder(SelectN)", "Flexgen", "DistNSingle", "Our
 method_labels = static_methods_labels + dynamic_methods_labels
 
 metric_list = ["TBT attainment", "TPOT", "E2E throughput", "# Violations"]
-metric_list_lables = ["TBT attainment\n(%)", "TPOT\n(token/s)", "E2E throughput\n(token/s)", "# Violations\n"]
+metric_list_lables = ["TBT attainment\n(%)", "TPOT\n(ms)", "E2E throughput\n(token/s)", "# Violations\n"]
 
 colors = [
     # Static (파란색 계열 - 부드럽고 시인성 높음)
@@ -277,5 +277,5 @@ fig.legend(
 )
 
 # plt.tight_layout(rect=[0, 0, 1, 0.95])
-plt.savefig("multi_metric_trace_barplot.jpg", format='jpg', bbox_inches="tight")
-plt.savefig("multi_metric_trace_barplot.pdf", format='pdf', bbox_inches="tight")
+plt.savefig("figures/multi_metric_trace_barplot.jpg", format='jpg', bbox_inches="tight")
+plt.savefig("figures/multi_metric_trace_barplot.pdf", format='pdf', bbox_inches="tight")
