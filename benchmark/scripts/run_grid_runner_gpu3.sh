@@ -14,8 +14,9 @@ EXP_LIST=(Debug)                         # ← your “experiments”
 shift
 METHOD_LIST=("$@")      # ← indexes into JSON above
 
-TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/test_best_worst"
-TRACE_LIST=(test_mix4_less)
+# TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/test_best_worst"
+TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/test_best_worst_10x"
+TRACE_LIST=(test_mix4_less_10x)
 
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"
