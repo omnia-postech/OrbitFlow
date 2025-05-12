@@ -98,9 +98,6 @@ class Solver:
             model.addGenConstrIndicator(resume[r], False,
                                         actual_time[r] >= M,
                                         name=f"act_off_{r}")
-        
-        for r in requests:
-            model.addConstr(resume[r] == 1, name=f"no offload constraint")
 
 
 # 5.8 ratio * H = deposit_timer (비선형 제약)
