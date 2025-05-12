@@ -374,6 +374,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         step = 500
         if cached_all_token_ids is not None and len(cached_all_token_ids['token_ids']) % step == 0:            
             logger.debug(f"cached_all_token_ids: {len(cached_all_token_ids['token_ids'])}")
+        logger.debug(f"paused_cpu_seq_groups: {execute_model_req.paused_cpu_seq_groups}")
         if len(execute_model_req.paused_cpu_seq_groups) > 0:
             logger.debug(f"paused_cpu_seq_groups: {execute_model_req.paused_cpu_seq_groups}")
         

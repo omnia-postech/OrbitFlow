@@ -55,11 +55,14 @@
         "--pause-and-resume",
         "--enable-deposit"
     ],
-    "OursFallback": [
+    "Ours_TP": [
         "--prefetch-mode",        "solver",
         "--prefetch-distance",    "1",
         "--flattened-cache",      "true",
-        "--merge-prefetch-buffer", "true"
+        "--merge-prefetch-buffer", "true",
+        "--tensor-parallel-size", "2",
+        "--pause-and-resume",
+        "--enable-deposit"
     ]
   }
   
