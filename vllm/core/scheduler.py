@@ -154,6 +154,7 @@ class SchedulerOutputs:
     # The number of requests in the running queue
     running_queue_size: int
     preempted: int
+    solver_time: float
     def __post_init__(self):
         # Swap in and swap out should never happen at the same time.
         assert not (self.blocks_to_swap_in and self.blocks_to_swap_out)
@@ -230,6 +231,8 @@ class SchedulerRunningOutputs:
     decode_seq_groups_list: List[SequenceGroup]
     prefill_seq_groups_list: List[SequenceGroup]
 
+    # logging solver time 
+    solver_time: float = 0.0
     @classmethod
     def create_empty(cls) -> "SchedulerRunningOutputs":
         return SchedulerRunningOutputs(
@@ -792,6 +795,8 @@ class Scheduler:
                         block_bandwidth = block_bytes / bandwidth
                             
                         logger.debug(f"######## Run solver ########")
+                        # (xinyue) logger solver time 
+                        solver_start = time.time()
                         match Solver.solve(request_list, block_bandwidth = block_bandwidth, gpu_block_capacity = self.block_manager.num_total_gpu_blocks):
                             case None:
                                 logger.info(f"No optimal solution found.")
@@ -824,7 +829,7 @@ class Scheduler:
                                         new_decode_list.append(sg.seq_group)
                                 ret.decode_seq_groups = new_decodes
                                 ret.decode_seq_groups_list = new_decode_list
-                                                            
+                        ret.solver_time = time.time() - solver_start
             else:         
                 ####################### Naive pause #######################
                 # NOTE(HONG): pause
@@ -1023,7 +1028,7 @@ class Scheduler:
                     "cache blocks to run the entire sequence.",
                     seq_group.request_id)
                 for seq in seq_group.get_seqs():
-                    seq.status = SequenceStatus.FINISHED_IGNORED
+                    seq.status = SequenceStatus.FINISHED_LENGTH_CAPPED # why was this (borrowed from _schedule_swapped) FINISHED_IGNORED ?
                 infeasible_seq_groups.append(seq_group)
                 paused_queue.popleft()
                 continue
@@ -1412,10 +1417,12 @@ class Scheduler:
             if cond1 or cond2: 
                 if not is_paused_to_resume:
                     swapped_in = self._schedule_paused(budget, curr_loras)
+                    logger.critical(f"swapped_in ignored: {swapped_in.infeasible_seq_groups}")
                     # prioritize swapped requests over preempted requests. 
                     # TODO resume and swap in cannot happend at the same time
-                    if len(swapped_in.decode_seq_groups) == 0 and len(swapped_in.prefill_seq_groups) == 0:
-                        swapped_in = self._schedule_swapped(budget, curr_loras)
+                    # if len(swapped_in.decode_seq_groups) == 0 and len(swapped_in.prefill_seq_groups) == 0:
+                    #     swapped_in = self._schedule_swapped(budget, curr_loras)
+        logger.critical(f"swapped_in ignored: {swapped_in.infeasible_seq_groups}")
 
         assert (budget.num_batched_tokens <=
                 self.scheduler_config.max_num_batched_tokens)
@@ -1455,7 +1462,10 @@ class Scheduler:
         blocks_to_copy.extend(swapped_in.blocks_to_copy)
 
         ignored_seq_groups = prefills.ignored_seq_groups
+        logger.critical(f"swapped_in ignored: {swapped_in.infeasible_seq_groups}")
+        logger.critical(f"ignored_seq_groups before : {ignored_seq_groups}")
         ignored_seq_groups.extend(swapped_in.infeasible_seq_groups)
+        logger.critical(f"adding to ignored_seq: {ignored_seq_groups}")
 
         logger.debug(f"!!!!!!!!!!!!!!! SchedulerOutputs.paused: {running_scheduled.paused}")
 
@@ -1472,7 +1482,7 @@ class Scheduler:
             num_lookahead_slots=running_scheduled.num_lookahead_slots,
             running_queue_size=len(self.running),
             preempted=preempted,
-            
+            solver_time=running_scheduled.solver_time,
         )
 
     def _schedule_chunked_prefill(self) -> SchedulerOutputs:
@@ -1569,6 +1579,7 @@ class Scheduler:
             running_queue_size=len(self.running),
             preempted=(len(running_scheduled.preempted) +
                        len(running_scheduled.swapped_out)),
+            solver_time=running_scheduled.solver_time,
         )
 
     def _schedule(self) -> SchedulerOutputs:
@@ -1625,6 +1636,7 @@ class Scheduler:
 
         # block allocation inside _schedule
         scheduler_outputs: SchedulerOutputs = self._schedule()
+        logger.critical(f"scheduler_outputs ignored: {scheduler_outputs.ignored_seq_groups}")
         now = time.time()
 
         if not self.cache_config.enable_prefix_caching:

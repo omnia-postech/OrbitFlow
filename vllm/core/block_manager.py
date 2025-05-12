@@ -588,7 +588,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         block_size: int,
         num_gpu_blocks: int,
         num_cpu_blocks: int,
-        watermark: float = 0.01,
+        watermark: float = 0.0, # (xinyue) turning off watermark for accurate simulation, was 0.01
         sliding_window: Optional[int] = None,
         enable_caching: bool = False,
         enable_prefetch: bool = True,
@@ -688,8 +688,6 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         # Use watermark to avoid frequent cache eviction.
         if (self.num_total_gpu_blocks - num_required_blocks <
                 self.watermark_blocks):
-            msg = f"self.num_total_gpu_blocks: {self.num_total_gpu_blocks}, num_required_blocks: {num_required_blocks}, watermark_blocks: {self.watermark_blocks}"
-            print(msg)
             return AllocStatus.NEVER
         if num_free_gpu_blocks - num_required_blocks >= self.watermark_blocks:
             return AllocStatus.OK

@@ -1172,6 +1172,10 @@ class LLMEngine:
             seq_group.maybe_set_first_token_time(now)
             if not seq_group.is_prefill():
                 seq_group.set_last_token_time(now)
+            if solver_overhead:=scheduler_outputs.solver_time:
+                seq_group.set_solver_time(solver_overhead)
+            else: 
+                seq_group.set_solver_time(0)
             request_output = RequestOutputFactory.create(
                 seq_group,
                 self.seq_id_to_seq_group,
