@@ -55,6 +55,14 @@
         "--pause-and-resume",
         "--enable-deposit"
     ],
+    "Ours_fallback": [
+        "--prefetch-mode",        "solver",
+        "--prefetch-distance",    "1",
+        "--flattened-cache",      "true",
+        "--merge-prefetch-buffer", "true",
+        "--pause-and-resume",
+        "--enable-deposit"
+    ],
     "Ours_TP": [
         "--prefetch-mode",        "solver",
         "--prefetch-distance",    "1",

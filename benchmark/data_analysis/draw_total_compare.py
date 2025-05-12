@@ -12,11 +12,12 @@ EXP = "Debug"
 
 # 설정
 #데이터를 가져올 떄 쓸 path에서 mehthod 와 trace의 naming
-static_methods = ["NoPrefetch", "NextLayer", "Static2"]
-dynamic_methods = ["SelectN", "Flexgen", "DistNSingle", "Ours"]
+# static_methods = ["NextLayer", "NoPrefetch"]
+static_methods = ["NoPrefetch"]
+dynamic_methods = ["SelectN", "Flexgen", "Ours"]
 method_list = static_methods + dynamic_methods
 
-trace_list = ["test_fit_static_0", "test_fit_static_2", 
+trace_list = ["test_fit_static_0", 
               "test_shortshort_enough", 
               "test_shortlong_less", "test_shortlong_enough", 
               "test_longshort_less", "test_longshort_enough", 
@@ -25,7 +26,6 @@ trace_list = ["test_fit_static_0", "test_fit_static_2",
             ]
 trace_labels = [
     "StaticFit-0",        # test_fit_static_0
-    "StaticFit-2",        # test_fit_static_2
 
     "Short-Short (Enough)",   # test_shortshort_enough
 
@@ -43,26 +43,28 @@ trace_labels = [
 ]
 
 def get_csv_path(exp: str, method: str, trace: str) -> Path:
-    return Path(f"/home/xinyuema/vllm/outputs/benchmark/{exp}/{method}/{trace}/outputs.csv")
+    return Path(f"/home/heelim/vllm/outputs/benchmark/{exp}/{method}/{trace}/outputs.csv")
 
 # 그래프에 나타나는 label naming
-static_methods_labels = ["No Prefetch", "Static0", "Static2"]
-dynamic_methods_labels = ["Placeholder(SelectN)", "Flexgen", "DistNSingle", "Ours"]
+# static_methods_labels = ["Static0", "No Prefetch", "Static2"]
+# dynamic_methods_labels = ["Placeholder(SelectN)", "Flexgen", "DistNSingle", "Ours"]
+static_methods_labels = ["No Prefetch"]
+dynamic_methods_labels = ["Placeholder(SelectN)", "Flexgen", "Ours"]
 method_labels = static_methods_labels + dynamic_methods_labels
 
 metric_list = ["TBT attainment", "TPOT", "E2E throughput", "# Violations"]
-metric_list_lables = ["TBT attainment\n(%)", "TPOT\n(token/s)", "E2E throughput\n(token/s)", "# Violations\n"]
+metric_list_lables = ["TBT attainment\n(%)", "TPOT\n(s)", "E2E throughput\n(token/s)", "# Violations\n"]
 
 colors = [
     # Static (파란색 계열 - 부드럽고 시인성 높음)
-    "#84C8F4",  # NextLayer - 부드러운 파란색
+    # "#84C8F4",  # NextLayer - 부드러운 파란색
     "#7CD6A4",  # NoPrefetch - 연한 청록색
-    "#63D0C2",  # Static2 - 중간 밝기의 민트
+    # "#63D0C2",  # Static2 - 중간 밝기의 민트
 
     # Dynamic (따뜻한 계열, Ours는 강조)
     "#FAC07D",  # SelectN - 파스텔 오렌지
     "#C59FDB",  # Flexgen - 연한 보라색
-    "#F29E9E",  # DistNSingle - 연한 코랄
+    # "#F29E9E",  # DistNSingle - 연한 코랄
 
     "#E05A4F"   # Ours - 강조용 진한 살구+레드 (단독 대비 확보)
 ]
@@ -277,5 +279,5 @@ fig.legend(
 )
 
 # plt.tight_layout(rect=[0, 0, 1, 0.95])
-plt.savefig("multi_metric_trace_barplot.jpg", format='jpg', bbox_inches="tight")
-plt.savefig("multi_metric_trace_barplot.pdf", format='pdf', bbox_inches="tight")
+plt.savefig("figures/multi_metric_trace_barplot_test.jpg", format='jpg', bbox_inches="tight")
+# plt.savefig("figures/multi_metric_trace_barplot.pdf", format='pdf', bbox_inches="tight")

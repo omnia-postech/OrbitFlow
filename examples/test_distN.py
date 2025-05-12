@@ -304,7 +304,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
             engine.add_request(req_id, prompt_obj, sampling_params)
 
     SLO_THRESHOLD = 0.5 # TBT SLO (seconds per token)
-    sim = DelaySimulator(v_tps=1/SLO_THRESHOLD, slo_ratio=0.5, deposit_enabled=enable_deposit)
+    sim = DelaySimulator(v_tps=1/SLO_THRESHOLD, slo_ratio=0.6, deposit_enabled=enable_deposit)
 
     if csv_path is None:
         csv_path = "metrics.csv"

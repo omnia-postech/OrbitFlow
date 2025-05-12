@@ -12,7 +12,7 @@ OUTPUT_BASE="${ROOT}/outputs/benchmark"
 PYTHON_SCRIPT="${ROOT}/benchmark/data_analysis/plots_per_metric.py"
 
 # 실험 디렉토리
-EXP_LIST=("NotEnough")
+EXP_LIST=("Debug")
 
 # trace list 하드코딩
 TRACE_LIST=("test_trace1_10_not_enough")  # ← 여기에 trace 이름들 적기 (확장자 없이)

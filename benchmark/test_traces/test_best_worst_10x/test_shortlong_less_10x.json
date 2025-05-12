@@ -1,0 +1,20 @@
+{
+  "arrival_pattern":{"type":"DiscreteUniformArrival","params":{"max_step":4000}},
+  "batch_size":4,
+  "max_model_len":49920,
+  "num_gpu_blocks_override":3120,
+  "request_type_probs":[["Short-Long ShareGPT",1.0]],
+  "vocab":[200,30000],
+  "requests":{
+    "request_0":{"category":"Short-Long ShareGPT","input_length":3580,"output_length":15030,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_1":{"category":"Short-Long ShareGPT","input_length":3130,"output_length":13520,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_2":{"category":"Short-Long ShareGPT","input_length":3290,"output_length":24430,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_3":{"category":"Short-Long ShareGPT","input_length":3070,"output_length":22450,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_4":{"category":"Short-Long ShareGPT","input_length":3510,"output_length":21990,"arrival_time":12,"sched_time":1353,"wait_time":1341},
+    "request_5":{"category":"Short-Long ShareGPT","input_length":3540,"output_length":16110,"arrival_time":16,"sched_time":1504,"wait_time":1488},
+    "request_6":{"category":"Short-Long ShareGPT","input_length":3630,"output_length":18320,"arrival_time":19,"sched_time":2246,"wait_time":2227},
+    "request_7":{"category":"Short-Long ShareGPT","input_length":3130,"output_length":27090,"arrival_time":23,"sched_time":2444,"wait_time":2421},
+    "request_8":{"category":"Short-Long ShareGPT","input_length":3900,"output_length":13790,"arrival_time":26,"sched_time":3116,"wait_time":3090},
+    "request_9":{"category":"Short-Long ShareGPT","input_length":3110,"output_length":10160,"arrival_time":32,"sched_time":3553,"wait_time":3521}
+  }
+}
