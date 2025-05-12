@@ -15,7 +15,7 @@ shift
 METHOD_LIST=("$@")      # ← indexes into JSON above
 
 TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/test_best_worst"
-TRACE_LIST=(test_shortlong_less test_shortshort_enough)
+TRACE_LIST=(test_mix4_less)
 
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"

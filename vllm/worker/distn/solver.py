@@ -24,7 +24,7 @@ class Result:
 
 class Solver:
     @staticmethod
-    def solve(requests_list: list[Request], layer_num = 32, block_bandwidth = 103178.0 / 1000, gpu_block_capacity = 49152 / 80, window_ub = 100) -> Optional[list[Result]]:
+    def solve(requests_list: list[Request], layer_num = 32, block_bandwidth = 103178.0 / 1000, gpu_block_capacity = 49152 / 80, window_ub = 1000) -> Optional[list[Result]]:
         requests = [r.id for r in requests_list]
         context_blocks = {r.id: r.context_len_in_blocks for r in requests_list}
         layer_time = {r.id: r.layer_time for r in requests_list}
@@ -47,7 +47,7 @@ class Solver:
         prefetch_dist = model.addVars(requests, lb=1, ub=L+2, vtype=GRB.INTEGER, name='prefetch_dist')
         offload_num = model.addVars(requests, lb=0, ub=L, vtype=GRB.INTEGER, name='offload_num')
 
-        decode_steps = model.addVar(lb=4, ub=window_ub, vtype=GRB.INTEGER, name='decode_steps')
+        decode_steps = model.addVar(lb=32, ub=window_ub, vtype=GRB.INTEGER, name='decode_steps')
 
         offload_num_constr = {(r, i): model.addVar(vtype=GRB.BINARY, name=f"onc_{i}") for i in range(1, L+2) for r in requests}
 
@@ -98,9 +98,6 @@ class Solver:
             model.addGenConstrIndicator(resume[r], False,
                                         actual_time[r] >= M,
                                         name=f"act_off_{r}")
-        
-        for r in requests:
-            model.addConstr(resume[r] == 1, name=f"no offload constraint")
 
 
 # 5.8 ratio * H = deposit_timer (비선형 제약)
