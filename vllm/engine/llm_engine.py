@@ -1377,6 +1377,7 @@ class LLMEngine:
             last_sampled_token_ids = \
                 self._get_last_sampled_token_ids(virtual_engine)
 
+            logger.debug(f"scheduler_outputs: {scheduler_outputs.paused_cpu_seq_groups}")
             execute_model_req = ExecuteModelRequest(
                 seq_group_metadata_list=seq_group_metadata_list,
                 blocks_to_swap_in=scheduler_outputs.blocks_to_swap_in,

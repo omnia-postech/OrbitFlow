@@ -388,6 +388,7 @@ class Scheduler:
         self.swapped: Deque[SequenceGroup] = deque()
         # Contain decode requests that are paused.
         self.paused: Deque[SequenceGroup] = deque()
+        self.paused_copy: Deque[SequenceGroup] = deque()
         # Contain decode requests that are paused due to preemptions. 
         self.paused_cpu: Deque[SequenceGroup] = deque()
         # deposit_map: request_id -> available output tokens
@@ -562,7 +563,7 @@ class Scheduler:
         budget: SchedulingBudget,
         curr_loras: Optional[Set[int]],
         enable_chunking: bool = False,
-    ) -> SchedulerRunningOutputs:
+    ) -> Tuple[SchedulerRunningOutputs, bool]:
         """Schedule sequence groups that are running.
 
         Running queue should include decode and chunked prefill requests.
@@ -604,7 +605,9 @@ class Scheduler:
             ScheduledSequenceGroup] = ret.prefill_seq_groups
         preempted: List[SequenceGroup] = ret.preempted
         swapped_out: List[SequenceGroup] = ret.swapped_out
-        paused: List[SequenceGroup] = ret.paused 
+        paused_cpu: List[SequenceGroup] = ret.paused 
+
+        is_paused_to_resume = False
 
         running_queue = self.running
         assert len(self._async_stopped) == 0
@@ -687,8 +690,8 @@ class Scheduler:
                                                    blocks_to_swap_out)
                     if preempted_mode == PreemptionMode.RECOMPUTE:
                         preempted.append(victim_seq_group)
-                    elif preempted_mode == PreemptionMode.PAUSE:
-                        paused.append(victim_seq_group)
+                    elif preempted_mode == PreemptionMode.PAUSE:                        
+                        paused_cpu.append(victim_seq_group)
                         self.paused_cpu.append(victim_seq_group)
                     else:
                         swapped_out.append(victim_seq_group)
@@ -724,15 +727,18 @@ class Scheduler:
                     curr_loras.add(seq_group.lora_int_id)
 
         if self.cache_config.pause_and_resume:
-            if not self.running and not self.waiting and paused:
-                logger.debug(f"No running or waiting seqs; restoring {len(paused)} paused requests")
-                for pg in list(paused):                    
+            # save self.paused seq ids
+            previous_paused_ids = {seq_group.get_seqs()[0].seq_id for seq_group in self.paused}            
+
+            if not self.running and not self.waiting and self.paused:
+                logger.debug(f"No running or waiting seqs; restoring {len(self.paused)} paused requests")
+                for pg in list(self.paused):                    
                     scheduled = self._scheduled_seq_group_cache[self.cache_id].get_object()
                     scheduled.seq_group = pg
                     scheduled.token_chunk_size = 1
                     ret.decode_seq_groups.append(scheduled)
-                    ret.decode_seq_groups_list.append(pg)
-                paused.clear()
+                    ret.decode_seq_groups_list.append(pg)                    
+                self.paused.clear()
                 self._pause_window_remaining = 0
 
             if self.cache_config.prefetch_mode == "solver":
@@ -741,7 +747,7 @@ class Scheduler:
                         logger.debug(f"Preemption detected, trigger solver")
                         seq_ids = [sg.seq_group.get_seqs()[0].seq_id for sg in ret.decode_seq_groups]                                                
                         blocks_allocated = {seq_id: sg.seq_group.get_seqs()[0].n_blocks for seq_id, sg in zip(seq_ids, ret.decode_seq_groups)}
-                        logger.debug(f"@@@@@@@@@@ total blocks/free_blocks: {self.block_manager.num_total_gpu_blocks//32}/{blocks_allocated} @@@@@@@@@@")
+                        logger.debug(f"total blocks/blocks_allocated: {self.block_manager.num_total_gpu_blocks//32}/{blocks_allocated}")
                         self._pause_window_remaining = 0
 
                     if self._pause_window_remaining > 0:
@@ -756,7 +762,7 @@ class Scheduler:
                                 scheduled.token_chunk_size = 1
                                 ret.decode_seq_groups.append(scheduled)
                                 ret.decode_seq_groups_list.append(pg)
-                            self.paused.clear() 
+                            self.paused.clear()
 
                         request_list = []
                         seq_ids = [sg.seq_group.get_seqs()[0].seq_id for sg in ret.decode_seq_groups]                        
@@ -785,7 +791,7 @@ class Scheduler:
                         block_bytes      = per_token_bytes * self.block_manager.block_size
                         block_bandwidth = block_bytes / bandwidth
                             
-                        logger.debug(f"######## Run solver with request_list: {request_list} ########")
+                        logger.debug(f"######## Run solver ########")
                         match Solver.solve(request_list, block_bandwidth = block_bandwidth, gpu_block_capacity = self.block_manager.num_total_gpu_blocks):
                             case None:
                                 logger.info(f"No optimal solution found.")
@@ -795,6 +801,11 @@ class Scheduler:
                                 self.resume_distances = {sol.id: sol.n for sol in result if sol.resume}
                                 logger.debug(f"Resume distances for each request: {self.resume_distances}")                                       
                                 pause_ids = {sol.id for sol in result if not sol.resume}
+                                resume_ids = {sol.id for sol in result if sol.resume}
+                                                                
+                                if any(id in resume_ids for id in previous_paused_ids):
+                                    is_paused_to_resume = True
+
                                 # NOTE(HONG): we need to pause that are not resume status
                                 # get scheduled_seq_group and seq_group that matches with sol.request_id
                                 # 1. remove scheduled_seq_group from decode_seq_groups
@@ -823,7 +834,7 @@ class Scheduler:
                         if self.deposit_map.get(g.request_id, 0) > 50 # threshold, hard coded
                         and any(seq.status == SequenceStatus.RUNNING for seq in g.get_seqs())
                     ]
-                    candidates.extend(paused) 
+                    candidates.extend(paused_cpu) 
                     if candidates: 
                         # candidates[1].get_seqs()[0].get_output_len()
                         pause_victim = max(candidates, key=lambda g: g.get_seqs()[0].get_output_len())
@@ -831,13 +842,14 @@ class Scheduler:
                                     f"running_queue_size={len(self.running)-1}, paused_queue_size={len(self.paused)+1}")
 
                         self.running.remove(pause_victim)
-                        self.paused.append(pause_victim)
+                        self.paused_cpu.append(pause_victim)
                 ####################### Naive pause #######################
 
         self._scheduler_running_outputs_cache[self.next_cache_id].reset()
         self._scheduled_seq_group_cache[self.next_cache_id].reset()
 
-        return ret
+        logger.debug(f"!!!!!!!!!!! ret.paused: {ret.paused}")
+        return ret, is_paused_to_resume
 
     def _schedule_swapped(
         self,
@@ -1384,7 +1396,7 @@ class Scheduler:
         # NOTE: If `_schedule_prefills` doesn't enable chunking, self.running
         # only contains decode requests, not chunked prefills.
         if len(prefills.seq_groups) == 0:
-            running_scheduled = self._schedule_running(budget,
+            running_scheduled, is_paused_to_resume = self._schedule_running(budget,
                                                        curr_loras,
                                                        enable_chunking=False)
 
@@ -1394,13 +1406,16 @@ class Scheduler:
                     running_scheduled.swapped_out) + len(
                     running_scheduled.paused) == 0
             # if there are no scheduled requests, we can swap in 
-            cond2 = len(running_scheduled.decode_seq_groups) + len(running_scheduled.decode_seq_groups) == 0
+            cond2 = len(running_scheduled.prefill_seq_groups) + len(running_scheduled.decode_seq_groups) == 0
+            logger.debug(f"GU: {cond1}, cond2: {cond2}")
+            logger.debug(f"is_paused_to_resume: {is_paused_to_resume}")
             if cond1 or cond2: 
-                swapped_in = self._schedule_paused(budget, curr_loras)
-                # prioritize swapped requests over preempted requests. 
-                # TODO resume and swap in cannot happend at the same time
-                if len(swapped_in.decode_seq_groups) == 0 and len(swapped_in.prefill_seq_groups) == 0:
-                    swapped_in = self._schedule_swapped(budget, curr_loras)
+                if not is_paused_to_resume:
+                    swapped_in = self._schedule_paused(budget, curr_loras)
+                    # prioritize swapped requests over preempted requests. 
+                    # TODO resume and swap in cannot happend at the same time
+                    if len(swapped_in.decode_seq_groups) == 0 and len(swapped_in.prefill_seq_groups) == 0:
+                        swapped_in = self._schedule_swapped(budget, curr_loras)
 
         assert (budget.num_batched_tokens <=
                 self.scheduler_config.max_num_batched_tokens)
@@ -1441,6 +1456,8 @@ class Scheduler:
 
         ignored_seq_groups = prefills.ignored_seq_groups
         ignored_seq_groups.extend(swapped_in.infeasible_seq_groups)
+
+        logger.debug(f"!!!!!!!!!!!!!!! SchedulerOutputs.paused: {running_scheduled.paused}")
 
         return SchedulerOutputs(
             scheduled_seq_groups=scheduled_seq_groups,
@@ -1922,7 +1939,7 @@ class Scheduler:
         seq_id = seq.seq_id
         seq_layers_to_drop = {seq_id:list(range(self.block_manager.num_attention_layers))}
         freed_gpu_blocks = self.block_manager.free_seq_by_layer(seq_layers_to_drop)
-        logger.critical(f"Preemption by PAUSE: request {seq_group.request_id},")# freed {freed_gpu_blocks} ")
+        logger.critical(f"Preemption by PAUSE: request {seq_group.request_id}, freed {freed_gpu_blocks} ")# freed {freed_gpu_blocks} ")
         return freed_gpu_blocks
     def _swap_in(
         self,
