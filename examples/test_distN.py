@@ -85,7 +85,7 @@ class DelaySimulator:
         logger.debug(f"[on_token] rid={rid} @ {step_time:.6f}: deposit {before} -> {after}")
 
 
-    def pop(self, step_time: float):
+    def pop(self, step_time: float, solver_time: float = 0.0):
         deposits_snapshot = {k: int(v) for k, v in self.deposit.items()}
         pops: list[tuple[str, int]] = []
         rid_log: list[str] = []
@@ -98,7 +98,7 @@ class DelaySimulator:
             
             
             last   = self.last_time.get(rid, step_time)
-            dt     = step_time - last           
+            dt     = step_time - last - solver_time           
             n      = int(dt * v)             
             if n <= 0:
                 continue
@@ -124,7 +124,7 @@ class DelaySimulator:
             pops.append((rid, to_rel))
         # single-line summary
         if rid_log:
-            logger.critical(
+            logger.info(
                 "[pop] deposits=%s | released: %s",
                 deposits_snapshot,
                 " | ".join(rid_log),
@@ -222,6 +222,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
     from vllm.sampling_params import SamplingParams
     logger = logging.getLogger("vllm")
     consecutive_no_output = 0
+    solver_invocations = 0
     # 1) Convert Trace dictionary -> sorted list by arrival_time
     #    E.g. [("request_0", req0), ("request_1", req1), ...]
     #    We'll interpret arrival_time as "arrive_at_step".
@@ -326,7 +327,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
     ])
     if write_header:
         csv_writer.writeheader()
-
+    step_count = 1
     # The main simulation loop
     while queue or request_metadata:
         # 4) Find all requests that have arrival_time <= cumulative_steps
@@ -356,6 +357,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
         step_start = time.time()
         step_outputs = engine.step()
         step_end = time.time()
+        step_count += 1
         elapsed_time_step = step_end - step_start
         overall_wall += elapsed_time_step
         
@@ -379,11 +381,16 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                 decode_wall += elapsed_time_step
                 step_tokens = sum([request_metadata[rid]["prompt_length"] + request_metadata[rid]['decode_length']+1 for rid in decode_rids])
                 profiled_res = PROFILED_A * step_tokens + PROFILED_B 
+                if not hasattr(step_outputs[0], "solver_time"):
+                    solver_time = 0.0
+                else: 
+                    solver_time = step_outputs[0].solver_time
             else: 
                 prefill_rids = list(set([output.request_id for output in step_outputs])) 
                 prefill_wall += elapsed_time_step
                 profiled_res = PROFILED_A * step_tokens + PROFILED_B 
                 step_tokens = sum([request_metadata[rid]["prompt_length"] for rid in prefill_rids])
+                solver_time = step_outputs[0].solver_time
             consecutive_no_output = 0
         else: 
             consecutive_no_output += 1 
@@ -403,11 +410,6 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
 
         for output in step_outputs:
             rid = output.request_id
-            if hasattr(output, "solver_time"):
-                logger.critical("test_distn_solver_time: %s", output.solver_time)
-            else: 
-                logger.critical("test_distn_solver_time: non exist")
-            logger.debug("step %d  rid=%s", cumulative_steps, rid)
             # Prefill
             if len(prefill_rids) > 0:
             # if rid not in received_requests:
@@ -445,7 +447,6 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
             if output.finished:
 
                 if len(output.outputs[0].token_ids) < request_metadata[rid]["expected_output_length"]:
-                    logger.critical(f"{rid} output: {len(output.outputs[0].token_ids)} tokens; {output.outputs[0].token_ids[:20]}")
                     finish_reason = "length_capped"
                 else: 
                     finish_reason = output.outputs[0].finish_reason
@@ -517,7 +518,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
         
         for rid in finished_rids:
             request_metadata.pop(rid)
-        tokens_to_release = sim.pop(step_end)
+        tokens_to_release = sim.pop(step_end,solver_time=solver_time)
         
 
     # 7) After all requests are done, save to CSV

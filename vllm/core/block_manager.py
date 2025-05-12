@@ -945,9 +945,12 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         return block_table
 
     def allocate_seq_by_layer(self, seq_id, layer_id, n_blocks): 
-        
+
         assert(seq_id in self.block_tables) # will this be true for paused or preempt requests 
         cpu_layer_table = self.cpu_block_tables[seq_id][layer_id]
+        if n_blocks == -1: 
+            # FIXME: temporarily use -1 to indicate that the request was preempted
+            n_blocks = len(cpu_layer_table._blocks)
         assert(n_blocks == len(cpu_layer_table._blocks)) 
         token_ids = cpu_layer_table._get_all_token_ids()
         block_table = BlockTable(
@@ -966,7 +969,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         assert(n_blocks == len(block_table._blocks)) 
 
         self.block_tables[seq_id][layer_id] = block_table
-        logger.critical(f"bm check free blocks {self.block_allocator.get_num_free_blocks(Device.GPU)}")
+        # logger.critical(f"bm check free blocks {self.block_allocator.get_num_free_blocks(Device.GPU)}")
         return self.block_tables[seq_id][layer_id].physical_block_ids
     def free_cross(self, seq_group: SequenceGroup) -> None:
         request_id = seq_group.request_id
@@ -1237,10 +1240,10 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         # existing count of blocks to touch.
         num_blocks_touched += self.block_allocator.get_num_full_blocks_touched(
             blocks, device=device)
-        watermark_blocks = 0
-        if device == Device.GPU:
-            watermark_blocks = self.watermark_blocks
-
+        watermark_blocks = 32 
+        # should be able to at least append one more block1 !!!
+        # if device == Device.GPU:
+        #     watermark_blocks = self.watermark_blocks
         if prefetch_distance > -1:
             assert(prefetch_distance > 0 and prefetch_distance < self.num_attention_layers) # does not work for distance == 0
             temp_gpu_map = [0 if (x+1) % prefetch_distance == 0 else 1 for x in range(self.num_attention_layers)]
@@ -1249,9 +1252,11 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
 
         if self.block_allocator.get_num_total_blocks(
                 device) <= num_blocks_touched: # if <, never evicts
+            # logger.critical(f"num_blocks_touched {num_blocks_touched} > num_total_blocks {self.block_allocator.get_num_total_blocks(device)}")
             return (num_blocks_touched, AllocStatus.NEVER)
         elif self.block_allocator.get_num_free_blocks(
                 device) - num_blocks_touched - num_additional >= watermark_blocks:
+            # logger.critical(f"num_blocks_touched {num_blocks_touched} > num_additional {num_additional} free_blocks {self.block_allocator.get_num_free_blocks(device)}")
             return (num_blocks_touched, AllocStatus.OK)
         else:
             return (num_blocks_touched, AllocStatus.LATER)

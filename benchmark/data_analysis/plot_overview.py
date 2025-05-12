@@ -85,8 +85,24 @@ def get_result(metric, log_dict, df):
     elif metric == "slo_attainment_tpot": 
         return ((df["time_per_output_token"] - df["slo_threshold"]) < 0 ).mean()
     elif metric == "slo_99":
-        print(f"{df['decode_time']}")
-        return (df["decode_time"] / df["slo_threshold"]).quantile(0.99)
+        result = []
+        for idx,row in df.iterrows():
+            num_list = eval(row["time_between_tokens"])
+            row["tbt_sorted"] = sorted(num_list, reverse=True)
+            i99 = int(len(row) * 0.99)
+            result.append(row["tbt_sorted"][i99])
+        df["99p"] = result
+        return (df["99p"]).mean()
+    elif metric == "slo_95":
+        for idx,row in df.iterrows():
+            row["tbt_sorted"] = sorted(row["time_between_tokens"], ascending=True)
+        df["95p"][idx] = df["tbt_sorted"].iloc[int(len(df) * 0.95)]
+        return (df["95p"]).mean()
+    elif metric == "slo_90":
+        for idx,row in df.iterrows():
+            row["tbt_sorted"] = row.sorted(row["tbt_sorted"], ascending=True)
+        df["90p"][idx] = df["tbt_sorted"].iloc[int(len(df) * 0.90)]
+        return (df["90p"]).mean()
     elif metric in df.columns:
         return df[metric].mean()
     else:
@@ -127,6 +143,28 @@ for i, val in enumerate(averages):
     if not np.isnan(val):
         ax.text(x[i], val * 1.01, f"{val:.1f}", ha="center", va="bottom", **style["text"])
 
+# ==== draw slo_threshold line if metric is slo_9* ====
+if args.metric.startswith("slo_9"):
+    # Load the first CSV to get the threshold
+    first_csv = os.path.join(
+        args.input_dir, x_labels[0], args.trace, "outputs.csv"
+    )
+    if os.path.exists(first_csv):
+        df0 = pd.read_csv(first_csv)
+        if "slo_threshold" in df0.columns:
+            slo_thresh = df0["slo_threshold"].iloc[0]
+            # ensure the line is within the y‐range
+            ymin, ymax = ax.get_ylim()
+            ax.set_ylim(min(ymin, slo_thresh*0.9), max(ymax, slo_thresh*1.1))
+            ax.axhline(
+                slo_thresh,
+                color="red",
+                linestyle="--",
+                linewidth=2,
+                label="SLO Threshold"
+            )
+            ax.legend(fontsize=style["text"]["fontsize"])
+
 ax.set_xticks(x)
 ax.set_xticklabels(x_labels, fontsize=style["tick"]["fontsize"], rotation=45)
 ax.set_xlabel(args.xlabel, **style["label"])
@@ -144,4 +182,6 @@ ax.tick_params(axis='x', which='both', length=0)
 ax.tick_params(axis='y', which='both', length=0)
 
 os.makedirs(os.path.dirname(args.output), exist_ok=True)
+
+
 plt.savefig(args.output, format='pdf', bbox_inches="tight")

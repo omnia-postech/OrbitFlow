@@ -65,44 +65,45 @@ class DistNBlockAllocator(BlockAllocator):
             self._block_pool = block_pool
     
     def update_by_cache_config(self, cache_config):
-        num_blocks = cache_config.num_gpu_blocks
-        device = "gpu" if 0 in self._all_block_indices else "cpu" 
-        if device == "gpu": # increase size, starts at 0
-            new_blocks = max(self._all_block_indices) + 1
-            for i in range(new_blocks, num_blocks):
-                self._free_block_indices.append(i)
+        pass
+    #     num_blocks = cache_config.num_gpu_blocks
+        # device = "gpu" if 0 in self._all_block_indices else "cpu" 
+        # if device == "gpu": # increase size, starts at 0
+        #     new_blocks = max(self._all_block_indices) + 1
+        #     for i in range(new_blocks, num_blocks):
+        #         self._free_block_indices.append(i)
         
-            self._all_block_indices = frozenset(range(num_blocks))
+        #     self._all_block_indices = frozenset(range(num_blocks))
         
-            self._refcounter.new_indices(self._all_block_indices)
+        #     self._refcounter.new_indices(self._all_block_indices)
         
-            extra_factor = 4
-            self._block_pool.update_block_pool(
-                action='expand',
-                new_size=num_blocks * extra_factor
-            )
+        #     extra_factor = 4
+        #     self._block_pool.update_block_pool(
+        #         action='expand',
+        #         new_size=num_blocks * extra_factor
+        #     )
             
-        elif device == "cpu": # change block_ids only as gpu caches expands 
-            new_offset = num_blocks 
-            self._all_block_indices = frozenset(range(new_offset, new_offset + len(self._all_block_indices)))
-            self._free_block_indices = deque([x + new_offset for x in self._free_block_indices])
+        # elif device == "cpu": # change block_ids only as gpu caches expands 
+        #     new_offset = num_blocks 
+        #     self._all_block_indices = frozenset(range(new_offset, new_offset + len(self._all_block_indices)))
+        #     self._free_block_indices = deque([x + new_offset for x in self._free_block_indices])
             
-            # update refcounter to align with the offset change 
-            old_refcounts = self._refcounter.get_refcounts()
-            self._refcounter = RefCounter(self._all_block_indices)
-            for old_id, count in old_refcounts.items():
-                new_id = old_id + new_offset 
-                for _ in range(count):  
-                    self._refcounter.incr(new_id)
-            self._cow_tracker = CopyOnWriteTracker(
-                refcounter=self._refcounter.as_readonly())
-            # Update block pool
-            self._block_pool.update_block_pool(
-                action='shift',
-                offset=new_offset
-            )
-        else:
-            raise NotImplementedError(f"Unsupported device: {device}")
+        #     # update refcounter to align with the offset change 
+        #     old_refcounts = self._refcounter.get_refcounts()
+        #     self._refcounter = RefCounter(self._all_block_indices)
+        #     for old_id, count in old_refcounts.items():
+        #         new_id = old_id + new_offset 
+        #         for _ in range(count):  
+        #             self._refcounter.incr(new_id)
+        #     self._cow_tracker = CopyOnWriteTracker(
+        #         refcounter=self._refcounter.as_readonly())
+        #     # Update block pool
+        #     self._block_pool.update_block_pool(
+        #         action='shift',
+        #         offset=new_offset
+        #     )
+        # else:
+        #     raise NotImplementedError(f"Unsupported device: {device}")
     def allocate_immutable_block(self,
                                  prev_block: Optional[Block],
                                  token_ids: List[int],
