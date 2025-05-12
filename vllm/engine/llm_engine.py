@@ -1408,6 +1408,19 @@ class LLMEngine:
             cache_config = self.model_executor.driver_worker.cache_engine[0].cache_config # FIXME Hard code again, although when is multiple virtual engine used?
             self.scheduler[0].change_cache_config(cache_config)
 
+            # NOTE(HONG): transfer GPU map to scheduler
+            gpu_blocks_per_layer = {}
+            gpu_layers_per_seq = {}
+            gpu_map = self.model_executor.driver_worker.cache_engine[0].mapping.gpu_map
+            for seq_id, layer_blocks in gpu_map.items():
+                # Count blocks and layers only for non-empty layers
+                # Get blocks from first non-empty layer since blocks per layer are identical
+                gpu_blocks_per_layer[seq_id] = next((len(blocks) for blocks in layer_blocks.values() if blocks), 0)
+                gpu_layers_per_seq[seq_id] = sum(1 for blocks in layer_blocks.values() if blocks)
+
+            self.scheduler[0].gpu_blocks_per_layer = gpu_blocks_per_layer
+            self.scheduler[0].gpu_layers_per_seq = gpu_layers_per_seq
+
             # We need to do this here so that last step's sampled_token_ids can
             # be passed to the next iteration for PP.
             if self.scheduler_config.is_multi_step:
