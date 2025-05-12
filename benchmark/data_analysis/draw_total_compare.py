@@ -51,7 +51,7 @@ dynamic_methods_labels = ["Placeholder(SelectN)", "Flexgen", "DistNSingle", "Our
 method_labels = static_methods_labels + dynamic_methods_labels
 
 metric_list = ["TBT attainment", "TPOT", "E2E throughput", "# Violations"]
-metric_list_lables = ["TBT attainment\n(%)", "TPOT\n(ms)", "E2E throughput\n(token/s)", "# Violations\n"]
+metric_list_lables = ["TBT attainment\n(%)", "TPOT\n(s)", "E2E throughput\n(token/s)", "# Violations\n"]
 
 colors = [
     # Static (파란색 계열 - 부드럽고 시인성 높음)
