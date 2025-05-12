@@ -1,18 +1,18 @@
 {
   "arrival_pattern":{"type":"DiscreteUniformArrival","params":{"max_step":4000}},
   "batch_size":4,
-  "max_model_len":4992,
-  "num_gpu_blocks_override":312,
+  "max_model_len":49920,
+  "num_gpu_blocks_override":3120,
   "request_type_probs":[["distn 2",1.0]],
   "vocab":[200,30000],
   "requests":{
-    "request_0":{"category":"distn=2","input_length":1232,"output_length":510,"arrival_time":0,"sched_time":0,"wait_time":0},
-    "request_1":{"category":"distn=2","input_length":1232,"output_length":510,"arrival_time":0,"sched_time":2732,"wait_time":2732},
-    "request_2":{"category":"distn=2","input_length":1232,"output_length":510,"arrival_time":0,"sched_time":6449,"wait_time":6449},
-    "request_3":{"category":"distn=2","input_length":1232,"output_length":510,"arrival_time":0,"sched_time":9957,"wait_time":9957},
-    "request_4":{"category":"distn=2","input_length":1232,"output_length":510,"arrival_time":927,"sched_time":12221,"wait_time":12150},
-    "request_5":{"category":"distn=2","input_length":1232,"output_length":510,"arrival_time":927,"sched_time":17071,"wait_time":16891},
-    "request_6":{"category":"distn=2","input_length":1232,"output_length":510,"arrival_time":927,"sched_time":19935,"wait_time":19438},
-    "request_7":{"category":"distn=2","input_length":1232,"output_length":510,"arrival_time":927,"sched_time":23581,"wait_time":22820}
+    "request_0":{"category":"distn=2","input_length":12320,"output_length":5100,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_1":{"category":"distn=2","input_length":12320,"output_length":5100,"arrival_time":0,"sched_time":2732,"wait_time":2732},
+    "request_2":{"category":"distn=2","input_length":12320,"output_length":5100,"arrival_time":0,"sched_time":6449,"wait_time":6449},
+    "request_3":{"category":"distn=2","input_length":12320,"output_length":5100,"arrival_time":0,"sched_time":9957,"wait_time":9957},
+    "request_4":{"category":"distn=2","input_length":12320,"output_length":5100,"arrival_time":927,"sched_time":12221,"wait_time":12150},
+    "request_5":{"category":"distn=2","input_length":12320,"output_length":5100,"arrival_time":927,"sched_time":17071,"wait_time":16891},
+    "request_6":{"category":"distn=2","input_length":12320,"output_length":5100,"arrival_time":927,"sched_time":19935,"wait_time":19438},
+    "request_7":{"category":"distn=2","input_length":12320,"output_length":5100,"arrival_time":927,"sched_time":23581,"wait_time":22820}
   }
 }
