@@ -7,7 +7,7 @@
 export CUDA_VISIBLE_DEVICES=$1
 export VLLM_CONFIGURE_LOGGING=1
 LOGGING_LEVEL=CRITICAL
-ROOT="/home/xinyuema/vllm"
+ROOT="$(pwd)/../../"
 
 FIGURE_ONLY=0
 EXP_LIST=(Debug)                         # ← your “experiments”
