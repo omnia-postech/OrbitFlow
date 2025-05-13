@@ -747,6 +747,7 @@ class Scheduler:
                 self.paused.clear()
                 self._pause_window_remaining = 0
 
+            ret.solver_time = 0.0
             if self.cache_config.prefetch_mode == "solver":
                 if ret.decode_seq_groups and len(ret.decode_seq_groups)>0:
                     if self._is_preemption(len(ret.decode_seq_groups)):
