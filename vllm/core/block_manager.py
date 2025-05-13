@@ -945,7 +945,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         return block_table
 
     def allocate_seq_by_layer(self, seq_id, layer_id, n_blocks): 
-
+        # logger.critical(f"bm allocate_seq_by_layer {seq_id} {layer_id} {n_blocks}")
         assert(seq_id in self.block_tables) # will this be true for paused or preempt requests 
         cpu_layer_table = self.cpu_block_tables[seq_id][layer_id]
         if n_blocks == -1: 

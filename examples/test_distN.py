@@ -267,6 +267,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                 "token_timestamps": [],
                 "profiled_tbt": [],
                 "time_between_tokens": [],
+                "solver_time": [],
                 "decode_length": 0,
                 "expected_output_length": req_obj.output_length,
                 "stall_times": [],
@@ -322,7 +323,8 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
         "stall_duration", "decode_length",
         "end_to_end_time", "decode_time",
         "time_per_output_token", "time_between_tokens",
-        "finish_reason", "profiled_tbt", "expected_output_length",
+        "finish_reason", "solver_time",
+        "profiled_tbt", "expected_output_length",
         "stall_durations",
     ])
     if write_header:
@@ -390,9 +392,10 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                 prefill_wall += elapsed_time_step
                 profiled_res = PROFILED_A * step_tokens + PROFILED_B 
                 step_tokens = sum([request_metadata[rid]["prompt_length"] for rid in prefill_rids])
-                solver_time = step_outputs[0].solver_time
+                solver_time = 0.0
             consecutive_no_output = 0
         else: 
+            solver_time = 0.0
             consecutive_no_output += 1 
             if consecutive_no_output > 5:
                 # pop everything in request_metadata into finished_requests 
@@ -406,7 +409,8 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                     logger.critical(f"[finish] removing last_time entry for {rid}")
                     print(f"Failure (due to memory limits): {len(rids)}")
                 break
-
+        
+        assert(elapsed_time_step > solver_time) 
 
         for output in step_outputs:
             rid = output.request_id
@@ -434,6 +438,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                 # NOTE(HONG): not useing output.metrics.last_token_time since we are using step_time
                 request_metadata[rid]["token_timestamps"].append(step_end)
                 request_metadata[rid]["time_between_tokens"].append(elapsed_time_step)
+                request_metadata[rid]["solver_time"].append(solver_time)
                 request_metadata[rid]["profiled_tbt"].append(profiled_res)
                 request_metadata[rid]["decode_length"] += 1
                 finished_tokens += 1
@@ -496,6 +501,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                     "time_per_output_token": avg_token_latency,
                     "finish_reason": finish_reason,
                     # "time_between_tokens": json.dumps(per_token_latencies),
+                    "solver_time": json.dumps(request_metadata[rid]["solver_time"]),
                     "time_between_tokens": json.dumps(request_metadata[rid]["time_between_tokens"]),
                     "profiled_tbt": request_metadata[rid]["profiled_tbt"],
                     "expected_output_length": request_metadata[rid]["expected_output_length"],
