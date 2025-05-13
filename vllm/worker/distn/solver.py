@@ -2,6 +2,9 @@ import math
 import gurobipy as gp
 from gurobipy import GRB
 from typing import Optional, List
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 # ────────────────── Data-classes ──────────────────
@@ -64,7 +67,7 @@ class Solver:
 
         offload_num_constr = {(r, i): model.addVar(vtype=GRB.BINARY, name=f"onc_{i}") for i in range(1, L+2) for r in requests}
 
-        move_blocks   = model.addVars(requests, lb=0, ub=L, vtype=GRB.INTEGER, name='move_blocks')
+        # move_blocks   = model.addVars(requests, lb=0, ub=L, vtype=GRB.INTEGER, name='move_blocks')
 
         onc = {(r, i): model.addVar(vtype=GRB.BINARY, name=f"onc_{r}_{i}")
                for r in requests for i in range(1, L + 2)}
@@ -75,7 +78,7 @@ class Solver:
             model.addConstr(gp.quicksum(offload_num_constr[(r, i)] for i in range(1, L+2)) == 1)
             model.addConstr(gp.quicksum(offload_num_constr[(r, i)] * i for i in range(1, L+2)) == prefetch_dist[r])
             model.addConstr(gp.quicksum(offload_num_constr[(r, i)] * floor_val[i] for i in range(1, L+2)) == offload_num[r])
-            model.addConstr(move_blocks[r] >= (L - offload_num[r]) - gpu_layers[r], name=f"mv_pos_{r}")
+            # model.addConstr(move_blocks[r]ㄴ >= (L - offload_num[r]) - gpu_layers[r], name=f"mv_pos_{r}")
 
         batch_layer  = model.addVar(lb=0, name='batch_layer')
         comm_time    = model.addVar(lb=0, name='comm_time')
@@ -89,7 +92,7 @@ class Solver:
 
 # 5.2 batch_layer = max(layer_time[r] * resume[r])
         for r in requests:
-            model.addConstr(batch_layer >= layer_time[r] * resume[r],
+            model.addConstr(batch_layer >= gp.quicksum(layer_time[r] * resume[r] for r in requests),
                             name=f"batch_layer_{r}")
 
         model.addConstr(1 <= gp.quicksum(resume[r] for r in requests), name="should execute more than 1")
@@ -107,14 +110,14 @@ class Solver:
         model.addConstr(comp_time == batch_layer * L, name="comp_time_def")
 
 # 5.4.1 move_overhead = max(0, move_blocks[r] * context_blocks[r] / block_bandwidth)        
-        move_overhead = model.addVar(lb=0, name='move_overhead')
-        model.addConstr(
-        move_overhead == gp.quicksum(
-            resume[r] * move_blocks[r] * context_blocks[r]
-            for r in requests
-        ) / block_bandwidth,
-        name="move_overhead_def"
-        )
+        # move_overhead = model.addVar(lb=0, name='move_overhead')
+        # model.addConstr(
+        # move_overhead == gp.quicksum(
+        #     resume[r] * move_blocks[r] * context_blocks[r]
+        #     for r in requests
+        # ) / block_bandwidth,
+        # name="move_overhead_def"
+        # )
 
 # 5.5 token_time = max(comm_time, comp_time)
         model.addGenConstrMax(token_time, [comm_time, comp_time], name="token_time_max")
@@ -148,7 +151,7 @@ class Solver:
 
         # 🆕 goodput 분모: token_time + move_overhead
         eff_latency = model.addVar(lb=0, name='effective_latency')
-        model.addConstr(eff_latency == token_time + move_overhead,
+        model.addConstr(eff_latency == token_time,
                         name="eff_lat_def")
 
 # === 6. 목적함수 및 최적화 ===
@@ -185,7 +188,16 @@ class Solver:
         else:
             return None
 
-class BetterSolver:
+class BetterSolver:    
+    @staticmethod
+    def _pow2_distances(L: int) -> list[int]:
+        """L=32 → [1,2,4,8,16,32]"""
+        out, v = [], 1
+        while v <= L:
+            out.append(v)
+            v <<= 1
+        return out
+
     @staticmethod
     def solve(requests_list: list[Request], layer_num = 32, block_bandwidth = 103178.0 / 1000, gpu_block_capacity = 49152 / 80, window_ub = 1000) -> Optional[list[Result]]:
         requests = [r.id for r in requests_list]
@@ -195,45 +207,61 @@ class BetterSolver:
         SLO = {r.id: r.slo for r in requests_list}
         gpu_layers = {r.id: r.gpu_layers_on_gpu for r in requests_list}
 
-        L = layer_num 
+        L = layer_num
+        cand_i = BetterSolver._pow2_distances(L)
         M = 1e6                     # big-M
 
 # === 2. floor/ceil 값 미리 계산 ===
-        floor_val = {n: math.floor(L / n) for n in range(1, L+2)}
+        floor_val  = {i: L // i for i in cand_i}
 
 # === 3. 모델 생성 및 설정 ===
         model = gp.Model('block_solver')
         model.Params.NonConvex = 2    # 비선형 곱 제약 허용
 
-        prefetch_dist = model.addVars(requests, lb=1, ub=L+2, vtype=GRB.INTEGER, name='prefetch_dist')
+        prefetch_dist = model.addVars(requests, lb=1, ub=L+1, vtype=GRB.INTEGER, name='prefetch_dist')
         offload_num = model.addVars(requests, lb=0, ub=L, vtype=GRB.INTEGER, name='offload_num')
 
         decode_steps = model.addVar(lb=32, ub=window_ub, vtype=GRB.INTEGER, name='decode_steps')
 
-        offload_num_constr = {(r, i): model.addVar(vtype=GRB.BINARY, name=f"onc_{i}") for i in range(1, L+2) for r in requests}
+        # ▶ distance 후보를 cand_i 로만 제한 ◀
+        z = {(r, i): model.addVar(vtype=GRB.BINARY, name=f"z_{r}_{i}")
+             for r in requests for i in cand_i}
 
         move_blocks   = model.addVars(requests, lb=0, ub=L, vtype=GRB.INTEGER, name='move_blocks')
 
         print(floor_val)
 
-        for r in requests:
-            model.addConstr(gp.quicksum(offload_num_constr[(r, i)] for i in range(1, L+2)) == 1)
-            model.addConstr(gp.quicksum(offload_num_constr[(r, i)] * i for i in range(1, L+2)) == prefetch_dist[r])
-            model.addConstr(gp.quicksum(offload_num_constr[(r, i)] * floor_val[i] for i in range(1, L+2)) == offload_num[r])
-            model.addConstr(move_blocks[r] >= (L - offload_num[r]) - gpu_layers[r], name=f"mv_pos_{r}")
+        # for r in requests:
+        #     # model.addConstr(gp.quicksum(offload_num_constr[(r, i)] for i in range(1, L+2)) == 1)
+        #     # model.addConstr(gp.quicksum(offload_num_constr[(r, i)] * i for i in range(1, L+2)) == prefetch_dist[r])
+        #     # model.addConstr(gp.quicksum(offload_num_constr[(r, i)] * floor_val[i] for i in range(1, L+2)) == offload_num[r])
+        #     model.addConstr(move_blocks[r] >= (L - offload_num[r]) - gpu_layers[r], name=f"mv_pos_{r}")
 
-        batch_layer  = model.addVar(lb=0, name='batch_layer')
+        # batch_layer  = model.addVar(lb=0, name='batch_layer')
+        batch_layer = sum(layer_time[r] for r in requests)
         comm_time    = model.addVar(lb=0, name='comm_time')
-        comp_time    = model.addVar(lb=0, name='comp_time')
+        comp_time    = batch_layer * L
         token_time   = model.addVar(lb=0, name='token_time')
         ratio        = model.addVars(requests, lb=0, name='ratio')
         slo_fail_per_decode     = model.addVars(requests, lb=0, name='slo_fail_per_decode')
 
-# === 5. 제약식 ===
 
         for r in requests:
-            model.addConstr(batch_layer >= layer_time[r],
-                            name=f"batch_layer_{r}")
+            model.addConstr(gp.quicksum(z[r, i] for i in cand_i) == 1)
+            model.addConstr(prefetch_dist[r] ==
+                        gp.quicksum(i * z[r, i] for i in cand_i))
+            model.addConstr(offload_num[r] ==
+                        gp.quicksum(floor_val[i] * z[r, i] for i in cand_i))
+
+            # move_blocks ≥ (L-offload)−(GPU에 이미 남아있는 레이어)
+            model.addConstr(move_blocks[r] >= (L - offload_num[r]) - gpu_layers[r])
+# === 5. 제약식 ===
+
+        # for r in requests:
+        #     model.addConstr(batch_layer >= layer_time[r],
+        #                     name=f"batch_layer_{r}")
+
+
 # 5.3 comm_time 정의: 필요한 블록 수 ÷ block_bandwidth
         model.addConstr(
             comm_time == gp.quicksum(
@@ -244,7 +272,8 @@ class BetterSolver:
         )
 
 # 5.4 comp_time = batch_layer * L
-        model.addConstr(comp_time == batch_layer * L, name="comp_time_def")
+        # model.addConstr(comp_time == batch_layer * L, name="comp_time_def")
+
 
 # 5.4.1 move_overhead = max(0, move_blocks[r] * context_blocks[r] / block_bandwidth)        
         move_overhead = model.addVar(lb=0, name='move_overhead')
@@ -263,11 +292,13 @@ class BetterSolver:
 
 # 5.8 ratio * H = deposit_timer (비선형 제약)
         for r in requests:
-            model.addQConstr(ratio[r] * batch_layer == decode_steps * SLO[r], name=f"ratio_qc_{r}")
+            model.addQConstr(ratio[r] == decode_steps * SLO[r] / batch_layer, name=f"ratio_qc_{r}")
 
         for r in requests:
             model.addConstr(slo_fail_per_decode[r] * decode_steps >= decode_steps - ratio[r] - deposit_count[r],
                             name=f"slo_fail_{r}")
+
+    
 
 # 5.11 GPU 메모리 제약: 필요한 블록 수 ≤ gpu_block_capacity
         model.addConstr(
@@ -293,10 +324,9 @@ class BetterSolver:
         model.Params.TimeLimit = 0.1
         model.optimize()        
 
-# === 7. 결과 출력 ===
-        if model.Status == GRB.TIME_LIMIT: 
-            return None
-        if model.Status == GRB.OPTIMAL or model.Status == GRB.SUBOPTIMAL:
+# === 7. 결과 출력 ===        
+        if model.Status == GRB.OPTIMAL or model.Status == GRB.SUBOPTIMAL or model.Status == GRB.TIME_LIMIT:
+            logger.info(f"Status: {model.Status}")
             print("\n--- Optimal Solution ---")
             print(" r | resume | offload_num | slo_fail | actual_time")
             print("---|--------|-------------|----------|-------------")
@@ -311,183 +341,26 @@ class BetterSolver:
             ])}/{gpu_block_capacity}""")
             print(f"decode_steps: {decode_steps.X}")
             print(f"comm time: {comm_time.X}")
-            print(f"comp time: {comp_time.X}")
+            print(f"comp time: {comp_time}")
 
             result = []
 
             for r in requests:
-                result.append(Result(r, 1, -1 if offload_num[r].X == 0 else int(prefetch_dist[r].X), int(offload_num[r].X), slo_fail_per_decode[r].X, batch_layer.X, decode_steps.X))
+                result.append(Result(r, 1, -1 if offload_num[r].X == 0 else int(prefetch_dist[r].X), int(offload_num[r].X), slo_fail_per_decode[r].X, batch_layer, decode_steps.X))
 
             return result
         else:
             return None
-
-
-
-class SolverV2:
-    """
-    * distance 후보를 1·2·4·8·… 식으로 축소하여
-      ‟같은 offload_num 을 만드는 작은 distance” 를 제거
-    * KeyError 수정
-    * move_overhead 포함 여부를 플래그로 제어
-    """
-
-    # ---------- helper --------------------------------------------------
-    @staticmethod
-    def _build_floor_map(L: int) -> tuple[dict[int, int], List[int]]:
-        """
-        Returns
-        -------
-        floor_val : dict  (i -> ⌊L/i⌋)         # 모든 i ∈ 1..L+1
-        valid_i   : list  (1,2,4,8,…,L)        # **중복 offload 제거된** distance
-        """
-        raw = {i: L // i for i in range(1, L + 2)}
-
-        # offload_num 동일하면 가장 큰 distance 만 남긴다
-        picked: dict[int, int] = {}
-        for i, v in raw.items():          # v = offload_num
-            if v not in picked or i > picked[v]:
-                picked[v] = i
-        valid_i = sorted(picked.values())  # ex) [1,2,4,8,16,32]
-
-        return raw, valid_i
-
-    # ---------- main ----------------------------------------------------
-    @staticmethod
-    def solve(
-        requests_list: List[Request],
-        *,
-        layer_num: int = 32,
-        block_bandwidth: float = 103178.0 / 1000,   # blocks / ms
-        gpu_block_capacity: float = 49152 / 80,
-        window_ub: int = 1000,
-        use_move_overhead: bool = False,
-        verbose: bool = False,
-    ) -> Optional[List[Result]]:
-
-        # 1. 입력 파싱 ----------------------------------------------------
-        ids = [r.id for r in requests_list]
-        ctx_blk = {r.id: r.context_len_in_blocks for r in requests_list}
-        layer_t = {r.id: r.layer_time            for r in requests_list}
-        deposit = {r.id: r.deposit_count         for r in requests_list}
-        slo     = {r.id: r.slo                   for r in requests_list}
-        gpu_L   = {r.id: r.gpu_layers_on_gpu     for r in requests_list}
-
-        L = layer_num
-        floor_val, valid_i = SolverV2._build_floor_map(L)
-
-        # 2. Gurobi 모델 --------------------------------------------------
-        m = gp.Model("better_solver")
-        m.Params.NonConvex = 2
-        if not verbose:
-            m.Params.OutputFlag = 0
-
-        # 3. 변수 ---------------------------------------------------------
-        # distance (prefetch_dist)
-        d = m.addVars(ids, lb=1, ub=L + 1, vtype=GRB.INTEGER, name="dist")
-        # offload_num
-        off = m.addVars(ids, lb=0, ub=L, vtype=GRB.INTEGER, name="off")
-        # one-hot 선택 변수 (valid_i 에 한정)
-        z = {(r, i): m.addVar(vtype=GRB.BINARY, name=f"z_{r}_{i}")
-             for r in ids for i in valid_i}
-
-        # 창(window) 길이
-        H = m.addVar(lb=32, ub=window_ub, vtype=GRB.INTEGER, name="decode_steps")
-
-        # 시간 관련
-        batch_layer = m.addVar(lb=0, name="batch_layer")
-        comm_time   = m.addVar(lb=0, name="comm_time")
-        comp_time   = m.addVar(lb=0, name="comp_time")
-        token_time  = m.addVar(lb=0, name="token_time")
-        if use_move_overhead:
-            mv_over = m.addVar(lb=0, name="move_overhead")
-
-        ratio = m.addVars(ids, lb=0, name="ratio")
-        fail  = m.addVars(ids, lb=0, name="slo_fail_per_decode")
-
-        # 4. distance ↔ offload 매핑 -------------------------------------
-        for r in ids:
-            m.addConstr(gp.quicksum(z[r, i] for i in valid_i) == 1)
-            m.addConstr(gp.quicksum(i * z[r, i] for i in valid_i) == d[r])
-            m.addConstr(gp.quicksum(floor_val[i] * z[r, i]
-                                    for i in valid_i) == off[r])
-
-        # 5. 시간 계산 ----------------------------------------------------
-        for r in ids:
-            m.addConstr(batch_layer >= layer_t[r])
-
-        m.addConstr(
-            comm_time == gp.quicksum(off[r] * ctx_blk[r] for r in ids)
-            / block_bandwidth)
-
-        m.addConstr(comp_time == batch_layer * L)
-        m.addGenConstrMax(token_time, [comm_time, comp_time])
-
-        if use_move_overhead:
-            mv_blocks = m.addVars(ids, lb=0, vtype=GRB.INTEGER, name="mv_blocks")
-            for r in ids:
-                m.addConstr(mv_blocks[r] >= (L - off[r]) - gpu_L[r])
-            m.addConstr(
-                mv_over == gp.quicksum(mv_blocks[r] * ctx_blk[r] for r in ids)
-                / block_bandwidth)
-
-        # 6. SLO 실패 계산 -----------------------------------------------
-        for r in ids:
-            m.addQConstr(ratio[r] * batch_layer == H * slo[r])
-            m.addConstr(fail[r] * H >= H - ratio[r] - deposit[r])
-
-        # 7. 메모리 제약 ---------------------------------------------------
-        m.addConstr(
-            gp.quicksum((L - off[r]) * ctx_blk[r] for r in ids)
-            <= gpu_block_capacity)
-
-        m.addConstr(fail.sum() <= 1)
-
-        # 8. 목적식 --------------------------------------------------------
-        eff_lat = m.addVar(lb=0, name="effective_latency")
-        if use_move_overhead:
-            m.addConstr(eff_lat * H == token_time * H + mv_over)
-        else:
-            m.addConstr(eff_lat == token_time)
-
-        goodput = m.addVar(lb=0, name="obj")
-        m.addConstr(goodput * eff_lat == len(ids) - fail.sum())
-        m.setObjective(goodput, GRB.MAXIMIZE)
-
-        # 9. 최적화 --------------------------------------------------------
-        m.optimize()
-        if m.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL, GRB.TIME_LIMIT):
-            return None
-
-        # 10. 결과 변환 ----------------------------------------------------
-        window = int(H.X)
-        results: List[Result] = []
-        for r in ids:
-            results.append(Result(
-                id          = r,
-                resume      = True,
-                n           = int(d[r].X),
-                offload_num = int(off[r].X),
-                slo_fail    = fail[r].X,
-                actual_time = float(batch_layer.X),
-                window      = window,
-            ))
-        return results
-
 if __name__ == "__main__":
-    requests = ['r1', 'r2', 'r3', 'r4']
-    context_blocks   = {'r1':  int(300 / 16), 'r2': int(200 / 16), 'r3':  int(150 / 16), 'r4': int(350 / 16)}  # 각 요청에 대해 읽어야 할 메타데이터 블록 수
-    layer_time       = {'r1': 0.12, 'r2': 0.12, 'r3': 0.19, 'r4': 0.12}  # ms
-    deposit_count    = {'r1': 0,   'r2': 3,   'r3': 100, 'r4': 0}
-    SLO              = {'r1': 2,  'r2': 1,  'r3': 3, 'r4': 4}   # ms
-
-    requests_list = []
-
-    for id in requests:
-        requests_list.append(Request(id, context_blocks[id], layer_time[id], deposit_count[id], SLO[id]))
-
-    match Solver.solve(requests_list, gpu_block_capacity = 40152 / 40):
-        case None:
-            print("No optimal solution found.")
-        case result:
-            pass
+    # Test the Solver class
+    requests = [
+        Request(id="req1", context_len_in_blocks=10, layer_time=0.5, deposit_count=2, slo=1.0, gpu_layers_on_gpu=4),
+        Request(id="req2", context_len_in_blocks=20, layer_time=0.6, deposit_count=3, slo=1.5, gpu_layers_on_gpu=5)
+    ]
+    solver = BetterSolver()
+    result = solver.solve(requests)
+    if result:
+        for res in result:
+            print(res.__dict__)
+    else:
+        print("No solution found.") 

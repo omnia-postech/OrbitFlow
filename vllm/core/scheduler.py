@@ -18,7 +18,7 @@ from vllm.sequence import (Sequence, SequenceData, SequenceGroup,
                            SequenceStatus)
 from vllm.utils import Device, PyObjectCache
 from gurobipy import GRB
-from vllm.worker.distn.solver import Solver, Result, Request, BetterSolver, SolverV2
+from vllm.worker.distn.solver import Solver, Result, Request, BetterSolver
 
 logger = init_logger(__name__)
 
@@ -863,7 +863,7 @@ class Scheduler:
                     block_bandwidth = block_bytes / bandwidth
 
                     solver_start = time.time()                
-                    sol = BetterSolver.solve(                 # 💡 “resume=1” 강제 변형판
+                    sol = Solver.solve(                 # 💡 “resume=1” 강제 변형판
                         request_list,
                         block_bandwidth=block_bandwidth,
                         gpu_block_capacity=self.block_manager.num_total_gpu_blocks,                        
