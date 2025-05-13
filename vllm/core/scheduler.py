@@ -793,8 +793,9 @@ class Scheduler:
 
             # TODO(HONG): 가능성은 작지만 pause된 request들을 한꺼번에 빼는 경우 memory가 부족할 수 있음. 
             # TODO(HONG): self.running 대신 ret.decode_seq_groups 으로 해야함. 
-            if not self.running and not self.waiting and self.paused:
-                logger.info(f"No running or waiting seqs; restoring {len(self.paused)} paused requests")
+            # (xinyue) this puts back the paused right away, wait until some of the running batch finishes 
+            if (len(ret.decode_seq_groups)) > 0 and not self.waiting and self.paused:
+                logger.critical(f"No running or waiting seqs; restoring {len(self.paused)} paused requests")
                 for pg in list(self.paused):
                     scheduled = self._scheduled_seq_group_cache[self.cache_id].get_object()
                     scheduled.seq_group = pg
@@ -829,25 +830,37 @@ class Scheduler:
                 self.decode_window_left == 0
             )
 
-            if need_solver or signature_changed:
+            if need_solver:
                 if self.paused:
-                            logger.info(f"RESTORE-PAUSED: bringing back {len(self.paused)} paused requests into decode candidates")
-                            for pg in list(self.paused):
-                                scheduled = self._scheduled_seq_group_cache[self.cache_id].get_object()
-                                scheduled.seq_group = pg
-                                scheduled.token_chunk_size = 1
-                                ret.decode_seq_groups.append(scheduled)
-                                ret.decode_seq_groups_list.append(pg)
-                            self.paused.clear()
+                    logger.critical(f"RESTORE-PAUSED: bringing back {len(self.paused)} paused requests into decode candidates")
+                    for pg in list(self.paused):
+                        scheduled = self._scheduled_seq_group_cache[self.cache_id].get_object()
+                        scheduled.seq_group = pg
+                        scheduled.token_chunk_size = 1
+                        ret.decode_seq_groups.append(scheduled)
+                        ret.decode_seq_groups_list.append(pg)
+                    self.paused.clear()
                 while True:
                     # TODO(HONG): 이 부분 if not signature_changed가 말이 되는지 확인 필요. 
                     # pause-반복 오버헤드 방지: 동일 signature 이면 기존 pause 유지
-                    decode_candidates = [
-                        sg for sg in ret.decode_seq_groups
-                        if sg.seq_group.request_id not in self.paused_solver_ids
-                    ] if not signature_changed else ret.decode_seq_groups                    
-                    logger.info(f"[Solver] decode_candidates: {decode_candidates}")
-                    logger.info(f"signature_changed={signature_changed}, ret.decode_seq_groups: {ret.decode_seq_groups}")
+                    if not signature_changed: # signiture did not change 
+                        logger.critical(f"skip prev paused {self.paused_solver_ids}")
+                        decode_candidates = [
+                            sg for sg in ret.decode_seq_groups
+                            if sg.seq_group.request_id not in self.paused_solver_ids
+                        ] 
+                        # put back in paused or cache engine will allocate for it 
+                        for sg in decode_candidates:
+                            if sg.seq_group.request_id in self.paused_solver_ids:
+                                self.paused.append(victim_sg.seq_group)
+                        new_decodes = decode_candidates
+                        ret.decode_seq_groups = new_decodes
+                        ret.decode_seq_groups_list = [sg.seq_group for sg in new_decodes]           
+                    else: 
+                        decode_candidates=ret.decode_seq_groups
+                        self.paused_solver_ids.clear() # cant clear this upon ANY VALID plan cause they can be with in the same step after fall back
+                    # logger.critical(f"[Solver] decode_candidates: {decode_candidates}")
+                    # logger.critical(f"signature_changed={signature_changed}, ret.decode_seq_groups: {ret.decode_seq_groups}")
 
                     if not decode_candidates:
                         logger.info(f"No decode candidates for solver")
@@ -861,7 +874,7 @@ class Scheduler:
                     per_token_bytes = 2 * 2 * head_size * num_kv_heads
                     block_bytes = per_token_bytes * self.block_manager.block_size
                     block_bandwidth = block_bytes / bandwidth
-
+                    # logger.critical(f"solver_input: {request_list}")
                     solver_start = time.time()                
                     sol = BetterSolver.solve(                 # 💡 “resume=1” 강제 변형판
                         request_list,
@@ -873,7 +886,8 @@ class Scheduler:
 
                     # ---------- ② infeasible → victim pause ------------------------
                     if sol is None:                           # ② infeasible ⇒ fallback
-                        logger.info(f"Solver infeasible ❌, decode_candidates={decode_candidates}")
+                        logger.critical(f"Solver infeasible ❌")
+                        # logger.info(f"Solver infeasible ❌, decode_candidates={decode_candidates}")
                         # 가장 긴 요청 1개 선택 
                         # TODO(HONG): tie-break 구현
                         victim_sg = max(
@@ -883,8 +897,9 @@ class Scheduler:
                             )
                         )
                         vid = victim_sg.seq_group.request_id
-                        logger.info(f"[Solver-fallback] pause '{vid}' (longest length)")
+                        logger.critical(f"[Solver-fallback] pause '{vid}' (longest length)")
 
+                        decode_ids = {sg.seq_group.get_seqs()[0].seq_id for sg in ret.decode_seq_groups}
                         self.paused.append(victim_sg.seq_group)
                         self.paused_solver_ids.add(vid)
 
@@ -899,8 +914,7 @@ class Scheduler:
                         # ---------- ② feasible -----------------------------------------
                         self.decode_window_left = sol[0].window
                         self.resume_distances = {s.id: s.n for s in sol}                        
-                        self.paused_solver_ids.clear()
-                        logger.info(
+                        logger.critical(
                             f"Solver feasible ✔  window={self.decode_window_left}  "
                             f"resume_distances={self.resume_distances}"
                         )
