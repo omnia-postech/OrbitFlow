@@ -1,29 +1,30 @@
 import math
 import gurobipy as gp
 from gurobipy import GRB
-from typing import Optional
+from typing import Optional, List
 
+
+# ────────────────── Data-classes ──────────────────
 class Request:
-    def __init__(self, id: str, context_len_in_blocks: int,
-                 layer_time: float, deposit_count: int, slo: float,
-                 gpu_layers_on_gpu: int):
+    def __init__(self, id: str, context_len_in_blocks: int, layer_time: float,
+                 deposit_count: int, slo: float, gpu_layers_on_gpu: int):
         self.id = id
         self.context_len_in_blocks = context_len_in_blocks
         self.layer_time = layer_time
         self.deposit_count = deposit_count
         self.slo = slo
-        # self.gpu_blocks_per_layer = gpu_blocks_per_layer
         self.gpu_layers_on_gpu = gpu_layers_on_gpu
 
+
 class Result:
-    def __init__(self, id: str, resume: bool, n: int, offload_num: int, slo_fail: float, actual_time: float, window: int):
+    def __init__(self, id: str, resume: bool, n: int, offload_num: int,
+                 slo_fail: float, actual_time: float, window: int):
         self.id = id
-        self.n = n
         self.resume = resume
-        self.offload_num = offload_num 
+        self.n = n                  # (=prefetch_dist, 즉 distance)
+        self.offload_num = offload_num
         self.slo_fail = slo_fail
         self.actual_time = actual_time
-        
         self.window = window
 
 class Solver:
@@ -52,7 +53,9 @@ class Solver:
         model.Params.NonConvex = 2    # 비선형 곱 제약 허용
 
 # === 4. 의사결정 변수 ===
-        resume        = model.addVars(requests, vtype=GRB.BINARY, name='resume')
+        # MOD: resume 고정(lb=ub=1)  -------------------------------
+        # resume        = model.addVars(requests, vtype=GRB.BINARY, name='resume')
+        resume = model.addVars(requests, lb=1, ub=1, vtype=GRB.BINARY, name='resume')
 
         prefetch_dist = model.addVars(requests, lb=1, ub=L+2, vtype=GRB.INTEGER, name='prefetch_dist')
         offload_num = model.addVars(requests, lb=0, ub=L, vtype=GRB.INTEGER, name='offload_num')
@@ -61,8 +64,10 @@ class Solver:
 
         offload_num_constr = {(r, i): model.addVar(vtype=GRB.BINARY, name=f"onc_{i}") for i in range(1, L+2) for r in requests}
 
-        move_blocks   = model.addVars(requests, lb=0, ub=L,
-                                      vtype=GRB.INTEGER, name='move_blocks')
+        move_blocks   = model.addVars(requests, lb=0, ub=L, vtype=GRB.INTEGER, name='move_blocks')
+
+        onc = {(r, i): model.addVar(vtype=GRB.BINARY, name=f"onc_{r}_{i}")
+               for r in requests for i in range(1, L + 2)}
 
         print(floor_val)
 
@@ -188,6 +193,7 @@ class BetterSolver:
         layer_time = {r.id: r.layer_time for r in requests_list}
         deposit_count = {r.id: r.deposit_count for r in requests_list}
         SLO = {r.id: r.slo for r in requests_list}
+        gpu_layers = {r.id: r.gpu_layers_on_gpu for r in requests_list}
 
         L = layer_num 
         M = 1e6                     # big-M
@@ -206,12 +212,15 @@ class BetterSolver:
 
         offload_num_constr = {(r, i): model.addVar(vtype=GRB.BINARY, name=f"onc_{i}") for i in range(1, L+2) for r in requests}
 
+        move_blocks   = model.addVars(requests, lb=0, ub=L, vtype=GRB.INTEGER, name='move_blocks')
+
         print(floor_val)
 
         for r in requests:
             model.addConstr(gp.quicksum(offload_num_constr[(r, i)] for i in range(1, L+2)) == 1)
             model.addConstr(gp.quicksum(offload_num_constr[(r, i)] * i for i in range(1, L+2)) == prefetch_dist[r])
             model.addConstr(gp.quicksum(offload_num_constr[(r, i)] * floor_val[i] for i in range(1, L+2)) == offload_num[r])
+            model.addConstr(move_blocks[r] >= (L - offload_num[r]) - gpu_layers[r], name=f"mv_pos_{r}")
 
         batch_layer  = model.addVar(lb=0, name='batch_layer')
         comm_time    = model.addVar(lb=0, name='comm_time')
@@ -237,6 +246,16 @@ class BetterSolver:
 # 5.4 comp_time = batch_layer * L
         model.addConstr(comp_time == batch_layer * L, name="comp_time_def")
 
+# 5.4.1 move_overhead = max(0, move_blocks[r] * context_blocks[r] / block_bandwidth)        
+        move_overhead = model.addVar(lb=0, name='move_overhead')
+        model.addConstr(
+        move_overhead == gp.quicksum(
+            move_blocks[r] * context_blocks[r]
+            for r in requests
+        ) / block_bandwidth,
+        name="move_overhead_def"
+        )
+
 # 5.5 token_time = max(comm_time, comp_time)
         model.addGenConstrMax(token_time, [comm_time, comp_time], name="token_time_max")
 
@@ -258,18 +277,26 @@ class BetterSolver:
             ) <= gpu_block_capacity,
             name="memory_limit"
         )
+
+        # 🆕 goodput 분모: token_time + move_overhead
+        eff_latency = model.addVar(lb=0, name='effective_latency')
+        model.addConstr(eff_latency * decode_steps == token_time * decode_steps + move_overhead,
+                        name="eff_lat_def")
         
-        model.addConstr(slo_fail_per_decode.sum() < 1, name="stoping condition")
+        model.addConstr(slo_fail_per_decode.sum() <= 1, name="stoping condition")
 
 # === 6. 목적함수 및 최적화 ===
         goodput = model.addVar(lb=0, name='obj')
-        model.addConstr(goodput * token_time == len(requests) - slo_fail_per_decode.sum())
+        model.addConstr(goodput * eff_latency == len(requests) - slo_fail_per_decode.sum())
         model.setObjective(goodput, GRB.MAXIMIZE)
         model.Params.OutputFlag = 1
-        model.optimize()
+        model.Params.TimeLimit = 0.1
+        model.optimize()        
 
 # === 7. 결과 출력 ===
-        if model.Status == GRB.OPTIMAL or model.Status == GRB.TIME_LIMIT or model.Status == GRB.SUBOPTIMAL:
+        if model.Status == GRB.TIME_LIMIT: 
+            return None
+        if model.Status == GRB.OPTIMAL or model.Status == GRB.SUBOPTIMAL:
             print("\n--- Optimal Solution ---")
             print(" r | resume | offload_num | slo_fail | actual_time")
             print("---|--------|-------------|----------|-------------")
@@ -294,7 +321,158 @@ class BetterSolver:
             return result
         else:
             return None
-        
+
+
+
+class SolverV2:
+    """
+    * distance 후보를 1·2·4·8·… 식으로 축소하여
+      ‟같은 offload_num 을 만드는 작은 distance” 를 제거
+    * KeyError 수정
+    * move_overhead 포함 여부를 플래그로 제어
+    """
+
+    # ---------- helper --------------------------------------------------
+    @staticmethod
+    def _build_floor_map(L: int) -> tuple[dict[int, int], List[int]]:
+        """
+        Returns
+        -------
+        floor_val : dict  (i -> ⌊L/i⌋)         # 모든 i ∈ 1..L+1
+        valid_i   : list  (1,2,4,8,…,L)        # **중복 offload 제거된** distance
+        """
+        raw = {i: L // i for i in range(1, L + 2)}
+
+        # offload_num 동일하면 가장 큰 distance 만 남긴다
+        picked: dict[int, int] = {}
+        for i, v in raw.items():          # v = offload_num
+            if v not in picked or i > picked[v]:
+                picked[v] = i
+        valid_i = sorted(picked.values())  # ex) [1,2,4,8,16,32]
+
+        return raw, valid_i
+
+    # ---------- main ----------------------------------------------------
+    @staticmethod
+    def solve(
+        requests_list: List[Request],
+        *,
+        layer_num: int = 32,
+        block_bandwidth: float = 103178.0 / 1000,   # blocks / ms
+        gpu_block_capacity: float = 49152 / 80,
+        window_ub: int = 1000,
+        use_move_overhead: bool = False,
+        verbose: bool = False,
+    ) -> Optional[List[Result]]:
+
+        # 1. 입력 파싱 ----------------------------------------------------
+        ids = [r.id for r in requests_list]
+        ctx_blk = {r.id: r.context_len_in_blocks for r in requests_list}
+        layer_t = {r.id: r.layer_time            for r in requests_list}
+        deposit = {r.id: r.deposit_count         for r in requests_list}
+        slo     = {r.id: r.slo                   for r in requests_list}
+        gpu_L   = {r.id: r.gpu_layers_on_gpu     for r in requests_list}
+
+        L = layer_num
+        floor_val, valid_i = SolverV2._build_floor_map(L)
+
+        # 2. Gurobi 모델 --------------------------------------------------
+        m = gp.Model("better_solver")
+        m.Params.NonConvex = 2
+        if not verbose:
+            m.Params.OutputFlag = 0
+
+        # 3. 변수 ---------------------------------------------------------
+        # distance (prefetch_dist)
+        d = m.addVars(ids, lb=1, ub=L + 1, vtype=GRB.INTEGER, name="dist")
+        # offload_num
+        off = m.addVars(ids, lb=0, ub=L, vtype=GRB.INTEGER, name="off")
+        # one-hot 선택 변수 (valid_i 에 한정)
+        z = {(r, i): m.addVar(vtype=GRB.BINARY, name=f"z_{r}_{i}")
+             for r in ids for i in valid_i}
+
+        # 창(window) 길이
+        H = m.addVar(lb=32, ub=window_ub, vtype=GRB.INTEGER, name="decode_steps")
+
+        # 시간 관련
+        batch_layer = m.addVar(lb=0, name="batch_layer")
+        comm_time   = m.addVar(lb=0, name="comm_time")
+        comp_time   = m.addVar(lb=0, name="comp_time")
+        token_time  = m.addVar(lb=0, name="token_time")
+        if use_move_overhead:
+            mv_over = m.addVar(lb=0, name="move_overhead")
+
+        ratio = m.addVars(ids, lb=0, name="ratio")
+        fail  = m.addVars(ids, lb=0, name="slo_fail_per_decode")
+
+        # 4. distance ↔ offload 매핑 -------------------------------------
+        for r in ids:
+            m.addConstr(gp.quicksum(z[r, i] for i in valid_i) == 1)
+            m.addConstr(gp.quicksum(i * z[r, i] for i in valid_i) == d[r])
+            m.addConstr(gp.quicksum(floor_val[i] * z[r, i]
+                                    for i in valid_i) == off[r])
+
+        # 5. 시간 계산 ----------------------------------------------------
+        for r in ids:
+            m.addConstr(batch_layer >= layer_t[r])
+
+        m.addConstr(
+            comm_time == gp.quicksum(off[r] * ctx_blk[r] for r in ids)
+            / block_bandwidth)
+
+        m.addConstr(comp_time == batch_layer * L)
+        m.addGenConstrMax(token_time, [comm_time, comp_time])
+
+        if use_move_overhead:
+            mv_blocks = m.addVars(ids, lb=0, vtype=GRB.INTEGER, name="mv_blocks")
+            for r in ids:
+                m.addConstr(mv_blocks[r] >= (L - off[r]) - gpu_L[r])
+            m.addConstr(
+                mv_over == gp.quicksum(mv_blocks[r] * ctx_blk[r] for r in ids)
+                / block_bandwidth)
+
+        # 6. SLO 실패 계산 -----------------------------------------------
+        for r in ids:
+            m.addQConstr(ratio[r] * batch_layer == H * slo[r])
+            m.addConstr(fail[r] * H >= H - ratio[r] - deposit[r])
+
+        # 7. 메모리 제약 ---------------------------------------------------
+        m.addConstr(
+            gp.quicksum((L - off[r]) * ctx_blk[r] for r in ids)
+            <= gpu_block_capacity)
+
+        m.addConstr(fail.sum() <= 1)
+
+        # 8. 목적식 --------------------------------------------------------
+        eff_lat = m.addVar(lb=0, name="effective_latency")
+        if use_move_overhead:
+            m.addConstr(eff_lat * H == token_time * H + mv_over)
+        else:
+            m.addConstr(eff_lat == token_time)
+
+        goodput = m.addVar(lb=0, name="obj")
+        m.addConstr(goodput * eff_lat == len(ids) - fail.sum())
+        m.setObjective(goodput, GRB.MAXIMIZE)
+
+        # 9. 최적화 --------------------------------------------------------
+        m.optimize()
+        if m.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL, GRB.TIME_LIMIT):
+            return None
+
+        # 10. 결과 변환 ----------------------------------------------------
+        window = int(H.X)
+        results: List[Result] = []
+        for r in ids:
+            results.append(Result(
+                id          = r,
+                resume      = True,
+                n           = int(d[r].X),
+                offload_num = int(off[r].X),
+                slo_fail    = fail[r].X,
+                actual_time = float(batch_layer.X),
+                window      = window,
+            ))
+        return results
 
 if __name__ == "__main__":
     requests = ['r1', 'r2', 'r3', 'r4']
