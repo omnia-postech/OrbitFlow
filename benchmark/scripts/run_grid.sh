@@ -7,16 +7,17 @@
 export CUDA_VISIBLE_DEVICES=0,1
 export VLLM_CONFIGURE_LOGGING=1
 LOGGING_LEVEL=CRITICAL
-ROOT="/home/heelim/vllm"
+ROOT="/home/xinyuema/vllm"
 
-FIGURE_ONLY=$0
-EXP_LIST=(TP)                         # ← your “experiments”
+FIGURE_ONLY=$1
+EXP_LIST=(GroundWork)                         # ← your “experiments”
 # METHOD_LIST=(Ours NoPrefetch Flexgen NextLayer Static8 SelectN DistNSingle Ours_TP)      # ← indexes into JSON above
-METHOD_LIST=(Ours_TP)      # ← indexes into JSON above
+METHOD_LIST=(Flexgen)      # ← indexes into JSON above
 
 TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/test_best_worst"
-# TRACE_LIST=(test_longshort_enough)
-TRACE_LIST=(test_longlong_enough test_fit_static_0 test_fit_static_2 test_longlong_less test_longshort_less test_mix4_enough test_mix4_less test_shortlong_enough test_shortlong_less test_shortshort_enough)
+TRACE_LIST=(mixed_scaled)
+# TRACE_LIST=(test)
+# TRACE_LIST=(test_longlong_enough test_fit_static_0 test_fit_static_2 test_longlong_less test_longshort_less test_mix4_enough test_mix4_less test_shortlong_enough test_shortlong_less test_shortshort_enough)
 
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"
@@ -84,6 +85,9 @@ PY
           echo "  ↳ Plotting stats and TBT for $(basename "$CSV")"
           python "$PLOTTER" stats "$CSV"
           python "$PLOTTER" tbt_wc  "$CSV"
+          python "$PLOTTER" tbt  "$CSV"
+          python "$PLOTTER" tbt_err  "$CSV"
+          python "$PLOTTER" tbt_err_wc  "$CSV"
       else
           echo "  [WARN] $CSV not found -- skipping plots" >&2
       fi
