@@ -396,19 +396,22 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
             consecutive_no_output = 0
         else: 
             solver_time = 0.0
-            consecutive_no_output += 1 
-            if consecutive_no_output > 5:
-                # pop everything in request_metadata into finished_requests 
-                # and stop the simulation
-                logger.critical("No output for 5 consecutive steps, stopping simulation.")
-                rids = list(request_metadata.keys())
-                for rid in rids:
-                    logger.critical(f"[finish] clearing deposit for {rid}: was {sim.deposit[rid]}")
-                    sim.finish(rid)
-                    request_metadata.pop(rid)
-                    logger.critical(f"[finish] removing last_time entry for {rid}")
-                    print(f"Failure (due to memory limits): {len(rids)}")
-                break
+            if queue: 
+                time.sleep(0.1) # wait for a while to avoid busy waiting 
+            else: 
+                consecutive_no_output += 1 
+                if consecutive_no_output > 5:
+                    # pop everything in request_metadata into finished_requests 
+                    # and stop the simulation
+                    logger.critical("No output for 5 consecutive steps, stopping simulation.")
+                    rids = list(request_metadata.keys())
+                    for rid in rids:
+                        logger.critical(f"[finish] clearing deposit for {rid}: was {sim.deposit[rid]}")
+                        sim.finish(rid)
+                        request_metadata.pop(rid)
+                        logger.critical(f"[finish] removing last_time entry for {rid}")
+                        print(f"Failure (due to memory limits): {len(rids)}")
+                    break
         
         assert(elapsed_time_step > solver_time) 
 
