@@ -333,6 +333,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
 
         cache_engine._sync_active_gpu_cpu_map(cache_engine.mapping.seq_row_order)
 
+        # logger.critical(f"after executing cache plan, mapping:{cache_engine.mapping}")
         # bm = cache_engine._get_bm()
         # plan_data['bm'] = bm
 

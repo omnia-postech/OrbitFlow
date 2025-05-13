@@ -1809,8 +1809,8 @@ class MappingTable:
             and sid in self.gpu_cpu_cache_map
         )
 
-        logger.info(f"update_mapping table {self.__repr__()}")       
-        logger.info(f"GPU map {self.gpu_map}")
+        # logger.info(f"update_mapping table {self.__repr__()}")       
+        # logger.info(f"GPU map {self.gpu_map}")
 
     def _validate_cache(self, gpu_slot_mapping, cpu_slot_mapping, cpu_offset):
         # check if the mapping is valid 
