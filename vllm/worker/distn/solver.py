@@ -32,7 +32,8 @@ class Result:
         self.slo_fail = slo_fail
         self.actual_time = actual_time
         self.window = window
-
+    def __repr__(self):
+        return f"Result(id={self.id}, resume={self.resume}, n={self.n}, offload_num={self.offload_num}, slo_fail={self.slo_fail}, actual_time={self.actual_time}, window={self.window})"
 class Solver:
     @staticmethod
     def solve(requests_list: list[Request], layer_num = 32, block_bandwidth = 103178.0 / 1000, gpu_block_capacity = 49152 / 80, window_ub = 1000) -> Optional[list[Result]]:
@@ -52,8 +53,9 @@ class Solver:
         M = 1e6                     # big-M
 
 # === 2. floor/ceil 값 미리 계산 ===
-        floor_val = {n: math.floor(L / n) for n in range(1, L+2)}
-
+        # floor_val = {n: math.floor(L / n) for n in range(1, L+2)}
+        floor_val = {d: L // (d + 1)           # floor( L / (d+1) )
+                       for d in range(0, L + 2)} # 0 … L+1
 # === 3. 모델 생성 및 설정 ===
         model = gp.Model('block_solver')
         model.Params.NonConvex = 2    # 비선형 곱 제약 허용
