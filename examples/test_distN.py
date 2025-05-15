@@ -688,6 +688,10 @@ if __name__ == "__main__":
                         action="store_true",
                         default=False,
                         help="whether to use use token deposit")
+    parser.add_argument("--static-batching",
+                        action="store_true",
+                        default=False,
+                        help="whether to use use static batching instead of continuous batching")
     args = parser.parse_args()    
     print(args)
     # --- Setup Logging ---
