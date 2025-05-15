@@ -920,8 +920,11 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         for seq_id, layers in seq_blocks.items():
             for layer in layers:
                 # collect the block-ids belonging to this (seq_id, layer) pair
-                freed_blocks.extend(self.block_tables[seq_id][layer].physical_block_ids)
-
+                try:
+                    freed_blocks.extend(self.block_tables[seq_id][layer].physical_block_ids)
+                except KeyError:
+                    seq_ids = list(self.block_tables.keys())
+                    logger.critical(f"bm free_seq_by_layer {seq_id} {layer} not found in {seq_ids}")
                 # release the memory associated with those blocks
                 self.block_tables[seq_id][layer].free()
         return freed_blocks
@@ -1078,10 +1081,20 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
                     num_lookahead_slots: int,
                     prefetch_distance: int = -1,
                     num_blocks_touched: int = 0,
+                    prefetch_mode: str = "none",
                     ) -> Tuple[int, AllocStatus]:
         """Returns the AllocStatus for the given sequence_group 
         with num_lookahead_slots.
-
+        **used only in 1d kv cache** 
+        Conditions for AllocStatus.NEVER
+            1. for static prefetch methods (no prefetch, staticN), use prefetch_distance. total_blocks * prefetch_distance
+            2. for semi-static (selectn,  flexgen), theoretically, upperbound is 32*total blocks (dist=0)
+            3. dynamic prefetch (solver, distn_single,), upperbound is 32*total blocks (dist=0)
+        Contiditions for AllocStatus.LATER 
+            For static and semi static, respect the current distance. 
+            for dynamic? 
+                Solver.solve() is called BEFORE can_resume(). 
+                we might cause prequent
         Args:
             sequence_group (SequenceGroup): The sequence group to swap in.
             num_lookahead_slots (int): Number of lookahead slots used in 
@@ -1090,7 +1103,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         Returns:
             AllocStatus: The AllocStatus for the given sequence group.
         """
-        return self._can_resume(seq_group, Device.GPU, SequenceStatus.SWAPPED,
+        num_touched, alloc_stat = self._can_resume(seq_group, Device.GPU, SequenceStatus.SWAPPED,
                               prefetch_distance=prefetch_distance,
                               num_lookahead_slots=num_lookahead_slots,
                               num_blocks_touched=num_blocks_touched)
@@ -1211,6 +1224,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
                 for action. RUNNING for swap out and SWAPPED for swap in
             num_lookahead_slots (int): Number of lookahead slots used in 
                 speculative decoding, default to 0.
+            Use prefetch distance only to evaluate NEVER, not LATER 
 
         Returns:
             AllocStatus: The AllocStatus for swapping in/out the given 
@@ -1245,21 +1259,46 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         # if device == Device.GPU:
         #     watermark_blocks = self.watermark_blocks
         if prefetch_distance > -1:
-            assert(prefetch_distance > 0 and prefetch_distance < self.num_attention_layers) # does not work for distance == 0
+            assert(prefetch_distance < self.num_attention_layers) # does not work for distance == 0
             temp_gpu_map = [0 if (x+1) % prefetch_distance == 0 else 1 for x in range(self.num_attention_layers)]
             num_gpu_layers = sum(temp_gpu_map) 
             num_blocks_touched = (((num_blocks_touched // self.num_attention_layers)+1)*num_gpu_layers)
-
-        if self.block_allocator.get_num_total_blocks(
-                device) <= num_blocks_touched: # if <, never evicts
-            # logger.critical(f"num_blocks_touched {num_blocks_touched} > num_total_blocks {self.block_allocator.get_num_total_blocks(device)}")
-            return (num_blocks_touched, AllocStatus.NEVER)
-        elif self.block_allocator.get_num_free_blocks(
-                device) - num_blocks_touched - num_additional >= watermark_blocks:
-            # logger.critical(f"num_blocks_touched {num_blocks_touched} > num_additional {num_additional} free_blocks {self.block_allocator.get_num_free_blocks(device)}")
-            return (num_blocks_touched, AllocStatus.OK)
-        else:
-            return (num_blocks_touched, AllocStatus.LATER)
+            if self.block_allocator.get_num_total_blocks(
+                    device) <= num_blocks_touched: # if <, never evicts
+                # logger.critical(f"num_blocks_touched {num_blocks_touched} > num_total_blocks {self.block_allocator.get_num_total_blocks(device)}")
+                return (num_blocks_touched, AllocStatus.NEVER)
+            elif self.block_allocator.get_num_free_blocks(
+                    device) - num_blocks_touched - num_additional >= watermark_blocks:
+                # logger.critical(f"num_blocks_touched {num_blocks_touched} > num_additional {num_additional} free_blocks {self.block_allocator.get_num_free_blocks(device)}")
+                return (num_blocks_touched, AllocStatus.OK)
+            else:
+                return (num_blocks_touched, AllocStatus.LATER)
+        elif prefetch_distance  == -2: 
+            # evaluate never 
+            num_blocks_touched_layer = ((num_blocks_touched // self.num_attention_layers)+1)
+            num_blocks_touched = num_blocks_touched_layer * self.num_attention_layers
+            if self.block_allocator.get_num_total_blocks(
+                    device) <= num_blocks_touched_layer: # if <, never evicts
+                # logger.critical(f"num_blocks_touched {num_blocks_touched} > num_total_blocks {self.block_allocator.get_num_total_blocks(device)}")
+                return (num_blocks_touched_layer, AllocStatus.NEVER)
+            elif self.block_allocator.get_num_free_blocks(
+                    device) - num_blocks_touched - num_additional >= watermark_blocks:
+                # logger.critical(f"num_blocks_touched {num_blocks_touched} > num_additional {num_additional} free_blocks {self.block_allocator.get_num_free_blocks(device)}")
+                return (num_blocks_touched, AllocStatus.OK)
+            # evaluate later 
+            else:
+                return (num_blocks_touched, AllocStatus.LATER)          
+        else: 
+            if self.block_allocator.get_num_total_blocks(
+                    device) <= num_blocks_touched: # if <, never evicts
+                # logger.critical(f"num_blocks_touched {num_blocks_touched} > num_total_blocks {self.block_allocator.get_num_total_blocks(device)}")
+                return (num_blocks_touched, AllocStatus.NEVER)
+            elif self.block_allocator.get_num_free_blocks(
+                    device) - num_blocks_touched - num_additional >= watermark_blocks:
+                # logger.critical(f"num_blocks_touched {num_blocks_touched} > num_additional {num_additional} free_blocks {self.block_allocator.get_num_free_blocks(device)}")
+                return (num_blocks_touched, AllocStatus.OK)
+            else:
+                return (num_blocks_touched, AllocStatus.LATER)
 
     def _can_swap(self,
                   seq_group: SequenceGroup,
