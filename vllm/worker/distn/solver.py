@@ -5,7 +5,8 @@ from typing import Optional, List
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
-
+PROFILED_A = 1.0017431830666432e-06
+PROFILED_B = 0.049519613282613506
 
 # ────────────────── Data-classes ──────────────────
 class Request:
@@ -17,6 +18,8 @@ class Request:
         self.deposit_count = deposit_count
         self.slo = slo
         self.gpu_layers_on_gpu = gpu_layers_on_gpu
+    def __repr__(self):
+        return f"Request(id={self.id}, context_len_in_blocks={self.context_len_in_blocks}, layer_time={self.layer_time}, deposit_count={self.deposit_count}, slo={self.slo})"
 
 
 class Result:
@@ -80,7 +83,7 @@ class Solver:
             model.addConstr(gp.quicksum(offload_num_constr[(r, i)] * floor_val[i] for i in range(1, L+2)) == offload_num[r])
             # model.addConstr(move_blocks[r]ㄴ >= (L - offload_num[r]) - gpu_layers[r], name=f"mv_pos_{r}")
 
-        batch_layer  = model.addVar(lb=0, name='batch_layer')
+        batch_layer  = (sum(context_blocks[r] for r in requests) * PROFILED_A + PROFILED_B) / 32
         comm_time    = model.addVar(lb=0, name='comm_time')
         comp_time    = model.addVar(lb=0, name='comp_time')
         token_time   = model.addVar(lb=0, name='token_time')
@@ -91,10 +94,9 @@ class Solver:
 # === 5. 제약식 ===
 
 # 5.2 batch_layer = max(layer_time[r] * resume[r])
-        for r in requests:
-            model.addConstr(batch_layer >= gp.quicksum(layer_time[r] * resume[r] for r in requests),
-                            name=f"batch_layer_{r}")
-
+        # sum the sequence length, not the layer time!
+                # batch_layer = (sum(context_blocks[r] for r in requests) * PROFILED_A + PROFILED_B) / 32
+                # print("batch_layer", batch_layer)
         model.addConstr(1 <= gp.quicksum(resume[r] for r in requests), name="should execute more than 1")
 
 # 5.3 comm_time 정의: 필요한 블록 수 ÷ block_bandwidth
@@ -159,8 +161,11 @@ class Solver:
         model.addConstr(goodput * eff_latency == gp.quicksum(resume[r] for r in requests) - slo_fail_per_decode.sum())
         model.setObjective(goodput, GRB.MAXIMIZE)
         model.Params.OutputFlag = 1
-        model.optimize()
-
+        try:
+            model.optimize()
+        except gp.GurobiError as e:
+            print(f"Gurobi Error: {e}")
+            return None
 # === 7. 결과 출력 ===
         if model.Status == GRB.OPTIMAL or model.Status == GRB.TIME_LIMIT or model.Status == GRB.SUBOPTIMAL:
             print("\n--- Optimal Solution ---")
@@ -222,6 +227,7 @@ class BetterSolver:
         offload_num = model.addVars(requests, lb=0, ub=L, vtype=GRB.INTEGER, name='offload_num')
 
         decode_steps = model.addVar(lb=32, ub=window_ub, vtype=GRB.INTEGER, name='decode_steps')
+        # decode_steps = model.addVar(lb=1, ub=1, vtype=GRB.INTEGER, name='decode_steps')
 
         # ▶ distance 후보를 cand_i 로만 제한 ◀
         z = {(r, i): model.addVar(vtype=GRB.BINARY, name=f"z_{r}_{i}")

@@ -28,7 +28,11 @@ ENABLE_ARTIFICIAL_PREEMPT = bool(
     os.getenv("VLLM_TEST_ENABLE_ARTIFICIAL_PREEMPT", False))  # noqa
 ARTIFICIAL_PREEMPTION_PROB = 0.5
 ARTIFICIAL_PREEMPTION_MAX_CNT = 500
-
+PROFILED_A = 1.0017431830666432e-06
+PROFILED_B = 0.049519613282613506
+# DEBUG (xinyue) 
+file_no = 0  
+import torch 
 
 class PreemptionMode(enum.Enum):
     """Preemption modes.
@@ -351,7 +355,7 @@ class Scheduler:
         self.lora_config = lora_config
         self.pipeline_parallel_size = pipeline_parallel_size
 
-        self._pause_window_remaining: int = 0
+        # self._pause_window_remaining: int = 0
         self.slo_from_delaysim = {}
         
         self.gpu_blocks_per_layer = {}
@@ -571,13 +575,23 @@ class Scheduler:
     def _make_solver_requests(
         self,
         decode_seq_groups: list[ScheduledSequenceGroup],
+        calibrate: bool = False,
     ) -> list[Request]:
         """
         Solver 입력용 Request 리스트 생성.
         decode_seq_groups: _schedule_running 에서 선택된 디코드 후보들
         """
         reqs: list[Request] = []
-
+        # if calibrate:
+        #     if self.last_decode_time > 0:
+        #         assert(self.step_tokens > 0)
+        #         last_layer_time = self.last_decode_time / self.block_manager.num_attention_layers 
+        #         global PROFILED_A, PROFILED_B
+        #         New_B =  last_layer_time - PROFILED_A * self.step_tokens
+        #         if New_B > 0:
+        #             PROFILED_B = New_B 
+        
+            
         # 네트워크·모델상 상수 (기존 코드와 동일)
         for sg in decode_seq_groups:
             seq      = sg.seq_group.get_seqs()[0]               # 단일 시퀀스 가정
@@ -589,7 +603,7 @@ class Scheduler:
 
             # ② layer_time  (토큰 수로부터 선형추정: 기존 상수 그대로)
             num_toks   = len(seq.data._cached_all_token_ids)
-            layer_time = (1.001743183e-06 * num_toks + 0.0495196) / 32
+            layer_time = (PROFILED_A * num_toks + PROFILED_B) / 32
 
             # ③ deposit / SLO
             deposit = self.deposit_map.get(str(seq_id), 0)
@@ -778,6 +792,37 @@ class Scheduler:
                     budget.add_num_seqs(seq_group.request_id, num_running_seqs)
                 if curr_loras is not None and seq_group.lora_int_id > 0:
                     curr_loras.add(seq_group.lora_int_id)
+        # temp # (xinyue) debugging the solver
+        # global file_no
+        # file_name = f"/home/xinyuema/vllm/vllm/worker/distn/snapshot/step{file_no}.pt"
+        # request_list = self._make_solver_requests(ret.decode_seq_groups)
+        # bandwidth = 25.19 * 1024**3  # B/s
+        # head_size = 128
+        # num_kv_heads = 8
+        # per_token_bytes = 2 * 2 * head_size * num_kv_heads
+        # block_bytes = per_token_bytes * self.block_manager.block_size
+        # block_bandwidth =  bandwidth / block_bytes
+        # gpu_block_capacity=self.block_manager.num_total_gpu_blocks
+        # packed_request = [request_list, block_bandwidth, gpu_block_capacity]
+        # torch.save(packed_request, file_name)
+        # file_no += 1
+        # # TODO(HONG): 매 호출마다 동일 계산 위로 빼는게 좋음. 
+        # bandwidth = 25.19 * 1024**3  # B/s
+        # head_size = 128
+        # num_kv_heads = 8
+        # per_token_bytes = 2 * 2 * head_size * num_kv_heads
+        # block_bytes = per_token_bytes * self.block_manager.block_size
+        # block_bandwidth = block_bytes / bandwidth
+        # # logger.critical(f"solver_input: {request_list}")
+        # solver_start = time.time()                
+        # sol = Solver.solve(                 # 💡 “resume=1” 강제 변형판
+        #     request_list,
+        #     block_bandwidth=block_bandwidth,
+        #     gpu_block_capacity=self.block_manager.num_total_gpu_blocks,                        
+        # )                    
+        # solver_t = time.time() - solver_start
+        # ret.solver_time += solver_t               # 기록
+
         ret.solver_time = 0.0
         if self.cache_config.pause_and_resume and self.cache_config.prefetch_mode == "solver":            
             # ────────────── [ENTRY] ──────────────
@@ -873,13 +918,15 @@ class Scheduler:
                     num_kv_heads = 8
                     per_token_bytes = 2 * 2 * head_size * num_kv_heads
                     block_bytes = per_token_bytes * self.block_manager.block_size
-                    block_bandwidth = block_bytes / bandwidth
+                    block_bandwidth =  bandwidth / block_bytes # DEBUG (xinyue) bandwidth was e-06 
                     # logger.critical(f"solver_input: {request_list}")
-                    solver_start = time.time()                
+                    solver_start = time.time()                \
+                    # put some head room! 
+                    head_room = max(int(self.block_manager.num_total_gpu_blocks)*0.001, 100)
                     sol = Solver.solve(                 # 💡 “resume=1” 강제 변형판
                         request_list,
                         block_bandwidth=block_bandwidth,
-                        gpu_block_capacity=self.block_manager.num_total_gpu_blocks,                        
+                        gpu_block_capacity=self.block_manager.num_total_gpu_blocks - head_room,                        
                     )                    
                     solver_t = time.time() - solver_start
                     ret.solver_time += solver_t               # 기록
@@ -933,136 +980,6 @@ class Scheduler:
 
         # logger.debug(f"!!!!!!!!!!! ret.paused: {ret.paused}")
         return ret, is_paused_to_resume
-
-        # if self.cache_config.pause_and_resume:
-        #     # save self.paused seq ids
-        #     previous_paused_ids = {seq_group.get_seqs()[0].seq_id for seq_group in self.paused}            
-        #     if not self.running and not self.waiting and self.paused:
-        #         logger.debug(f"No running or waiting seqs; restoring {len(self.paused)} paused requests")
-        #         for pg in list(self.paused):                    
-        #             scheduled = self._scheduled_seq_group_cache[self.cache_id].get_object()
-        #             scheduled.seq_group = pg
-        #             scheduled.token_chunk_size = 1
-        #             ret.decode_seq_groups.append(scheduled)
-        #             ret.decode_seq_groups_list.append(pg)                    
-        #         self.paused.clear()
-        #         self._pause_window_remaining = 0
-
-        #     if self.cache_config.prefetch_mode == "solver":
-        #         if ret.decode_seq_groups and len(ret.decode_seq_groups)>0:
-        #             if self._is_preemption(len(ret.decode_seq_groups)):
-        #                 logger.debug(f"Preemption detected, trigger solver")
-        #                 seq_ids = [sg.seq_group.get_seqs()[0].seq_id for sg in ret.decode_seq_groups]                                                
-        #                 blocks_allocated = {seq_id: sg.seq_group.get_seqs()[0].n_blocks for seq_id, sg in zip(seq_ids, ret.decode_seq_groups)}
-        #                 logger.debug(f"total blocks/blocks_allocated: {self.block_manager.num_total_gpu_blocks//32}/{blocks_allocated}")
-        #                 self._pause_window_remaining = 0
-
-        #             if self._pause_window_remaining > 0:
-        #                 logger.debug(f"Within pause window (remaining={self._pause_window_remaining}), skipping solver")
-        #                 self._pause_window_remaining -= 1
-        #             else:                        
-        #                 if self.paused:
-        #                     logger.debug(f"RESTORE-PAUSED: bringing back {len(self.paused)} paused requests into decode candidates")
-        #                     for pg in list(self.paused):
-        #                         scheduled = self._scheduled_seq_group_cache[self.cache_id].get_object()
-        #                         scheduled.seq_group = pg
-        #                         scheduled.token_chunk_size = 1
-        #                         ret.decode_seq_groups.append(scheduled)
-        #                         ret.decode_seq_groups_list.append(pg)
-        #                     self.paused.clear()
-
-        #                 request_list = []
-        #                 seq_ids = [sg.seq_group.get_seqs()[0].seq_id for sg in ret.decode_seq_groups]                        
-
-        #                 # NOTE(HONG): we give buffer here as adding +1 blocks per requests 
-        #                 context_blocks = {seq_id: sg.seq_group.get_seqs()[0].n_blocks + 1 for seq_id, sg in zip(seq_ids, ret.decode_seq_groups)}
-
-        #                 layer_time = {}
-        #                 SLO = {}
-        #                 for sg in ret.decode_seq_groups:
-        #                     req_id = sg.seq_group.request_id
-        #                     seq = sg.seq_group.get_seqs()[0]
-        #                     seq_id = seq.seq_id
-        #                     num_tokens = len(seq.data._cached_all_token_ids)
-        #                     layer_time[seq_id] = (1.001743183e-06 * num_tokens + 0.0495196) / 32
-        #                     SLO[seq_id] = 1 / self.slo_from_delaysim[req_id]
-                        
-        #                 seq_ids = [sg.seq_group.get_seqs()[0].seq_id for sg in ret.decode_seq_groups]
-        #                 deposit_count = {seq_id: self.deposit_map.get(str(seq_id), 0) for seq_id in seq_ids}
-                        
-                        
-        #                 # cur_gpu_blocks_per_layer = {seq_id: self.gpu_blocks_per_layer.get(seq_id, 0) for seq_id in seq_ids}   # NOTE(HONG): -> num blocks per layer(+1 for buffer) == context_blocks
-        #                 cur_gpu_layers_per_seq = {seq_id: self.gpu_layers_per_seq.get(seq_id, 0) for seq_id in seq_ids} # NOTE(HONG): -> num layers per seq
-        #                 request_list = [Request(seq_id, context_blocks[seq_id], layer_time[seq_id], deposit_count[seq_id], SLO[seq_id], cur_gpu_layers_per_seq[seq_id]) for seq_id in seq_ids]
-
-        #                 bandwidth = 25.19 * 1024**3  # B/s
-        #                 head_size = 128
-        #                 num_kv_heads = 8
-        #                 per_token_bytes = 2 * 2 * head_size * num_kv_heads
-        #                 block_bytes      = per_token_bytes * self.block_manager.block_size
-        #                 block_bandwidth = block_bytes / bandwidth
-                            
-        #                 logger.debug(f"######## Run solver ########")
-        #                 # (xinyue) logger solver time 
-        #                 solver_start = time.time()
-        #                 match Solver.solve(request_list, block_bandwidth = block_bandwidth, gpu_block_capacity = self.block_manager.num_total_gpu_blocks):
-        #                     case None:
-        #                         logger.info(f"No optimal solution found.")
-        #                     case result:                 
-        #                         # result[0].resume = False # For debugging
-        #                         self._pause_window_remaining = result[0].window
-        #                         self.resume_distances = {sol.id: sol.n for sol in result if sol.resume}
-        #                         logger.debug(f"Resume distances for each request: {self.resume_distances}")                                       
-        #                         pause_ids = {sol.id for sol in result if not sol.resume}
-        #                         resume_ids = {sol.id for sol in result if sol.resume}
-                                                                
-        #                         if any(id in resume_ids for id in previous_paused_ids):
-        #                             is_paused_to_resume = True
-
-        #                         # NOTE(HONG): we need to pause that are not resume status
-        #                         # get scheduled_seq_group and seq_group that matches with sol.request_id
-        #                         # 1. remove scheduled_seq_group from decode_seq_groups
-        #                         # 2. remove seq_group from ret.decode_seq_groups_list                                    
-        #                         if pause_ids:
-        #                             logger.info(f"Proactive pause for requests: {pause_ids}")
-        #                         new_decodes: List[ScheduledSequenceGroup] = []
-        #                         new_decode_list: List[SequenceGroup] = []
-        #                         for sg in ret.decode_seq_groups:
-        #                             seq_id = sg.seq_group.get_seqs()[0].seq_id
-        #                             if seq_id in pause_ids:
-        #                                 self.paused.append(sg.seq_group)                                    
-        #                                 logger.debug(f"Paused ScheduledSequenceGroup for '{seq_id}'")
-        #                             else:
-        #                                 new_decodes.append(sg)
-        #                                 new_decode_list.append(sg.seq_group)
-        #                         ret.decode_seq_groups = new_decodes
-        #                         ret.decode_seq_groups_list = new_decode_list
-        #                 ret.solver_time = time.time() - solver_start
-        #     else:         
-        #         ####################### Naive pause #######################
-        #         # NOTE(HONG): pause
-        #         if ret.decode_seq_groups and len(ret.decode_seq_groups)>1:
-        #             candidates = [
-        #                 g for g in self.ret.decode_seq_groups 
-        #                 if self.deposit_map.get(g.request_id, 0) > 50 # threshold, hard coded
-        #                 and any(seq.status == SequenceStatus.RUNNING for seq in g.get_seqs())
-        #             ]
-        #             candidates.extend(paused_cpu) 
-        #             if candidates: 
-        #                 # candidates[1].get_seqs()[0].get_output_len()
-        #                 pause_victim = max(candidates, key=lambda g: g.get_seqs()[0].get_output_len())
-        #                 logger.debug(f"PAUSE: request {pause_victim.request_id} moved from RUNNING -> PAUSED; "
-        #                             f"running_queue_size={len(self.running)-1}, paused_queue_size={len(self.paused)+1}")
-
-        #                 self.running.remove(pause_victim)
-        #                 self.paused_cpu.append(pause_victim)
-        #         ####################### Naive pause #######################
-
-        # self._scheduler_running_outputs_cache[self.next_cache_id].reset()
-        # self._scheduled_seq_group_cache[self.next_cache_id].reset()
-
-        # logger.debug(f"!!!!!!!!!!! ret.paused: {ret.paused}")
-        # return ret, is_paused_to_resume
 
     def _schedule_swapped(
         self,
@@ -1227,9 +1144,18 @@ class Scheduler:
                     break # same as later
             # If the sequence group cannot be swapped in, stop.
             is_prefill = seq_group.is_prefill()
+            if self.cache_config.prefetch_mode in ["solver", "none"]:
+                prefetch_distance = -1 # solver will never enter preemption by design, none correspond to dist of -1 
+            elif self.cache_config.prefetch_mode in ['static']: 
+                prefetch_distance = self.cache_config.prefetch_distance # use the same distance as the rest of the scheduler
+            elif self.cache_config.prefetch_mode in ['selectn', "flexgen", "distn_single"]:
+                prefetch_distance = -2 # as long as there is blocks enough for 1 layer, we will eventually swap it in #FIXME 
+            else: 
+                prefetch_distance = -1 # default
             touched_blocks, alloc_status = self.block_manager.can_resume(
                 seq_group,
-                self._get_num_lookahead_slots(is_prefill, enable_chunking),
+                num_lookahead_slots=self._get_num_lookahead_slots(is_prefill, enable_chunking),
+                prefetch_distance=prefetch_distance,
                 num_blocks_touched=total_touched_blocks)
             if alloc_status == AllocStatus.LATER:
                 break
@@ -1604,9 +1530,9 @@ class Scheduler:
                                                curr_loras,
                                                enable_chunking=False)
 
-        if self.cache_config.pause_and_resume and self.cache_config.prefetch_mode == "solver":
-            if prefills.seq_groups:
-                self._pause_window_remaining = 0
+        # if self.cache_config.pause_and_resume and self.cache_config.prefetch_mode == "solver":
+        #     if prefills.seq_groups:
+        #         self._pause_window_remaining = 0
         
         if len(prefills.seq_groups
                ) == 0 and self.scheduler_config.policy == "priority":

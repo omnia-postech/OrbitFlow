@@ -522,6 +522,20 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
         if decode_rids:
             logger.info("Decode  step %d: %s",
                         cumulative_steps, ", ".join(map(str, decode_rids)))
+        if not running_requests and queue:
+            # queue is always kept sorted by arrival_time
+            next_arrival_step = queue[0][1].arrival_time
+            if cumulative_steps < next_arrival_step:
+                logger.debug(
+                    "Fast-forwarding from step %d → %d (idle gap)",
+                    cumulative_steps, next_arrival_step,
+                )
+                cumulative_steps = next_arrival_step
+                # also reset the “no-output” watchdog
+                consecutive_no_output = 0
+            # continue so that the enqueue logic at the top of the loop
+            # will pick up the new request(s) immediately.
+            continue
         engine.scheduler[0].last_decode_time = sim.last_decode_time
         engine.scheduler[0].step_tokens = step_tokens          
         
@@ -568,9 +582,7 @@ def main(configs):
         gpu_memory_utilization = trace.gpu_memory_utilization if trace.gpu_memory_utilization else 0.01 # dummy to work around with vllm's _verify_args()
     if gpu_memory_utilization == 0.01:
         num_gpu_blocks_override = trace.num_gpu_blocks_override
-        max_model_len = min(num_gpu_blocks_override * BLOCK_SIZE, 128000  )
-    else: 
-        max_model_len = trace.max_model_len if hasattr(trace, "max_model_len") else MAX_MODEL_LEN
+    max_model_len = trace.max_model_len if hasattr(trace, "max_model_len") else  trace.num_gpu_blocks_override * BLOCK_SIZE
     assert gpu_memory_utilization != 0.01 or num_gpu_blocks_override is not None, "No gpu_memory_utilization or num_gpu_blocks_override found in prompt_dict"
 
     prefetch_mode = "none"
@@ -596,7 +608,6 @@ def main(configs):
     batch_size = trace.batch_size if hasattr(trace, "batch_size") else BATCH_SIZE
     # prompts = trace.requests if hasattr(trace, "requests") else trace.samples
     
-    print(f"max_model_len: {max_model_len}")
     print(f"batch_size: {batch_size}")
     print(f"prefetch_mode: {prefetch_mode}")
     print(f"prefetch_distance: {prefetch_distance}")
@@ -607,6 +618,7 @@ def main(configs):
     
     if flattened_cache and num_gpu_blocks_override is not None:
         num_gpu_blocks_override *= 32 
+    print(f"max_model_len: {max_model_len}")
     args = EngineArgs(
         model=MODEL,
         max_model_len=max_model_len,

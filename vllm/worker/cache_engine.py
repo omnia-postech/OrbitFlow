@@ -1124,7 +1124,7 @@ class FlattenedCacheEngine(CacheEngineBase):
                 self._solver_prefill_done = True                
             else:          
                 dist = self.resume_distances
-                logger.info(f"[driver] {dist}")
+                logger.info(f"[driver] {dist}") 
         elif self.prefetch_mode == "flexgen":
             total_blocks = self.num_gpu_blocks 
             if not is_decoding:
@@ -1132,8 +1132,8 @@ class FlattenedCacheEngine(CacheEngineBase):
             if is_decoding and self.prev_flexgen_distance is None:
                 blocks_per_layer = 0
                 for ctx_len in total_context_lens:
-                    blocks_per_layer += math.ceil(ctx_len / self.block_size)
-                
+                    blocks_per_layer += math.ceil(ctx_len / self.block_size) +1 # lookahead!! to avoid premption before changing
+                    
                 num_layers_on_GPU = (total_blocks // blocks_per_layer)
                 num_layers_on_GPU = min(32, num_layers_on_GPU)
                 num_layers_to_offload = 32 - num_layers_on_GPU
@@ -1176,13 +1176,15 @@ class FlattenedCacheEngine(CacheEngineBase):
                 prev_dist = list(snapshot.prev_dist_dict.values())[0]
             else: 
                 prev_dist = -1
-            logger.critical(f"prev_dist:{snapshot.prev_dist_dict}")
                 
             # increase the distance by 1 if no free blocks available for next step 
             free_blocks = self.block_manager.get_num_free_gpu_blocks() 
             max_append_blocks = len(snapshot.candidates) * self.num_attention_layers 
             if free_blocks < max_append_blocks: # more offloading 
-                prev_dist = list(snapshot.prev_dist_dict.values())[0]
+                if len(snapshot.prev_dist_dict) > 0:
+                   prev_dist = list(snapshot.prev_dist_dict.values())[0]
+                else: 
+                    prev_dist = -1
                 if prev_dist == -1:
                     dist = [self.num_attention_layers//2] * len(snapshot.candidates)
                 elif prev_dist > 0:
@@ -1206,7 +1208,8 @@ class FlattenedCacheEngine(CacheEngineBase):
                 if num_layers_on_CPU == 0:
                     dist = [-1] * len(snapshot.candidates)
                 else:
-                    dist = [self.num_attention_layers // num_layers_on_CPU] * len(snapshot.candidates)
+                    _dist = math.floor(self.num_attention_layers / num_layers_on_CPU) - 1 
+                    dist = [_dist] * len(snapshot.candidates)
             else: 
                 dist = [prev_dist] * len(snapshot.candidates)
         else:
@@ -1263,6 +1266,18 @@ class FlattenedCacheEngine(CacheEngineBase):
         # NOTE(HONG): we need to consdier that distance change -> we are not able to know number of free blocks. 
         # NOTE(HONG): self.block_manager.get_num_free_gpu_blocks() will return free blocks before changing distance(alloc and dealloc)
 
+        # count the total block usage of the current plan 
+        # CHECKER
+        all_gpu_block_ids = m.get_all_gpu_block_ids() 
+        all_blocks = len(all_gpu_block_ids)
+        ef_dict = dict(expected_freed)
+        freed = [ef_dict[k] for k in ef_dict]
+        freed = [len(v) for v in freed]
+        freed = sum(freed) 
+        # alloc_layers: List[Tuple[int, int, List[int]]] = []
+        alloced = [len(t[2]) for t in alloc_layers]
+        alloced = sum(alloced)
+        total = all_blocks + alloced - freed 
         return Plan(dict(dealloc_layers),
                     dict(expected_freed),
                     alloc_layers,
@@ -1809,9 +1824,22 @@ class MappingTable:
             and sid in self.gpu_cpu_cache_map
         )
 
-        # logger.info(f"update_mapping table {self.__repr__()}")       
-        # logger.info(f"GPU map {self.gpu_map}")
+    def all_gpu_block_ids(self) -> set[int]:
+        """
+        Return *all* physical block-IDs currently resident in GPU memory.
 
+        Notes
+        -----
+        • The return value is a **set**, so duplicates (e.g., the same block
+          referenced by two layers or two sequences) are collapsed.
+        • Empty block-tables (`None` or `[]`) are skipped.
+        """
+        block_ids: set[int] = set()
+        for layer_map in self.gpu_map.values():            # seq-level
+            for blk_list in layer_map.values():            # layer-level
+                if blk_list:                               # skip None / []
+                    block_ids.update(blk_list)
+        return block_ids
     def _validate_cache(self, gpu_slot_mapping, cpu_slot_mapping, cpu_offset):
         # check if the mapping is valid 
         pass
@@ -1969,6 +1997,22 @@ class FrozenMapping:
     cpu_map: Dict[int, Dict[int, Tuple[int, ...]]]
     num_layers: int
     seq_row_order: List[int]
+    def get_all_gpu_block_ids(self) -> set[int]:
+        """
+        Return *all* physical block-IDs currently resident in GPU memory.
+
+        Notes
+        -----
+        • The return value is a **set**, so duplicates (e.g., the same block
+          referenced by two layers or two sequences) are collapsed.
+        • Empty block-tables (`None` or `[]`) are skipped.
+        """
+        block_ids: set[int] = set()
+        for layer_map in self.gpu_map.values():            # seq-level
+            for blk_list in layer_map.values():            # layer-level
+                if blk_list:                               # skip None / []
+                    block_ids.update(blk_list)
+        return block_ids
 @dataclass(frozen=True)
 class Snapshot:
     mapping: FrozenMapping

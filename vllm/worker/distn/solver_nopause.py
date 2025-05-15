@@ -10,7 +10,8 @@ class Request:
         self.layer_time = layer_time
         self.deposit_count = deposit_count
         self.slo = slo
-
+    def __repr__(self):
+        return f"Request(id={self.id}, context_len_in_blocks={self.context_len_in_blocks}, layer_time={self.layer_time}, deposit_count={self.deposit_count}, slo={self.slo})"
 class Result:
     def __init__(self, id: str, resume: bool, n: int, offload_num: int, slo_fail: float, actual_time: float, window: int):
         self.id = id
@@ -19,7 +20,6 @@ class Result:
         self.offload_num = offload_num 
         self.slo_fail = slo_fail
         self.actual_time = actual_time
-        
         self.window = window
 
 class Solver:
@@ -36,11 +36,14 @@ class Solver:
 
 # === 2. floor/ceil 값 미리 계산 ===
         floor_val = {n: math.floor(L / n) for n in range(1, L+2)}
-
+        print(f"floor_val: {floor_val}")
 # === 3. 모델 생성 및 설정 ===
         model = gp.Model('block_solver')
         model.Params.NonConvex = 2    # 비선형 곱 제약 허용
-
+        model.Params.OutputFlag     = 1          # ensure console output
+        model.Params.DisplayInterval = 1         # progress every second
+        model.Params.Presolve = 0
+        model.setParam("LogFile", "test_solver.log")    # also save to file
 # === 4. 의사결정 변수 ===
         resume        = model.addVars(requests, vtype=GRB.BINARY, name='resume')
 
@@ -48,10 +51,10 @@ class Solver:
         offload_num = model.addVars(requests, lb=0, ub=L, vtype=GRB.INTEGER, name='offload_num')
 
         decode_steps = model.addVar(lb=4, ub=window_ub, vtype=GRB.INTEGER, name='decode_steps')
+        # decode_steps = model.addVar(lb=1, ub=1, vtype=GRB.INTEGER, name='decode_steps')
 
         offload_num_constr = {(r, i): model.addVar(vtype=GRB.BINARY, name=f"onc_{i}") for i in range(1, L+2) for r in requests}
 
-        print(floor_val)
 
         for r in requests:
             model.addConstr(gp.quicksum(offload_num_constr[(r, i)] for i in range(1, L+2)) == 1)
@@ -70,7 +73,7 @@ class Solver:
 
 # 5.2 batch_layer = max(layer_time[r] * resume[r])
         for r in requests:
-            model.addConstr(batch_layer >= layer_time[r] * resume[r],
+            model.addConstr(batch_layer >= gp.quicksum(layer_time[r] * resume[r] for r in requests),
                             name=f"batch_layer_{r}")
 
         model.addConstr(1 <= gp.quicksum(resume[r] for r in requests), name="should execute more than 1")
@@ -86,7 +89,6 @@ class Solver:
 
 # 5.4 comp_time = batch_layer * L
         model.addConstr(comp_time == batch_layer * L, name="comp_time_def")
-
 # 5.5 token_time = max(comm_time, comp_time)
         model.addGenConstrMax(token_time, [comm_time, comp_time], name="token_time_max")
 
@@ -123,7 +125,8 @@ class Solver:
 # === 6. 목적함수 및 최적화 ===
         goodput = model.addVar(lb=0, name='obj')
         model.addConstr(goodput * token_time == gp.quicksum(resume[r] for r in requests) - slo_fail_per_decode.sum())
-        model.setObjective(goodput, GRB.MAXIMIZE)
+        # model.setObjective(goodput, GRB.MAXIMIZE)
+        model.setObjective(token_time, GRB.MINIMIZE)
         model.Params.OutputFlag = 1
         model.optimize()
 

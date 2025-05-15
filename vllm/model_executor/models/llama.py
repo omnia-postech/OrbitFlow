@@ -73,6 +73,8 @@ def init_prefetch_state(gpu_cpu_cache_map: dict[int, list[int]]):
     for (sid, mask) in (gpu_cpu_cache_map.items()):
         cpu_layers = [i for i, v in enumerate(mask) if v == 0]
         if not cpu_layers:                      # sequence fully on GPU
+            next_cpu[sid] = None
+            gap[sid] = None
             continue
         next_cpu[sid] = cpu_layers[0]
 
@@ -568,7 +570,6 @@ class LlamaModel(nn.Module):
         work_map = {sid: layer_flags[:]           # shallow copy of each list
                     for sid, layer_flags in gpu_cpu_cache_map.items()}
         gap, next_cpu = init_prefetch_state(work_map) 
-        
         if kv_caches_cpu[0].numel()>0:
             assert kv_caches_cpu[0].is_pinned(), "CPU KV cache must be pinned for non_blocking=True"
 
@@ -821,7 +822,6 @@ class LlamaModel(nn.Module):
                                 cpu_offset=attn_metadata.cpu_offset, 
                                 prefetch_offset=attn_metadata.cpu_offset
                             )                       
-                            # logger.critical(f"[Layer {layer_num}][Init Prefetch for Layer{tgt_layer} (seq{seqs_to_prefetch})]")
                             # logger.info(f"[Layer {layer_num}][Init Prefetch for Layer{tgt_layer} (seq{seqs_to_prefetch})] old slot_mapping {layer_metas[tgt_layer].slot_mapping}")
                             slot_mapping = layer_metas[tgt_layer].slot_mapping
                             _seqs = list(seqs_to_prefetch)
@@ -891,6 +891,7 @@ class LlamaModel(nn.Module):
                         # if we ran out of zeros, mark done
                         if 0 not in work_map[sid][tgt_layer+1:]:
                             next_cpu[sid] = None
+                            gap[sid] = None
                     
             # flat kv cache, no offload
             elif len(kv_caches) == 1: 
