@@ -9,7 +9,7 @@ export VLLM_CONFIGURE_LOGGING=1
 LOGGING_LEVEL=CRITICAL
 ROOT="/home/heelim/vllm"
 
-FIGURE_ONLY=0
+FIGURE_ONLY=1
 EXP_LIST=(Debug)                         # ← your “experiments”
 shift
 METHOD_LIST=("$@")      # ← indexes into JSON above
