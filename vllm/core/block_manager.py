@@ -1103,7 +1103,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         Returns:
             AllocStatus: The AllocStatus for the given sequence group.
         """
-        num_touched, alloc_stat = self._can_resume(seq_group, Device.GPU, SequenceStatus.SWAPPED,
+        return self._can_resume(seq_group, Device.GPU, SequenceStatus.SWAPPED,
                               prefetch_distance=prefetch_distance,
                               num_lookahead_slots=num_lookahead_slots,
                               num_blocks_touched=num_blocks_touched)

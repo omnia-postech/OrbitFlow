@@ -603,8 +603,9 @@ class Scheduler:
 
             # ② layer_time  (토큰 수로부터 선형추정: 기존 상수 그대로)
             num_toks   = len(seq.data._cached_all_token_ids)
-            layer_time = (PROFILED_A * num_toks + PROFILED_B) / 32
-
+            layer_time = (1.001743183e-06 * num_toks + 0.0495196) / 32
+# PROFILED_A = 1.0017431830666432e-06
+# PROFILED_B = 0.049519613282613506
             # ③ deposit / SLO
             deposit = self.deposit_map.get(str(seq_id), 0)
             slo     = 1 / self.slo_from_delaysim[req_id]
