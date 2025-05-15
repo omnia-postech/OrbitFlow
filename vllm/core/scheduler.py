@@ -18,7 +18,7 @@ from vllm.sequence import (Sequence, SequenceData, SequenceGroup,
                            SequenceStatus)
 from vllm.utils import Device, PyObjectCache
 from gurobipy import GRB
-from vllm.worker.distn.solver import Solver, Result, Request, BetterSolver
+from vllm.worker.distn.solver import Solver, Result, Request
 
 logger = init_logger(__name__)
 
