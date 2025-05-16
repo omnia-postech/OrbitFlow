@@ -1150,7 +1150,7 @@ class Scheduler:
             elif self.cache_config.prefetch_mode in ['static']: 
                 prefetch_distance = self.cache_config.prefetch_distance # use the same distance as the rest of the scheduler
             elif self.cache_config.prefetch_mode in ['selectn', "flexgen", "distn_single"]:
-                prefetch_distance = -2 # as long as there is blocks enough for 1 layer, we will eventually swap it in #FIXME 
+                prefetch_distance = -1 # as long as there is blocks enough for 1 layer, we will eventually swap it in #FIXME 
             else: 
                 prefetch_distance = -1 # default
             touched_blocks, alloc_status = self.block_manager.can_resume(
@@ -1526,8 +1526,20 @@ class Scheduler:
         swapped_in = SchedulerSwappedInOutputs.create_empty()
 
         # If any requests are swapped, prioritized swapped requests.
-        if not self.swapped:
-            prefills = self._schedule_prefills(budget,
+        if self.cache_config.static_batching:
+            logger.info(f"swapped: {[seq.request_id for seq in self.swapped]}, paused_cpu: {[seq.request_id for seq in self.paused_cpu]}")            
+            logger.info(f"running: {[seq.request_id for seq in self.running]}, paused by fallback mechanism: {[seq.request_id for seq in self.paused]}")            
+            logger.info(f"waiting: {[seq.request_id for seq in self.waiting]}")
+            num_current_requests = len(self.running) + len(self.swapped) + len(self.paused_cpu) + len(self.paused)
+            logger.info(f"live requests in batch: {num_current_requests}")
+            if not self.swapped and not self.paused_cpu and num_current_requests == 0:
+                logger.info(f"No requests in the running queue, scheduling new requests")
+                prefills = self._schedule_prefills(budget,
+                                                curr_loras,
+                                                enable_chunking=False)
+        else:
+            if not self.swapped and not self.paused_cpu:
+                prefills = self._schedule_prefills(budget,
                                                curr_loras,
                                                enable_chunking=False)
 
@@ -1542,6 +1554,7 @@ class Scheduler:
         # Don't schedule decodes if prefills are scheduled.
         # NOTE: If `_schedule_prefills` doesn't enable chunking, self.running
         # only contains decode requests, not chunked prefills.
+        # NOTE(HONG): is_paused_to_resume is not about preemption requests, but requests that have been paused by Our fallback mechanism
         if len(prefills.seq_groups) == 0:
             running_scheduled, is_paused_to_resume = self._schedule_running(budget,
                                                        curr_loras,

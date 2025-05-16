@@ -92,6 +92,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         self.prefetch_distance = cache_config.prefetch_distance 
         self.merge_prefetch_buffer = cache_config.merge_prefetch_buffer     
         self.pause_and_resume = cache_config.pause_and_resume
+        self.static_batching = cache_config.static_batching
         # prefetch_enabled = True 
         # Initialize the cache.
         self.gpu_cache = self._allocate_kv_cache_gpu(

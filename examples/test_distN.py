@@ -607,6 +607,7 @@ def main(configs):
     pause_and_resume = configs.pause_and_resume if hasattr(configs, "pause_and_resume") else False
     batch_size = trace.batch_size if hasattr(trace, "batch_size") else BATCH_SIZE
     # prompts = trace.requests if hasattr(trace, "requests") else trace.samples
+    static_batching = configs.static_batching if hasattr(configs, "static_batching") else False
     
     print(f"batch_size: {batch_size}")
     print(f"prefetch_mode: {prefetch_mode}")
@@ -615,6 +616,7 @@ def main(configs):
     print(f"num_gpu_blocks_override: {num_gpu_blocks_override}")
     print(f"merge_prefetch_buffer: {merge_prefetch_buffer}")
     print(f"pause_and_resume: {pause_and_resume}")
+    print(f"static_batching: {static_batching}")
     
     if flattened_cache and num_gpu_blocks_override is not None:
         num_gpu_blocks_override *= 32 
@@ -638,6 +640,7 @@ def main(configs):
         flattened_cache=flattened_cache,
         merge_prefetch_buffer=merge_prefetch_buffer,
         pause_and_resume=pause_and_resume,
+        static_batching=static_batching,
         disable_sliding_window=True,
     )
     print(f"Logging to {configs.output_log}")
