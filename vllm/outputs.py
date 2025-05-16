@@ -117,6 +117,7 @@ class RequestOutput:
         encoder_prompt_token_ids: Optional[List[int]] = None,
         num_cached_tokens: Optional[int] = None,
         solver_time: Optional[float] = None,
+        solver_estimated_time: Optional[float] = None,
         *,
         multi_modal_placeholders: Optional[MultiModalPlaceholderDict] = None,
     ) -> None:
@@ -133,6 +134,7 @@ class RequestOutput:
         self.encoder_prompt_token_ids = encoder_prompt_token_ids
         self.num_cached_tokens = num_cached_tokens
         self.solver_time = solver_time
+        self.solver_estimated_time = solver_estimated_time
     @classmethod
     def new(
         cls,
@@ -306,6 +308,7 @@ class RequestOutput:
             "num_cached_tokens": num_cached_tokens,
             "multi_modal_placeholders": seq_group.multi_modal_placeholders,
             "solver_time":seq_group.solver_time,
+            "solver_estimated_time":seq_group.solver_estimated_time,
         }
 
         if use_cache:

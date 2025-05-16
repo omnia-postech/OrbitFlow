@@ -18,7 +18,8 @@ from vllm.sequence import (Sequence, SequenceData, SequenceGroup,
                            SequenceStatus)
 from vllm.utils import Device, PyObjectCache
 from gurobipy import GRB
-from vllm.worker.distn.solver import Solver, Result, Request
+from vllm.worker.distn.solver import Request
+from vllm.worker.distn.solver import Solver_updated as Solver
 
 logger = init_logger(__name__)
 
@@ -159,6 +160,7 @@ class SchedulerOutputs:
     running_queue_size: int
     preempted: int
     solver_time: float
+    solver_estimated_time: float
     def __post_init__(self):
         # Swap in and swap out should never happen at the same time.
         assert not (self.blocks_to_swap_in and self.blocks_to_swap_out)
@@ -237,6 +239,7 @@ class SchedulerRunningOutputs:
 
     # logging solver time 
     solver_time: float = 0.0
+    solver_estimated_time: float = 0.0
     @classmethod
     def create_empty(cls) -> "SchedulerRunningOutputs":
         return SchedulerRunningOutputs(
@@ -752,6 +755,7 @@ class Scheduler:
 
                 # Do preemption
                 if do_preempt:
+                    logger.critical("Do preemption")
                     preempted_mode = self._preempt(victim_seq_group,
                                                    blocks_to_swap_out)
                     if preempted_mode == PreemptionMode.RECOMPUTE:
@@ -794,18 +798,18 @@ class Scheduler:
                 if curr_loras is not None and seq_group.lora_int_id > 0:
                     curr_loras.add(seq_group.lora_int_id)
         # temp # (xinyue) debugging the solver
-        # global file_no
-        # file_name = f"/home/xinyuema/vllm/vllm/worker/distn/snapshot/step{file_no}.pt"
-        # request_list = self._make_solver_requests(ret.decode_seq_groups)
-        # bandwidth = 25.19 * 1024**3  # B/s
-        # head_size = 128
-        # num_kv_heads = 8
-        # per_token_bytes = 2 * 2 * head_size * num_kv_heads
-        # block_bytes = per_token_bytes * self.block_manager.block_size
-        # block_bandwidth =  bandwidth / block_bytes
-        # gpu_block_capacity=self.block_manager.num_total_gpu_blocks
-        # packed_request = [request_list, block_bandwidth, gpu_block_capacity]
-        # torch.save(packed_request, file_name)
+        global file_no
+        file_name = f"/home/xinyuema/vllm/vllm/worker/distn/snapshot/step{file_no}.pt"
+        request_list = self._make_solver_requests(ret.decode_seq_groups)
+        bandwidth = 25.19 * 1024**3  # B/s
+        head_size = 128
+        num_kv_heads = 8
+        per_token_bytes = 2 * 2 * head_size * num_kv_heads
+        block_bytes = per_token_bytes * self.block_manager.block_size
+        block_bandwidth =  bandwidth / block_bytes
+        gpu_block_capacity=self.block_manager.num_total_gpu_blocks
+        packed_request = [request_list, block_bandwidth, gpu_block_capacity]
+        torch.save(packed_request, file_name)
         # file_no += 1
         # # TODO(HONG): 매 호출마다 동일 계산 위로 빼는게 좋음. 
         # bandwidth = 25.19 * 1024**3  # B/s
@@ -825,6 +829,7 @@ class Scheduler:
         # ret.solver_time += solver_t               # 기록
 
         ret.solver_time = 0.0
+        ret.solver_estimated_time = 0.0
         if self.cache_config.pause_and_resume and self.cache_config.prefetch_mode == "solver":            
             # ────────────── [ENTRY] ──────────────
             logger.info(
@@ -871,6 +876,10 @@ class Scheduler:
             # if signature_changed:
             #         self.decode_window_left = 0
             
+            # (xinyue) lots of things not checked here!! 
+            # 1. anything preempted, should not happen... Get a signal from cache_engine! 
+            # 2. cur_sig != prev_sig, wait, can we use it for everything? 
+            cond2 = signature_changed
             need_solver = (                
                 ret.decode_seq_groups and
                 self.decode_window_left == 0
@@ -961,11 +970,12 @@ class Scheduler:
                     else:
                         # ---------- ② feasible -----------------------------------------
                         self.decode_window_left = sol[0].window
-                        self.resume_distances = {s.id: s.n for s in sol}                        
+                        self.resume_distances = {s.id: s.n for s in sol}        
                         logger.critical(
                             f"Solver feasible ✔  window={self.decode_window_left}  "
                             f"resume_distances={self.resume_distances}"
                         )
+                        logger.critical(sol)                
 
                         resumed_ids = {sg.seq_group.get_seqs()[0].seq_id for sg in ret.decode_seq_groups}                
                         logger.info(f"previous_paused_ids: {previous_paused_ids}, resumed_ids: {resumed_ids}")
@@ -973,7 +983,7 @@ class Scheduler:
                             is_paused_to_resume = True
 
                         break
-
+                ret.solver_estimated_time = sol.batch_time
                 self.prev_sig = cur_sig
 
         self._scheduler_running_outputs_cache[self.next_cache_id].reset()
@@ -1620,6 +1630,7 @@ class Scheduler:
             running_queue_size=len(self.running),
             preempted=preempted,
             solver_time=running_scheduled.solver_time,
+            solver_estimated_time=running_scheduled.solver_estimated_time,
         )
 
     def _schedule_chunked_prefill(self) -> SchedulerOutputs:
@@ -1995,6 +2006,7 @@ class Scheduler:
                 slots.
             enable_chunking (bool): True if chunked prefill is enabled.
         """
+        logger.critical(f"append_slots should be called EVERY STEP")
         is_prefill: bool = seq_group.is_prefill()
         num_lookahead_slots: int = self._get_num_lookahead_slots(
             is_prefill, enable_chunking)
@@ -2082,11 +2094,14 @@ class Scheduler:
         self,
         seq_group: SequenceGroup,
     ) -> List[int]:
+        logger.critical("Preemption by pause")
         for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
             seq.status = SequenceStatus.SWAPPED
         seq_id = seq.seq_id
         seq_layers_to_drop = {seq_id:list(range(self.block_manager.num_attention_layers))}
+        logger.critical(f"seq_layers_to_drop:{seq_layers_to_drop}")
         freed_gpu_blocks = self.block_manager.free_seq_by_layer(seq_layers_to_drop)
+        logger.critical(f"freed_gpu_blocks:{freed_gpu_blocks}")
         return freed_gpu_blocks
     def _swap_in(
         self,

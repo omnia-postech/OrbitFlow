@@ -774,21 +774,48 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         for known tokens. The contents of the lookahead slots are not defined.
         This is used by speculative decoding when speculating future tokens.
         """
-
+        gpu_cpu_cache_map = self.cache_config.gpu_cpu_cache_map
         num_touched_blocks = 0
         for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
+            seq_map = gpu_cpu_cache_map[seq.seq_id]
+            logger.critical(f"seq {seq.seq_id} gpu_cpu_cache_map {seq_map}")
             seq_block_tables = self.block_tables[seq.seq_id]
-            for block_table in seq_block_tables:
-                num_touched_blocks += (
-                    block_table.get_num_blocks_touched_by_append_slots(
-                        token_ids=block_table.get_unseen_token_ids(
-                            seq.get_token_ids()),
-                        num_lookahead_slots=num_lookahead_slots,
-                    ))
+            for i, block_table in enumerate(seq_block_tables):
+                if seq_map[i]:
+                    token_ids = block_table.get_unseen_token_ids(
+                                    seq.get_token_ids())
+                    _num_touched_blocks = (
+                        block_table.get_num_blocks_touched_by_append_slots(
+                            token_ids=token_ids,
+                            num_lookahead_slots=num_lookahead_slots,
+                        ))
+                    # logger.critical(f"seq {seq.seq_id} layer{i},  {_num_touched_blocks} blocks, token_ids {token_ids}")
+                else: 
+                    _num_touched_blocks = 0
+                    # logger.critical(f"seq {seq.seq_id} layer{i},  {_num_touched_blocks} blocks")
+                num_touched_blocks += _num_touched_blocks
+                    
+        logger.critical(f"num_touched_blocks {num_touched_blocks}")
 
         num_free_gpu_blocks = self.block_allocator.get_num_free_blocks(
             Device.GPU)
 
+        # if num_touched_blocks > num_free_gpu_blocks:
+        #     num_touched_blocks = 0
+        #     for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
+        #         seq_block_tables = self.block_tables[seq.seq_id]
+        #         for i, block_table in enumerate(seq_block_tables):
+        #             token_ids = block_table.get_unseen_token_ids(
+        #                         seq.get_token_ids())
+        #             _num_touched_blocks = (
+        #                 block_table.get_num_blocks_touched_by_append_slots(
+        #                     token_ids=token_ids,
+        #                     num_lookahead_slots=num_lookahead_slots,
+        #                 ))
+        #             if _num_touched_blocks > 1:
+        #                 logger.critical(f"seq {seq.seq_id} layer{i},  {_num_touched_blocks} blocks, token_ids {token_ids}")
+        #                 num_touched_blocks += _num_touched_blocks
+        #     raise RuntimeError("custom error: can_append_slots failed: ")
         if num_touched_blocks > num_free_gpu_blocks:
             msg = f"can_append_slots failed: {num_touched_blocks} > {num_free_gpu_blocks}; "\
                 f"total_gpu_blocks: {self.block_allocator.get_num_total_blocks(Device.GPU)},  " \

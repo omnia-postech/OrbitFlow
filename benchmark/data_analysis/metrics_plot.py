@@ -386,13 +386,13 @@ def plot_tbt_relerr(df: pd.DataFrame, csv_path: Path) -> Path:
     X-axis: token index within a request.
     Y-axis: error percentage. 0 % = perfect estimate.
     """
-    req_cols = ("time_between_tokens", "profiled_tbt")
+    req_cols = ("time_between_tokens", "solver_estimated_time",)
     if any(c not in df.columns for c in req_cols):
         raise KeyError(f"Missing column(s): {req_cols}")
 
     fig, ax = plt.subplots(figsize=(8, 4))
     for _, row in df.iterrows():
-        tbt, prof = (row["time_between_tokens"]), eval(row["profiled_tbt"])
+        tbt, prof = (row["time_between_tokens"]), eval(row["solver_estimated_time"])
         # assert(len(tbt) == len(prof))/
         if all(isinstance(x, (list, tuple)) for x in (tbt, prof)):
             tbt_arr, prof_arr = map(np.asarray, (tbt, prof))
@@ -402,8 +402,9 @@ def plot_tbt_relerr(df: pd.DataFrame, csv_path: Path) -> Path:
     ax.axhline(0, ls="--", lw=0.8, color="k")
     ax.set_xlabel("Output-token index")
     ax.set_ylabel("Relative error (%)")
-    ax.set_title("Profiled vs. actual Δt (token-index domain)")
+    ax.set_title("solver_estimated vs. actual Δt (token-index domain)")
     ax.grid(True, linewidth=0.3)
+    ax.set_ylim(-100, 100)
     plt.tight_layout()
 
     out_file = csv_path.with_name(f"{csv_path.stem}_tbt_relerr.png")

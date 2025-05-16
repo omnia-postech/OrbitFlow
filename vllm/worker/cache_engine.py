@@ -1278,6 +1278,8 @@ class FlattenedCacheEngine(CacheEngineBase):
         alloced = [len(t[2]) for t in alloc_layers]
         alloced = sum(alloced)
         total = all_blocks + alloced - freed 
+        logger.critical(f"total={total}, cur={all_blocks}, alloced={alloced}, freed={freed}")
+        
         return Plan(dict(dealloc_layers),
                     dict(expected_freed),
                     alloc_layers,

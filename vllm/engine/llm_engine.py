@@ -1176,6 +1176,10 @@ class LLMEngine:
                 seq_group.set_solver_time(solver_overhead)
             else: 
                 seq_group.set_solver_time(0)
+            if solver_estimate:=scheduler_outputs.solver_estimated_time:
+                seq_group.set_solver_estimated_time(solver_estimate)
+            else: 
+                seq_group.set_solver_estimated_time(100)
             request_output = RequestOutputFactory.create(
                 seq_group,
                 self.seq_id_to_seq_group,

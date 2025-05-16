@@ -17,7 +17,8 @@ class Request:
         self.gpu_layers_on_gpu = gpu_layers_on_gpu
 """
 import torch 
-from solver  import Solver
+from solver  import Solver_updated as Solver
+# from solver  import Solver as Solver
 
 from math import floor
 from typing import List, Dict, Tuple, Union, Optional
@@ -64,6 +65,7 @@ steps = [0]
 for step in steps: 
     solver_req = torch.load(path.format(step), weights_only=False)
     request_list, block_bandwidth, gpu_block_capacity = solver_req 
+    request_list[0].layer_time = 0.10
     print("request_list", request_list)
     print("block_bandwidth", block_bandwidth)
     print("gpu_block_capacity", gpu_block_capacity)

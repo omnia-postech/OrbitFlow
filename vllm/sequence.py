@@ -681,6 +681,7 @@ class SequenceGroup:
         self.cached_request_output = None
 
         self.solver_time = 0.0
+        self.solver_estimated_time=100
     @property
     def prompt(self) -> Optional[str]:
         return self.first_seq.prompt
@@ -792,6 +793,9 @@ class SequenceGroup:
     def set_solver_time(self, time: float) -> None:
         """Sets the set_solver_time for Request level timings."""
         self.solver_time = time
+    def set_solver_estimated_time(self, time: float) -> None:
+        """Sets the set_solver_time for Request level timings."""
+        self.solver_estimated_time = time
 
     def maybe_set_first_scheduled_time(self, time: float) -> None:
         """Sets the first scheduled time and time in queue for Request

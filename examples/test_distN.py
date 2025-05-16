@@ -268,6 +268,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                 "profiled_tbt": [],
                 "time_between_tokens": [],
                 "solver_time": [],
+                "solver_estimated_time": [],
                 "decode_length": 0,
                 "expected_output_length": req_obj.output_length,
                 "stall_times": [],
@@ -324,6 +325,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
         "end_to_end_time", "decode_time",
         "time_per_output_token", "time_between_tokens",
         "finish_reason", "solver_time",
+        "solver_estimated_time",
         "profiled_tbt", "expected_output_length",
         "stall_durations",
     ])
@@ -382,20 +384,29 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                 decode_rids = list(set([output.request_id for output in step_outputs])) 
                 decode_wall += elapsed_time_step
                 step_tokens = sum([request_metadata[rid]["prompt_length"] + request_metadata[rid]['decode_length']+1 for rid in decode_rids])
+                temp_step_tokens = {rid: request_metadata[rid]["prompt_length"] + request_metadata[rid]["decode_length"]+1 for rid in decode_rids}
+                logger.critical(f"Step {step_count}, step_tokens = {temp_step_tokens}")
+                
                 profiled_res = PROFILED_A * step_tokens + PROFILED_B 
                 if not hasattr(step_outputs[0], "solver_time"):
                     solver_time = 0.0
                 else: 
                     solver_time = step_outputs[0].solver_time
+                if not hasattr(step_outputs[0], "solver_estimated_time"):
+                    solver_estimated_time = 0.0
+                else: 
+                    solver_estimated_time = step_outputs[0].solver_estimated_time
             else: 
                 prefill_rids = list(set([output.request_id for output in step_outputs])) 
                 prefill_wall += elapsed_time_step
                 profiled_res = PROFILED_A * step_tokens + PROFILED_B 
                 step_tokens = sum([request_metadata[rid]["prompt_length"] for rid in prefill_rids])
                 solver_time = 0.0
+                solver_estimated_time = 100
             consecutive_no_output = 0
         else: 
             solver_time = 0.0
+            solver_estimated_time = 100 
             if queue: 
                 time.sleep(0.1) # wait for a while to avoid busy waiting 
             else: 
@@ -423,7 +434,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                 sim.last_decode_time = 0
                 # This is the first token for that request
                 received_requests.append(rid)
-                prefill_rids.append(rid)
+                # prefill_rids.append(rid)
                 # We'll treat the entire prompt as prefill
                 # i.e., output.prompt_token_ids is the input
                 finished_tokens += len(output.prompt_token_ids)
@@ -433,7 +444,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
             else:
                 sim.last_decode_time = elapsed_time_step
                 # Another token
-                decode_rids.append(rid)
+                # decode_rids.append(rid)
                 # now = time.time()
 
                 sim.on_token(rid, step_end)
@@ -442,6 +453,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                 request_metadata[rid]["token_timestamps"].append(step_end)
                 request_metadata[rid]["time_between_tokens"].append(elapsed_time_step)
                 request_metadata[rid]["solver_time"].append(solver_time)
+                request_metadata[rid]["solver_estimated_time"].append(solver_estimated_time)
                 request_metadata[rid]["profiled_tbt"].append(profiled_res)
                 request_metadata[rid]["decode_length"] += 1
                 finished_tokens += 1
@@ -505,6 +517,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                     "finish_reason": finish_reason,
                     # "time_between_tokens": json.dumps(per_token_latencies),
                     "solver_time": json.dumps(request_metadata[rid]["solver_time"]),
+                    "solver_estimated_time": json.dumps(request_metadata[rid]["solver_estimated_time"]),
                     "time_between_tokens": json.dumps(request_metadata[rid]["time_between_tokens"]),
                     "profiled_tbt": request_metadata[rid]["profiled_tbt"],
                     "expected_output_length": request_metadata[rid]["expected_output_length"],
