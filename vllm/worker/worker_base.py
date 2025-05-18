@@ -253,8 +253,8 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         logger.debug(f"[worker][broadcast_data keys] {list(broadcast_data.keys())}")
         worker_input = WorkerInput.from_broadcasted_tensor_dict(broadcast_data)
     
-        pause_layers = broadcast_data.pop('pause_layers')
-        resume_layers = broadcast_data.pop('resume_layers')
+        # pause_layers = broadcast_data.pop('pause_layers')
+        # resume_layers = broadcast_data.pop('resume_layers')
         cache_plan = broadcast_data.pop('cache_plan')
         dist_dict = broadcast_data.pop('dist_dict')
         sid2row = broadcast_data.pop('sid2row')
@@ -262,9 +262,9 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         new_gpu_blocks = broadcast_data.pop('new_gpu_blocks')
         cached_all_token_ids  = broadcast_data.pop('cached_all_token_ids')
 
-        logger.debug(f"[worker][pause_layers ] {pause_layers}")
-        logger.debug(f"[worker][resume_layers] {resume_layers}")
-        logger.debug(f"[worker][cache_plan   ] dealloc={cache_plan.dealloc_layers}, alloc={cache_plan.alloc_layers}, resize={cache_plan.prefetch_resize}")
+        # logger.debug(f"[worker][pause_layers ] {pause_layers}")
+        # logger.debug(f"[worker][resume_layers] {resume_layers}")
+        logger.debug(f"[worker][cache_plan   ] dealloc={cache_plan.dealloc_layers}, alloc={cache_plan.alloc_layers}, resize={cache_plan.prefetch_resize}, pause={cache_plan.pause_layers}")
         logger.debug(f"[worker][dist_dict    ] {dist_dict}")
         logger.debug(f"[worker][sid2row      ] {sid2row}")
         # logger.debug(f"[worker][bm           ] {bm}")
@@ -282,14 +282,14 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         # logger.debug(f"[worker] registering block_manager to cache_engine#{worker_input.virtual_engine}")
         # cache_engine.register_bm(bm)
 
-        if cache_engine.pause_and_resume:
-            if pause_layers or resume_layers:
-                logger.debug(f"[worker] executing pause/resume on engine")
-                cache_engine.execute_pause_resume(
-                    pause_layers, resume_layers
-                )
+        # if cache_engine.pause_and_resume:
+        #     if pause_layers or resume_layers:
+        #         logger.debug(f"[worker] executing pause/resume on engine")
+        #         cache_engine.execute_pause_resume(
+        #             pause_layers, resume_layers
+        #         )
 
-        if cache_plan.dealloc_layers or cache_plan.alloc_layers or cache_plan.prefetch_resize:
+        if cache_plan.dealloc_layers or cache_plan.alloc_layers or cache_plan.prefetch_resize or cache_plan.pause_layers:
             logger.debug(f"[worker] executing cache_plan on engine#{worker_input.virtual_engine}")
             cache_engine.execute_cache_plan(cache_plan, model_input.attn_metadata, sid2row, new_gpu_blocks)
         
@@ -307,26 +307,27 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         cache_engine.update_mapping(attn_meta, seq_group_metadata,
                                     finished_requests, paused_cpu_seq_groups)
         # 2. build pause/resume plan
-        if cache_engine.pause_and_resume:
-            pause_plan, resume_plan = cache_engine.build_pause_resume_plan()
-        else:
-            logger.debug(f"[driver] pause and resume feature => false")
-            pause_plan = resume_plan = None
+        # if cache_engine.pause_and_resume:
+        #     pause_plan, resume_plan = cache_engine.build_pause_resume_plan()
+        # else:
+        #     logger.debug(f"[driver] pause and resume feature => false")
+        #     pause_plan = resume_plan = None
+
         # 3. build cache plan
         total_context_lens = attn_meta.seq_lens
         is_decoding = attn_meta.decode_metadata is not None
         logger.debug(f"[driver] is_decoding: {is_decoding}")
-        cache_plan, dist = cache_engine.build_cache_plan(seq_group_metadata, total_context_lens, is_decoding)
+        cache_plan, dist = cache_engine.build_cache_plan(seq_group_metadata, total_context_lens, is_decoding, cache_engine.pause_and_resume)
         # pack into broadcastable structure
         plan_data = {
-            'pause_layers': pause_plan,
-            'resume_layers': resume_plan,
+            # 'pause_layers': pause_plan,
+            # 'resume_layers': resume_plan,
             'cache_plan': cache_plan,
             'dist_dict': dist,
             'sid2row': cache_engine.mapping.sid2row,
         }
         new_gpu_blocks = []
-        if cache_plan.dealloc_layers or cache_plan.alloc_layers or cache_plan.prefetch_resize:
+        if cache_plan.dealloc_layers or cache_plan.alloc_layers or cache_plan.prefetch_resize or cache_plan.pause_layers:
             new_gpu_blocks=cache_engine._execute_plan(cache_plan, seq_group_metadata, attn_meta)
             cache_engine.mapping.prev_dist_dict = dist
         plan_data['new_gpu_blocks'] = new_gpu_blocks
