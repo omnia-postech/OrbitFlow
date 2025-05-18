@@ -61,7 +61,7 @@ path = "/home/xinyuema/vllm/vllm/worker/distn/snapshot/step{}.pt"
 steps = list(range(49))
 steps = [0]
 
-
+solver = Solver()
 for step in steps: 
     solver_req = torch.load(path.format(step), weights_only=False)
     request_list, block_bandwidth, gpu_block_capacity = solver_req 
@@ -69,7 +69,7 @@ for step in steps:
     print("request_list", request_list)
     print("block_bandwidth", block_bandwidth)
     print("gpu_block_capacity", gpu_block_capacity)
-    output = Solver.solve(request_list, block_bandwidth=block_bandwidth, gpu_block_capacity=gpu_block_capacity)
+    output = solver.solve(request_list, block_bandwidth=block_bandwidth, gpu_block_capacity=gpu_block_capacity)
     print(output)
     
     # offload_num = {r.id: list(range(31)) for r in request_list}

@@ -19,7 +19,15 @@ import torch
 import bisect
 import torch
 import csv, os, pathlib
-
+from vllm.worker.distn.solver import ProfileBasedEstimator
+import time
+import os
+import json
+import pandas as pd
+from collections import defaultdict
+import logging
+import torch
+from vllm.sampling_params import SamplingParams
 torch.set_printoptions(edgeitems=2, linewidth=120, sci_mode=True)
 # --- Config ---
 MODEL = "/home/jongseop/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"
@@ -30,20 +38,15 @@ MAX_MODEL_LEN = 13000
 BLOCK_SIZE  = 16
 SLO_THRESHOLD = 0.5      
 CSV_OUTPUT_FILE = "metrics.csv"
-PROFILED_A = 1.0017431830666432e-06
-PROFILED_B = 0.049519613282613506
+# PROFILED_A = 1.0017431830666432e-06
+# PROFILED_B = 0.049519613282613506
 test_trace = {
     "description": "Continuous batching; BS = 4; A6000 with 48GB memory; Continuous batched request too large to fit in available memory.", 
     "batch_size": 4, 
     "max_model_len": 10000,
     "num_gpu_blocks_override": 400,
     "samples": {
-        "sample1":  {"prompt": 250, "max_tokens": 1500, "arrive_at_step": 0, "schedule_at_step": 0, "wait_time": 0},
-        "sample2":  {"prompt": 500, "max_tokens": 2000, "arrive_at_step": 0, "schedule_at_step": 0, "wait_time": 0},
-        "sample3":  {"prompt": 250, "max_tokens": 2000, "arrive_at_step": 0, "schedule_at_step": 0, "wait_time": 0},
-        "sample4":  {"prompt": 500, "max_tokens": 2000, "arrive_at_step": 0, "schedule_at_step": 0, "wait_time": 0},
-        "sample5":  {"prompt": 5000, "max_tokens": 2000, "arrive_at_step": 1450, "schedule_at_step": 1500, "wait_time": 50},
-        "sample6":  {"prompt": 1000, "max_tokens": 1500, "arrive_at_step": 1475, "schedule_at_step": 2000, "wait_time": 525}
+        "sample1":  {"prompt": 250, "max_tokens": 1500, "arrive_at_step": 0, "schedule_at_step": 0, "wait_time": 0}
     }
 }
 DEFAULT_PROMPTS = test_trace
@@ -195,7 +198,7 @@ def enqueue_batch(engine, batch, request_metadata):
         )
         engine.add_request(req_id, prompt_obj, sampling_params)
 
-def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=False):
+def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=False, estimator=None):
     """
     Step-based inference driver that consumes a Trace object (dictionary-based).
     Each request's arrival_time is interpreted as the 'arrive_at_step'.
@@ -212,14 +215,8 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
     now map to request.arrival_time, request.input_length, request.output_length, respectively.
     """
 
-    import time
-    import os
-    import json
-    import pandas as pd
-    from collections import defaultdict
-    import logging
-    import torch
-    from vllm.sampling_params import SamplingParams
+    # temp 
+    assert(estimator is not None)
     logger = logging.getLogger("vllm")
     consecutive_no_output = 0
     solver_invocations = 0
@@ -346,7 +343,10 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                     max_slo = req_obj.slo
                     slo = sim.register(req_id, max_slo)
                 else: 
-                    max_slo = PROFILED_A*(req_obj.input_length + req_obj.output_length) + PROFILED_B
+                    # max_slo = PROFILED_A*(req_obj.input_length + req_obj.output_length) + PROFILED_B
+                    max_slo = estimator.estimate_by_profiled_results(tokens=req_obj.input_length + req_obj.output_length,
+                                                which="NoPrefetch" ,
+                                                mode="upper_quad")
                     slo = sim.register(req_id, max_slo)
                 logger.critical(f"Enqueued request {req_id} with max_slo {max_slo} and SLO {(1/sim.v[req_id]):.3f} ms per token")
             # Remove them from the queue
@@ -387,7 +387,9 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                 temp_step_tokens = {rid: request_metadata[rid]["prompt_length"] + request_metadata[rid]["decode_length"]+1 for rid in decode_rids}
                 logger.critical(f"Step {step_count}, step_tokens = {temp_step_tokens}")
                 
-                profiled_res = PROFILED_A * step_tokens + PROFILED_B 
+                profiled_res = estimator.estimate_by_profiled_results(tokens=step_tokens,
+                                                which="NoPrefetch",
+                                                mode="upper_quad")
                 if not hasattr(step_outputs[0], "solver_time"):
                     solver_time = 0.0
                 else: 
@@ -399,7 +401,9 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
             else: 
                 prefill_rids = list(set([output.request_id for output in step_outputs])) 
                 prefill_wall += elapsed_time_step
-                profiled_res = PROFILED_A * step_tokens + PROFILED_B 
+                profiled_res = estimator.estimate_by_profiled_results(tokens=step_tokens,
+                                                which="NoPrefetch",
+                                                mode="upper_quad")
                 step_tokens = sum([request_metadata[rid]["prompt_length"] for rid in prefill_rids])
                 solver_time = 0.0
                 solver_estimated_time = 100
@@ -621,6 +625,20 @@ def main(configs):
     batch_size = trace.batch_size if hasattr(trace, "batch_size") else BATCH_SIZE
     # prompts = trace.requests if hasattr(trace, "requests") else trace.samples
     static_batching = configs.static_batching if hasattr(configs, "static_batching") else False
+
+    if configs.profiled_results:
+        p_path = configs.profiled_results
+    else:
+        p_path = "/home/xinyuema/vllm/benchmark/scripts/profiled_results.json"
+    estimator = ProfileBasedEstimator(p_path)
+    print("Available Profiled Fitters:", estimator.available_profiles())
+    t_bt = estimator.estimate_by_profiled_results(tokens=2048,
+                                            which="NoPrefetch",
+                                            mode="upper_quad")
+    print(f"Estimated Δt per token @2048 tokens ≈ {t_bt:.4f} s")
+    # Retrieve goodness-of-fit if you wish
+    print("R² for that fit:", estimator.r2("NoPrefetch", "linear"))
+    
     
     print(f"batch_size: {batch_size}")
     print(f"prefetch_mode: {prefetch_mode}")
@@ -653,7 +671,7 @@ def main(configs):
         flattened_cache=flattened_cache,
         merge_prefetch_buffer=merge_prefetch_buffer,
         pause_and_resume=pause_and_resume,
-        static_batching=static_batching,
+        # static_batching=static_batching,
         disable_sliding_window=True,
     )
     print(f"Logging to {configs.output_log}")
@@ -663,7 +681,7 @@ def main(configs):
     
     csv_path = configs.output_log.replace(".log", ".csv")
 
-    run_inference_step_mode(engine, trace, csv_path=csv_path,enable_deposit=configs.enable_deposit)
+    run_inference_step_mode(engine, trace, csv_path=csv_path,enable_deposit=configs.enable_deposit, estimator=estimator)
 
 if __name__ == "__main__":
     from vllm.utils import FlexibleArgumentParser
@@ -708,8 +726,13 @@ if __name__ == "__main__":
                         action="store_true",
                         default=False,
                         help="whether to use use static batching instead of continuous batching")
+    parser.add_argument("--profiled-results",
+                        type=str,
+                        default="/home/xinyuema/vllm/benchmark/scripts/profiled_results.json",
+                        help="profiling results. If not provided, use the default ones.")
     args = parser.parse_args()    
     print(args)
     # --- Setup Logging ---
     logging.basicConfig(filename=args.output_log, level=logging.INFO, format="%(message)s")
+
     main(args)

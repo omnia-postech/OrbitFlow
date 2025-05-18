@@ -1,15 +1,101 @@
 import math
 import gurobipy as gp
 from gurobipy import GRB
-from typing import Optional, List
+from typing import Optional, List, Dict
 from dataclasses import dataclass, asdict
 from typing     import Iterable, Iterator
 from tabulate   import tabulate          # pip install tabulate
-
+from pathlib import Path
+import json
 from vllm.logger import init_logger
 logger = init_logger(__name__)
-PROFILED_A = 1.0017431830666432e-06
-PROFILED_B = 0.049519613282613506
+profiled_path = "~/vllm/benchmark/scripts/profiled_results.json"
+class ProfileBasedEstimator:
+    """
+    Estimate per-token latency from pre-profiled polynomial fits.
+
+    JSON format (one example):
+
+    {
+        "NoPrefetch": {
+            "linear":      { "A": 1.23e-6, "B": 3.54e-2, "R2": 0.989 },
+            "upper_quad":  { "A": 8.38e-12, "B": 8.06e-7, "C": 4.46e-2, "R2": 0.895 }
+        },
+        "Prefetch32": { ... }
+    }
+
+    *   Top-level keys  →  “which” argument
+    *   Second level     →  “mode” argument
+    *   Each mode dict   →  polynomial coefficients + optional extras (e.g. R2)
+    """
+
+    _COEFF_ORDER = ["A", "B", "C", "D", "E"]        # extend if ever needed
+
+    # ──────────────────────────────────────────────────────────────────
+    # construction
+    # ──────────────────────────────────────────────────────────────────
+    def __init__(self, profiled_path: str | Path):
+        self.profile_path = Path(profiled_path).expanduser()
+        with self.profile_path.open("r", encoding="utf-8") as f:
+            self._data: Dict[str, Dict[str, Dict[str, float]]] = json.load(f)
+
+        # pre–parse coefficient arrays for fast evaluation
+        self._coeff_cache: Dict[tuple, List[float]] = {}  # (which, mode) -> coeff list
+        for which, modes in self._data.items():
+            for mode, params in modes.items():
+                coeffs = [
+                    params[c] for c in self._COEFF_ORDER if c in params
+                ]
+                if not coeffs:
+                    raise ValueError(f"No coefficients found for {which}/{mode}")
+                self._coeff_cache[(which, mode)] = coeffs
+
+    # ──────────────────────────────────────────────────────────────────
+    # main API
+    # ──────────────────────────────────────────────────────────────────
+    def estimate_by_profiled_results(
+        self,
+        tokens: int,
+        which: str = "NoPrefetch",
+        mode: str = "linear",
+    ) -> float:
+        """
+        Parameters
+        ----------
+        tokens : int
+            Number of output tokens.
+        which  : str
+            Top-level profile key (e.g. "NoPrefetch").
+        mode   : str
+            Fit name inside that profile (e.g. "upper_quad").
+
+        Returns
+        -------
+        float
+            Estimated Δt in seconds for *one* token. (Multiply by tokens if
+            you need total sequence time.)
+        """
+        coeffs = self._coeff_cache.get((which, mode))
+        if coeffs is None:
+            raise KeyError(f"Profile '{which}' with mode '{mode}' not found.")
+
+        # polynomial evaluation: a_n x^n + ... + a1 x + a0
+        x = float(tokens)
+        estimate = 0.0
+        for power, a in enumerate(reversed(coeffs)):  # constant term first
+            estimate += a * x**power
+        return estimate
+
+    # ──────────────────────────────────────────────────────────────────
+    # convenience helpers
+    # ──────────────────────────────────────────────────────────────────
+    def available_profiles(self) -> Dict[str, List[str]]:
+        """Return {"which": [modes…], …}"""
+        return {w: list(m.keys()) for w, m in self._data.items()}
+
+    def r2(self, which: str, mode: str) -> float | None:
+        """Return stored R² if present, else None."""
+        return self._data.get(which, {}).get(mode, {}).get("R2")
 
 # ────────────────── Data-classes ──────────────────
 @dataclass
@@ -65,6 +151,10 @@ class ResultList(list):
         return max(times) if times else None
 
 class Solver:
+    def __init__(self):
+        self.profiled_estimator = ProfileBasedEstimator(profiled_path)
+        self.which = "NoPrefetch"
+        self.mode = "upper_quad"
     @staticmethod
     def solve(requests_list: list[Request], layer_num = 32, block_bandwidth = 103178.0 / 1000, gpu_block_capacity = 49152 / 80, window_ub = 1000) -> Optional[list[Result]]:
         requests = [r.id for r in requests_list]
@@ -115,7 +205,9 @@ class Solver:
             model.addConstr(gp.quicksum(offload_num_constr[(r, i)] * floor_val[i] for i in range(1, L+2)) == offload_num[r])
             # model.addConstr(move_blocks[r]ㄴ >= (L - offload_num[r]) - gpu_layers[r], name=f"mv_pos_{r}")
 
-        batch_layer  = (sum(context_blocks[r] for r in requests) * PROFILED_A + PROFILED_B) / 32
+        num_tokens = sum(context_blocks[r] for r in requests)
+        batch_layer = self.profiled_estimator.estimate_by_profiled_results(num_tokens, which="NoPrefetch", mode="upper_quad")
+        batch_layer  /= 32
         comm_time    = model.addVar(lb=0, name='comm_time')
         comp_time    = model.addVar(lb=0, name='comp_time')
         token_time   = model.addVar(lb=0, name='token_time')
@@ -232,8 +324,12 @@ class Solver:
 
 
 class Solver_updated:
-    @staticmethod
-    def solve(requests_list: list[Request], layer_num = 32, block_bandwidth = 103178.0 / 1000, gpu_block_capacity = 49152 / 80, window_ub = 1000) -> Optional[list[Result]]:
+    def __init__(self):
+        self.profiled_estimator = ProfileBasedEstimator(profiled_path)
+        self.which = "NoPrefetch"
+        self.mode = "upper_quad"
+    # @staticmethod
+    def solve(self, requests_list: list[Request], layer_num = 32, block_bandwidth = 103178.0 / 1000, gpu_block_capacity = 49152 / 80, window_ub = 1000) -> Optional[list[Result]]:
         requests = [r.id for r in requests_list]
         context_blocks = {r.id: r.context_len_in_blocks for r in requests_list}
         layer_time = {r.id: r.layer_time for r in requests_list}
@@ -274,21 +370,6 @@ class Solver_updated:
 
         decode_steps = model.addVar(lb=32, ub=window_ub, vtype=GRB.INTEGER, name='decode_steps')
 
-        # offload_num_constr = {
-        #     (r, s): model.addVar(vtype=GRB.BINARY, name=f"onc_{r}_{s}")
-        #     for r in requests for s in valid_strides
-        # }
-        # move_blocks   = model.addVars(requests, lb=0, ub=L, vtype=GRB.INTEGER, name='move_blocks')
-
-        # onc = {(r, i): model.addVar(vtype=GRB.BINARY, name=f"onc_{r}_{i}")
-        #        for r in requests for i in range(1, L + 2)}
-
-
-        # for r in requests:
-        #     model.addConstr(gp.quicksum(offload_num_constr[(r, i)] for i in range(1, L+2)) == 1)
-        #     model.addConstr(gp.quicksum(offload_num_constr[(r, i)] * i for i in range(1, L+2)) == prefetch_dist[r])
-        #     model.addConstr(gp.quicksum(offload_num_constr[(r, i)] * floor_val[i] for i in range(1, L+2)) == offload_num[r])
-            # model.addConstr(move_blocks[r]ㄴ >= (L - offload_num[r]) - gpu_layers[r], name=f"mv_pos_{r}")
         # ----- binary choice variables only for the preferred distances -----
         onc = {
             (r, d): model.addVar(vtype=GRB.BINARY, name=f"onc_{r}_{d}")
@@ -314,7 +395,11 @@ class Solver_updated:
             for r in requests),
             name="offload_num_def"
         )
-        batch_layer  = (sum(context_blocks[r] for r in requests) * PROFILED_A + PROFILED_B) / 32
+        num_tokens = sum(context_blocks[r] for r in requests)*16
+        batch_layer = self.profiled_estimator.estimate_by_profiled_results(num_tokens, which="NoPrefetch", mode="upper_quad")/32
+        # print(f"batch_layer: {batch_layer} for {num_tokens} tokens")
+        
+        # batch_layer  /= 32
         comm_time    = model.addVar(lb=0, name='comm_time')
         comp_time    = model.addVar(lb=0, name='comp_time')
         token_time   = model.addVar(lb=0, name='token_time')
@@ -331,6 +416,12 @@ class Solver_updated:
         model.addConstr(1 <= gp.quicksum(resume[r] for r in requests), name="should execute more than 1")
 
 # 5.3 comm_time 정의: 필요한 블록 수 ÷ block_bandwidth
+
+        # temp (xinyue)
+        per_block_time = self.profiled_estimator.estimate_by_profiled_results(num_tokens, which="Communication", mode="upper_quad") / (32*16) # 32 layer, 16 tokens per block
+        block_bandwidth = 1 / per_block_time
+        print(f"block_bandwidth: {block_bandwidth} blks/s")
+        block_bandwidth = 1/per_block_time
         model.addConstr(
             comm_time == gp.quicksum(
                 resume[r] * offload_num[r] * context_blocks[r]

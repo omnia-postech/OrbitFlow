@@ -367,7 +367,7 @@ class Scheduler:
         self.paused_solver_ids: set[str] = set()   # 💡 solver-fallback 으로 pause 된 id 기억
         self.prev_sig: frozenset[str] = frozenset()# 💡 이전 iteration 의 request id 집합
         self.decode_window_left: int = 0           # 💡 solver 가 정한 window(dec. steps)
-
+        self.solver = Solver()
         version = "selfattn"
         if (self.scheduler_config.runner_type == "pooling"
                 or self.cache_config.is_attention_free):
@@ -933,7 +933,7 @@ class Scheduler:
                     solver_start = time.time()                \
                     # put some head room! 
                     head_room = max(int(self.block_manager.num_total_gpu_blocks)*0.001, 100)
-                    sol = Solver.solve(                 # 💡 “resume=1” 강제 변형판
+                    sol = self.solver.solve(                 # 💡 “resume=1” 강제 변형판
                         request_list,
                         block_bandwidth=block_bandwidth,
                         gpu_block_capacity=self.block_manager.num_total_gpu_blocks - head_room,                        

@@ -111,12 +111,11 @@ def plot_time_between_tokens(df: pd.DataFrame, csv_path: Path) -> Path:
         raise KeyError("Column 'time_between_tokens' missing!")
 
     fig, ax = plt.subplots(figsize=(8, 4))
-    for _, row in df.iterrows():
+    for i, row in df.iterrows():
         tbt = row["time_between_tokens"]
         if isinstance(tbt, (list, tuple)):
             x = range(len(tbt))
             ax.scatter(x, tbt, s=8, alpha=0.6)
-
     ax.set_xlabel("Output-token index")
     ax.set_ylabel("Δt (s)")
     ax.set_title("TBT (scatter)")
@@ -420,7 +419,7 @@ def plot_tbt_relerr_wallclock(df: pd.DataFrame, csv_path: Path) -> Path:
     • X-axis: seconds since the earliest arrival.
     """
     req_cols = ("arrival_time", "time_between_tokens",
-                "profiled_tbt", "time_to_first_token")
+                "solver_estimated_time", "time_to_first_token")
     if any(c not in df.columns for c in req_cols):
         raise KeyError(f"Missing column(s): {req_cols}")
 
@@ -434,7 +433,7 @@ def plot_tbt_relerr_wallclock(df: pd.DataFrame, csv_path: Path) -> Path:
         arrival = row["arrival_time"]
         ttf     = row["time_to_first_token"]
         
-        tbt, prof = (row["time_between_tokens"]), eval(row["profiled_tbt"])
+        tbt, prof = (row["time_between_tokens"]), eval(row["solver_estimated_time"])
         # assert(len(tbt) == len(prof))
         if all(isinstance(x, (list, tuple)) for x in (tbt, prof)):
             tbt_arr, prof_arr = map(np.asarray, (tbt, prof))
@@ -448,7 +447,7 @@ def plot_tbt_relerr_wallclock(df: pd.DataFrame, csv_path: Path) -> Path:
 
             # remaining tokens
             for dt, e in zip(tbt_arr, err):
-                cum += dt
+                cum += max(dt, dt+err)
                 xs.append(cum - t0)
                 ys.append(e)
                 cs.append(color)
@@ -457,7 +456,7 @@ def plot_tbt_relerr_wallclock(df: pd.DataFrame, csv_path: Path) -> Path:
     ax.axhline(0, ls="--", lw=0.8, color="k")
     ax.set_xlabel("Wall-clock time since start (s)")
     ax.set_ylabel("Relative error (%)")
-    ax.set_title("Profiled vs. actual Δt (wall-clock domain)")
+    ax.set_title("solver_estimated_time vs. actual Δt (wall-clock domain)")
     ax.grid(True, linewidth=0.3)
     plt.tight_layout()
 

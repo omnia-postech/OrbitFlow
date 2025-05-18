@@ -1769,7 +1769,6 @@ class MappingTable:
 
 
         # HACK (xinyue) exempt preempt decode sequences due to continuous batchd prefill 
-        # is_prefill_phase = getattr(attn_meta, "prefill_metadata", None) is not None
         is_prefill_phase = attn_meta.num_prefills > 0        
         logger.debug(f"MappingTable.update: is_prefill_phase={is_prefill_phase}, finished_requests={finished_requests}, paused_cpu_seq_groups={paused_cpu_seq_groups}")
         prev_active_gpu = self.active_gpu_seqs.copy()
