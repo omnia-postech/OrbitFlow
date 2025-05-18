@@ -155,8 +155,8 @@ class Solver:
         self.profiled_estimator = ProfileBasedEstimator(profiled_path)
         self.which = "NoPrefetch"
         self.mode = "upper_quad"
-    @staticmethod
-    def solve(requests_list: list[Request], layer_num = 32, block_bandwidth = 103178.0 / 1000, gpu_block_capacity = 49152 / 80, window_ub = 1000) -> Optional[list[Result]]:
+    # @staticmethod
+    def solve(self, requests_list: list[Request], layer_num = 32, block_bandwidth = 103178.0 / 1000, gpu_block_capacity = 49152 / 80, window_ub = 1000) -> Optional[list[Result]]:
         requests = [r.id for r in requests_list]
         context_blocks = {r.id: r.context_len_in_blocks for r in requests_list}
         layer_time = {r.id: r.layer_time for r in requests_list}
