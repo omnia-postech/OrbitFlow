@@ -903,6 +903,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         seq_group_metadata,
         total_context_lens,
         is_decoding,
+        pause_and_resume,
     ) -> Tuple["Plan", Dict[int, int]]:
         """
         Step 4: Snapshot and build cache allocation/deallocation plan.
@@ -913,7 +914,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         )
         dist_dict, _ = self._select_prefetch_distance(snap, self.prefetch_distance, total_context_lens, is_decoding)
         logger.critical(f"dist:{dist_dict}")
-        plan = self._plan_cache_delta(snap, dist_dict)
+        plan = self._plan_cache_delta(snap, dist_dict, pause_and_resume)
         return plan, dist_dict
 
     def execute_pause_resume(
@@ -1220,7 +1221,8 @@ class FlattenedCacheEngine(CacheEngineBase):
         return dist, {"policy": self.prefetch_mode}
     def _plan_cache_delta(self,
                         snapshot,                 # ← the read-only view
-                        dist_dict: Dict[int, int] # ← output of policy step
+                        dist_dict: Dict[int, int], # ← output of policy step
+                        pause_and_resume: bool = False,
                         ) -> "Plan":
         """
         Derive the minimal set of cache moves required to realise `dist_dict`
@@ -1229,11 +1231,13 @@ class FlattenedCacheEngine(CacheEngineBase):
         dealloc_layers   = defaultdict(list)          # GPU ➜ CPU
         expected_freed   = defaultdict(list)
         alloc_layers: List[Tuple[int, int, List[int]]] = []  # CPU ➜ GPU
+        pause_layers: Dict[int, List[int]] = {}     # pause layers  
 
         m     = snapshot.mapping
         n_lay = m.num_layers
         _want_gpu = self._should_live_on_gpu          # convenience alias
 
+        # NOTE(HONG): ① dealloc/alloc plan following new distance
         for sid in snapshot.candidates:
             d = dist_dict.get(sid, -1)      
 
@@ -1255,6 +1259,26 @@ class FlattenedCacheEngine(CacheEngineBase):
                     expected_freed[sid].extend(gpu_layers[lyr])
 
                 # else: already in the desired place → nothing to do
+
+        # NOTE(HONG): ② dealloc plan following fallback mechanism(pausing)
+        if pause_and_resume:
+            for sid in snapshot.paused_gpu_seqs:
+                logger.info(f"[PAUSE] Processing seq_id={sid}")
+                layer_map = self.mapping.gpu_map.get(sid, {})
+                alive = [lyr for lyr, blks in layer_map.items() if blks]                
+                if len(alive) <= 1:
+                    # NOTE(HONG): 첫 레이어만 남았거나 이미 비어 있음 → offload 생략
+                    logger.info(f"[PAUSE] seq_id={sid} has one layer left, skipping")                
+                    continue
+                first_layer = min(alive)              # HACK(HONG): leaving first layer to prevent from being paused_cpu_seqs
+                layers_to_pause = [lyr for lyr in alive if lyr != first_layer]
+                logger.info(f"[PAUSE] seq_id={sid} → offloading layers except last: {layers_to_pause}")
+
+                pause_layers[sid] = layers_to_pause.copy()
+        else:
+            logger.info(f"[driver] No pause and resume feature")
+            pause_layers = None            
+
         # estimate prefetch pages -------------------------------------------------
         need_prefetch = self._estimate_prefetch_blocks(
                             snapshot.seq_group_metadata,
@@ -1284,7 +1308,9 @@ class FlattenedCacheEngine(CacheEngineBase):
         return Plan(dict(dealloc_layers),
                     dict(expected_freed),
                     alloc_layers,
-                    prefetch_resize)
+                    prefetch_resize,
+                    pause_layers)
+    
     def _execute_plan(self, plan, seq_group_metadata, attn_meta):
         logger.debug(f"[driver] _execute_plan started")
         logger.debug(f"[driver] Received plan: {plan}")
@@ -1299,6 +1325,20 @@ class FlattenedCacheEngine(CacheEngineBase):
         logger.debug(f"[driver] SID to row mapping: {sid2row}")
 
         to_worker_new_gpu_blocks: List[Tuple[int, int, List[int]]] = []
+        
+        # NOTE(HONG): fallback mechanism (pausing)
+        for sid, layers in plan.pause_layers.items():
+            freed_ids = bm.free_seq_by_layer({sid: layers})
+            logger.info(f"[PAUSE] seq_id={sid} freed_block_ids={freed_ids}")
+            for lyr in layers:
+                mapping.gpu_map[sid][lyr] = []
+                mapping._set_gpu_flag(sid, lyr, False)
+            self._paused_layers_freed[sid].extend(layers)
+            logger.info(f"[PAUSE] sid={sid} offloaded {layers} → freed={freed_ids}")
+            
+            remaining = [lyr for lyr, blks in mapping.gpu_map[sid].items() if blks]
+            logger.info(f"[PAUSE] seq_id={sid} remaining_gpu_layers after offload: {remaining}")
+            logger.info(f"[PAUSE] self.mapping: {self.mapping}")
         
         freed = bm.free_seq_by_layer(plan.dealloc_layers)
         logger.debug(f"[driver] Blocks freed by layer: {plan.dealloc_layers}")
@@ -2033,4 +2073,7 @@ class Plan:
     expected_freed: Dict[int, List[int]]           # {sid: [block-ids]}
     alloc_layers:  List[Tuple[int, int, List[int]]]# [(sid, layer, cpu_block_ids)]
     prefetch_resize: int = 0                       # extra scratch pages (optional)
+
+    # NOTE(HONG): I guess we are not using pause_layers when resume since it will automatically fetch to GPU with new distance N. 
+    pause_layers: Dict[int, List[int]] = field(default_factory=dict)
 # --------------------------------------------------------------------------

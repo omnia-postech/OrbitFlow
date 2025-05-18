@@ -797,19 +797,19 @@ class Scheduler:
                     budget.add_num_seqs(seq_group.request_id, num_running_seqs)
                 if curr_loras is not None and seq_group.lora_int_id > 0:
                     curr_loras.add(seq_group.lora_int_id)
-        # temp # (xinyue) debugging the solver
-        global file_no
-        file_name = f"/home/xinyuema/vllm/vllm/worker/distn/snapshot/step{file_no}.pt"
-        request_list = self._make_solver_requests(ret.decode_seq_groups)
-        bandwidth = 25.19 * 1024**3  # B/s
-        head_size = 128
-        num_kv_heads = 8
-        per_token_bytes = 2 * 2 * head_size * num_kv_heads
-        block_bytes = per_token_bytes * self.block_manager.block_size
-        block_bandwidth =  bandwidth / block_bytes
-        gpu_block_capacity=self.block_manager.num_total_gpu_blocks
-        packed_request = [request_list, block_bandwidth, gpu_block_capacity]
-        torch.save(packed_request, file_name)
+        # NOTE(xinyue): debugging the solver
+        # global file_no
+        # file_name = f"/home/xinyuema/vllm/vllm/worker/distn/snapshot/step{file_no}.pt"
+        # request_list = self._make_solver_requests(ret.decode_seq_groups)
+        # bandwidth = 25.19 * 1024**3  # B/s
+        # head_size = 128
+        # num_kv_heads = 8
+        # per_token_bytes = 2 * 2 * head_size * num_kv_heads
+        # block_bytes = per_token_bytes * self.block_manager.block_size
+        # block_bandwidth =  bandwidth / block_bytes
+        # gpu_block_capacity=self.block_manager.num_total_gpu_blocks
+        # packed_request = [request_list, block_bandwidth, gpu_block_capacity]
+        # torch.save(packed_request, file_name)
         # file_no += 1
         # # TODO(HONG): 매 호출마다 동일 계산 위로 빼는게 좋음. 
         # bandwidth = 25.19 * 1024**3  # B/s
