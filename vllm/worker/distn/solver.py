@@ -491,7 +491,8 @@ class Solver_updated:
             >= decode_steps - ratio[r] - deposit_count[r]     for r in requests),
             name="slo_fail_def"
         )
-        model.addConstr(gp.quicksum(slo_fail_per_decode[r] for r in requests) <= 1,
+        # adjust infeasible SLO failures here
+        model.addConstr(gp.quicksum(slo_fail_per_decode[r] for r in requests) <= 2,
                         name="slo_fail_total")
 
         # 6.8 GPU memory capacity -----------------------------------------------------------
