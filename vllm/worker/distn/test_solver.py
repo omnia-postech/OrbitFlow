@@ -18,8 +18,10 @@ class Request:
 """
 import torch 
 from solver  import Solver_updated as Solver
+# from solver import LatencySolver as Solver
 from solver import Request
 # from solver  import Solver as Solver
+import time
 
 from math import floor
 from typing import List, Dict, Tuple, Union, Optional
@@ -71,11 +73,17 @@ for step in steps:
         request_list.append(Request(
             id="dummy", context_len_in_blocks=100, layer_time=0.05, deposit_count=10, slo=0.1, gpu_layers_on_gpu=10
         ))
+        request_list.append(Request(
+            id="dummy2", context_len_in_blocks=10, layer_time=0.04, deposit_count=10, slo=0.08, gpu_layers_on_gpu=10
+        ))
     # request_list[0].layer_time = 0.10
     print("request_list", request_list)
     print("block_bandwidth", block_bandwidth)
     print("gpu_block_capacity", gpu_block_capacity)
+    start = time.time()
     output = solver.solve(request_list, block_bandwidth=block_bandwidth, gpu_block_capacity=gpu_block_capacity)
+    end = time.time()
+    print("time", end-start)
     print(output)
     
     # offload_num = {r.id: list(range(31)) for r in request_list}

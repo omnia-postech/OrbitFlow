@@ -714,7 +714,7 @@ class LatencySolver:
                 print(f"{r:>2} |   {int(resume[r].X)}    |"
                       f"      {int(offload_num[r].X):2d}     |"
                       f" {slo_fail_per_decode[r].X * decode_steps.X:8.2f} | {actual_time[r].X:10.2f}")
-            print(f"\ngoodput = {model.ObjVal:.2f}")
+            # print(f"\ngoodput = {model.ObjVal:.2f}")
             print(f"""\nMem Usage: {sum([
                 (L - offload_num[r].X) * context_blocks[r]
                 for r in requests
