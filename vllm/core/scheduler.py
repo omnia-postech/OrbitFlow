@@ -836,6 +836,7 @@ class Scheduler:
                 f"[RUNNING] {len(self.running)}  "
                 f"[WAITING] {len(self.waiting)}  "
                 f"[PAUSED]  {len(self.paused)}  "
+                f"[SWAPPED] {len(self.paused_cpu)}  "
                 f"[DECODE_CAND] {len(ret.decode_seq_groups)}  "
                 f"window_left={self.decode_window_left}"
             )
