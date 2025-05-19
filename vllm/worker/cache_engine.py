@@ -1261,17 +1261,24 @@ class FlattenedCacheEngine(CacheEngineBase):
     def _pick_removable_layers(self, layer_map: dict[int, list[int]], need_blocks: int) -> tuple[list[int], list[int]]:        
         logger.info("[RC] _pick_removable_layers called (need={need_blocks})")
 
-        # NOTE(HONG): keeping always at least one layer on the GPU 
-        alive_layers = [lyr for lyr, blks in layer_map.items() if blks]
-        if not alive_layers:
-            return [], []
-        anchor = min(alive_layers)
+        # # NOTE(HONG) - Version #1: keeping always at least one layer on the GPU 
+        # alive_layers = [lyr for lyr, blks in layer_map.items() if blks]
+        # if not alive_layers:
+        #     return [], []
+        # anchor = min(alive_layers)
         
+        # candidates = [
+        #     (lyr, layer_map[lyr])
+        #     for lyr in sorted(alive_layers, reverse=True)
+        #     if lyr != anchor                    # anchor 보호
+        # ]
+        
+        # NOTE(HONG) - Version #2: remove all layers if needed
         candidates = [
-            (lyr, layer_map[lyr])
-            for lyr in sorted(alive_layers, reverse=True)
-            if lyr != anchor                    # anchor 보호
+            (lyr, blks) for lyr, blks in sorted(layer_map.items(), reverse=True)
+            if blks                                             # skip empty layers
         ]
+
         logger.debug("[RC] Candidate layers (rear‑first): %s", [(l, len(b)) for l, b in candidates])
 
         offload_layers: list[int] = []

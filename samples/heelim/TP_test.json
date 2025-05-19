@@ -1,7 +1,7 @@
 {
   "arrival_pattern":{"type":"DiscreteUniformArrival","params":{"max_step":4000}},
   "batch_size":4,
-  "max_model_len":4992,
+  "max_model_len":5199,
   "num_gpu_blocks_override":312,
   "request_type_probs":[["Long-Long ShareGPT",1.0]],
   "vocab":[200,30000],
