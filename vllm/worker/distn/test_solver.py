@@ -75,13 +75,7 @@ for step in steps:
         ))
         request_list.append(Request(
             id="dummy2", context_len_in_blocks=300, layer_time=0.05, deposit_count=10, slo=0.1, gpu_layers_on_gpu=10
-        ))
-        request_list.append(Request(
-            id="dummy2", context_len_in_blocks=10, layer_time=0.04, deposit_count=10, slo=0.08, gpu_layers_on_gpu=10
-        ))
-        request_list.append(Request(
-            id="dummy2", context_len_in_blocks=10, layer_time=0.04, deposit_count=10, slo=0.08, gpu_layers_on_gpu=10
-        ))
+        ))        
     # request_list[0].layer_time = 0.10
     print("request_list", request_list)
     print("block_bandwidth", block_bandwidth)
