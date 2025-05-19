@@ -628,18 +628,18 @@ class LatencySolver:
 
 # 5.3 comm_time 정의: 필요한 블록 수 ÷ block_bandwidth
 
-        # temp (xinyue)
-        per_block_time = self.profiled_estimator.estimate_by_profiled_results(num_tokens, which="Communication", mode="upper_quad") / (32*16) # 32 layer, 16 tokens per block
-        block_bandwidth = 1 / per_block_time
-        print(f"block_bandwidth: {block_bandwidth} blks/s")
-        block_bandwidth = 1/per_block_time
-        model.addConstr(
-            comm_time == gp.quicksum(
-                resume[r] * offload_num[r] * context_blocks[r]
-                for r in requests
-            ) / block_bandwidth,
-            name="comm_time_def"
-        )
+        # # temp (xinyue)
+        # per_block_time = self.profiled_estimator.estimate_by_profiled_results(num_tokens, which="Communication", mode="upper_quad") / (32*16) # 32 layer, 16 tokens per block
+        # block_bandwidth = 1 / per_block_time
+        # print(f"block_bandwidth: {block_bandwidth} blks/s")
+        # block_bandwidth = 1/per_block_time
+        # model.addConstr(
+        #     comm_time == gp.quicksum(
+        #         resume[r] * offload_num[r] * context_blocks[r]
+        #         for r in requests
+        #     ) / block_bandwidth,
+        #     name="comm_time_def"
+        # )
 
 # 5.4 comp_time = batch_layer * L
         model.addConstr(comp_time == batch_layer * L, name="comp_time_def")
@@ -714,7 +714,7 @@ class LatencySolver:
                 print(f"{r:>2} |   {int(resume[r].X)}    |"
                       f"      {int(offload_num[r].X):2d}     |"
                       f" {slo_fail_per_decode[r].X * decode_steps.X:8.2f} | {actual_time[r].X:10.2f}")
-            print(f"\ngoodput = {model.ObjVal:.2f}")
+            # print(f"\ngoodput = {model.ObjVal:.2f}")
             print(f"""\nMem Usage: {sum([
                 (L - offload_num[r].X) * context_blocks[r]
                 for r in requests

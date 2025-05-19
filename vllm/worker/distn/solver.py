@@ -404,7 +404,7 @@ class Solver_updated:
         ratio         = model.addVars(requests, lb=0.0, name="ratio")
         slo_fail_per_decode = model.addVars(requests, lb=0.0, name="slo_fail_per_decode")
 
-        goodput       = model.addVar(lb=0.0, name="obj")                          # objective
+        # goodput       = model.addVar(lb=0.0, name="obj")                          # objective
 
         # ----------------------------------------------------------------------------------
         # 4.  Fixed compute time per layer  (profiled “no-prefetch” curve)
@@ -505,12 +505,13 @@ class Solver_updated:
         # ----------------------------------------------------------------------------------
         # 7.  Objective: maximise good-put (tokens / second that meet SLO) ------------------
         # ----------------------------------------------------------------------------------
-        model.addConstr(
-            goodput * token_time ==
-            gp.quicksum(resume[r] for r in requests) - slo_fail_per_decode.sum(),
-            name="goodput_def"
-        )
-        model.setObjective(goodput, GRB.MAXIMIZE)
+        # model.addConstr(
+        #     goodput * token_time ==
+        #     gp.quicksum(resume[r] for r in requests) - slo_fail_per_decode.sum(),
+        #     name="goodput_def"
+        # )
+        # model.setObjective(goodput, GRB.MAXIMIZE)
+        model.setObjective(token_time, GRB.MINIMIZE)
         model.Params.OutputFlag = 1
 
         # ----------------------------------------------------------------------------------
