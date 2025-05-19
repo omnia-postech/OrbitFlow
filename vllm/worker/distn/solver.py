@@ -696,6 +696,7 @@ class LatencySolver:
         # goodput = model.addVar(lb=0, name='obj')
         # model.addConstr(goodput * eff_latency == gp.quicksum(resume[r] for r in requests) - slo_fail_per_decode.sum())
         # model.setObjective(goodput, GRB.MAXIMIZE)
+        model.setObjective(token_time, GRB.MINIMIZE)
         model.Params.OutputFlag = 1
         try:
             model.optimize()

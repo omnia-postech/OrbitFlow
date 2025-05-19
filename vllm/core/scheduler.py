@@ -874,8 +874,8 @@ class Scheduler:
             logger.info(f"signature_changed={cur_sig != self.prev_sig}  "
                          f"cur_sig={list(cur_sig)}  prev_sig={list(self.prev_sig)}")
             signature_changed = (cur_sig != self.prev_sig)
-            # if signature_changed:
-            #         self.decode_window_left = 0
+            if signature_changed:
+                self.decode_window_left = 0
             
             # (xinyue) lots of things not checked here!! 
             # 1. anything preempted, should not happen... Get a signal from cache_engine! 
@@ -887,7 +887,7 @@ class Scheduler:
             )
 
             if need_solver:
-                if self.paused:
+                if signature_changed and self.paused: # new request -> put paused request back to get new solution                 
                     logger.critical(f"RESTORE-PAUSED: bringing back {len(self.paused)} paused requests into decode candidates")
                     for pg in list(self.paused):
                         scheduled = self._scheduled_seq_group_cache[self.cache_id].get_object()
@@ -896,27 +896,12 @@ class Scheduler:
                         ret.decode_seq_groups.append(scheduled)
                         ret.decode_seq_groups_list.append(pg)
                     self.paused.clear()
-                while True:
-                    # TODO(HONG): 이 부분 if not signature_changed가 말이 되는지 확인 필요. 
-                    # pause-반복 오버헤드 방지: 동일 signature 이면 기존 pause 유지
-                    if not signature_changed: # signiture did not change 
-                        logger.critical(f"skip prev paused {self.paused_solver_ids}")
-                        decode_candidates = [
-                            sg for sg in ret.decode_seq_groups
-                            if sg.seq_group.request_id not in self.paused_solver_ids
-                        ] 
-                        # put back in paused or cache engine will allocate for it 
-                        for sg in decode_candidates:
-                            if sg.seq_group.request_id in self.paused_solver_ids:
-                                self.paused.append(victim_sg.seq_group)
-                        new_decodes = decode_candidates
-                        ret.decode_seq_groups = new_decodes
-                        ret.decode_seq_groups_list = [sg.seq_group for sg in new_decodes]           
-                    else: 
-                        decode_candidates=ret.decode_seq_groups
-                        self.paused_solver_ids.clear() # cant clear this upon ANY VALID plan cause they can be with in the same step after fall back
-                    # logger.critical(f"[Solver] decode_candidates: {decode_candidates}")
-                    # logger.critical(f"signature_changed={signature_changed}, ret.decode_seq_groups: {ret.decode_seq_groups}")
+                    # decode_candidates = ret.decode_seq_groups
+
+                restored_once = False
+
+                while True:                    
+                    decode_candidates = ret.decode_seq_groups
 
                     if not decode_candidates:
                         logger.info(f"No decode candidates for solver")
@@ -944,7 +929,7 @@ class Scheduler:
 
                     # ---------- ② infeasible → victim pause ------------------------
                     if sol is None:                           # ② infeasible ⇒ fallback
-                        logger.critical(f"Solver infeasible ❌")
+                        logger.critical(f"################# Solver infeasible ❌")
                         # logger.info(f"Solver infeasible ❌, decode_candidates={decode_candidates}")
                         # 가장 긴 요청 1개 선택 
                         # TODO(HONG): tie-break 구현
@@ -965,11 +950,13 @@ class Scheduler:
                         new_decodes = [sg for sg in ret.decode_seq_groups
                                     if sg.seq_group.request_id != vid]
                         ret.decode_seq_groups = new_decodes
-                        ret.decode_seq_groups_list = [sg.seq_group for sg in new_decodes]                            
+                        ret.decode_seq_groups_list = [sg.seq_group for sg in new_decodes]
+                        logger.info(f"decode_candidates after pause={decode_candidates}")                          
                         continue
                     
                     else:
                         # ---------- ② feasible -----------------------------------------
+                        logger.critical(f"################# Solver feasible")
                         self.decode_window_left = sol[0].window
                         self.resume_distances = {s.id: s.n for s in sol}        
                         logger.critical(
