@@ -69,14 +69,21 @@ for step in steps:
     if len(request_list) == 0: 
         # make a dummy request\
         request_list.append(Request(
-            id="dummy", context_len_in_blocks=100, layer_time=0.05, deposit_count=10, slo=0.1, gpu_layers_on_gpu=10
+            id="dummy1", context_len_in_blocks=10, layer_time=0.05, deposit_count=10, slo=0.08, gpu_layers_on_gpu=10
+        ))
+        request_list.append(Request(
+            id="dummy2", context_len_in_blocks=300, layer_time=0.05, deposit_count=10, slo=0.1, gpu_layers_on_gpu=10
         ))
     # request_list[0].layer_time = 0.10
     print("request_list", request_list)
     print("block_bandwidth", block_bandwidth)
     print("gpu_block_capacity", gpu_block_capacity)
+    import time 
+    start = time.time() 
     output = solver.solve(request_list, block_bandwidth=block_bandwidth, gpu_block_capacity=gpu_block_capacity)
+    end = time.time()
     print(output)
+    print("solver time", end-start)
     
     # offload_num = {r.id: list(range(31)) for r in request_list}
     # compute_batch_latency(request_list, offload_num=offload_num, block_bandwidth=block_bandwidth)
