@@ -997,6 +997,7 @@ class CacheConfig:
         pause_and_resume: bool = False,
         static_batching: bool = False,
         num_layers: int = 32, 
+        need_solver: bool = False,
     ) -> None:
         self.block_size = block_size
         self.gpu_memory_utilization = gpu_memory_utilization

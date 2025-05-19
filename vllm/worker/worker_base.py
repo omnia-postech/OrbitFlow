@@ -306,6 +306,8 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         # 1. update mapping
         cache_engine.update_mapping(attn_meta, seq_group_metadata,
                                     finished_requests, paused_cpu_seq_groups)
+        logger.critical(f"before executing cache plan, mapping:{cache_engine.mapping}")
+        
         # 2. build pause/resume plan
         # if cache_engine.pause_and_resume:
         #     pause_plan, resume_plan = cache_engine.build_pause_resume_plan()
@@ -334,7 +336,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
 
         cache_engine._sync_active_gpu_cpu_map(cache_engine.mapping.seq_row_order)
 
-        # logger.critical(f"after executing cache plan, mapping:{cache_engine.mapping}")
+        logger.critical(f"after executing cache plan, mapping:{cache_engine.mapping}")
         # bm = cache_engine._get_bm()
         # plan_data['bm'] = bm
 

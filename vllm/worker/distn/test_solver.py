@@ -18,6 +18,7 @@ class Request:
 """
 import torch 
 from solver  import Solver_updated as Solver
+from solver import Request
 # from solver  import Solver as Solver
 
 from math import floor
@@ -65,7 +66,12 @@ solver = Solver()
 for step in steps: 
     solver_req = torch.load(path.format(step), weights_only=False)
     request_list, block_bandwidth, gpu_block_capacity = solver_req 
-    request_list[0].layer_time = 0.10
+    if len(request_list) == 0: 
+        # make a dummy request\
+        request_list.append(Request(
+            id="dummy", context_len_in_blocks=100, layer_time=0.05, deposit_count=10, slo=0.1, gpu_layers_on_gpu=10
+        ))
+    # request_list[0].layer_time = 0.10
     print("request_list", request_list)
     print("block_bandwidth", block_bandwidth)
     print("gpu_block_capacity", gpu_block_capacity)

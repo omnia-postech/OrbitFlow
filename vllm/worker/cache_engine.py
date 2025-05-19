@@ -554,6 +554,10 @@ def _freeze_mapping(m) -> "FrozenMapping":
         cpu_map=_freeze(m.cpu_map),
         num_layers=m.num_layers,
         seq_row_order=m.seq_row_order,
+        all_seqs=m.all_seqs,
+        active_gpu_seqs=m.active_gpu_seqs,
+        paused_gpu_seqs=m.paused_gpu_seqs,
+        paused_cpu_seqs=m.paused_cpu_seqs,
     )
 def sid2sgidx(
     seg_group_metadata,
@@ -912,11 +916,19 @@ class FlattenedCacheEngine(CacheEngineBase):
             configure_paused=False,
             seq_group_metadata=seq_group_metadata,
         )
+        plan = None
         dist_dict, _ = self._select_prefetch_distance(snap, self.prefetch_distance, total_context_lens, is_decoding)
         logger.critical(f"dist:{dist_dict}")
-        plan = self._plan_cache_delta(snap, dist_dict, pause_and_resume)
-        return plan, dist_dict
+        plan, cur_blocks = self._plan_cache_delta(snap, dist_dict, pause_and_resume)
+        if plan is None and  self.prefetch_mode == "solver":
 
+            prefetch_mode = "distn_single"
+            logger.critical(f"use distn single for this step and notify solver")
+            dist_dict, _ = self._select_prefetch_distance(snap, self.prefetch_distance, total_context_lens, is_decoding, custom_prefetch_mode=prefetch_mode,cur_blocks = cur_blocks)
+            logger.critical(f"dist:{dist_dict}")
+            plan,cur_blocks = self._plan_cache_delta(snap, dist_dict, pause_and_resume)
+            self.cache_config.need_solver = True
+        return plan, dist_dict
     def execute_pause_resume(
             self,
             pause_layers: Dict[int, List[int]],
@@ -1035,7 +1047,8 @@ class FlattenedCacheEngine(CacheEngineBase):
 
         # 2. helper map {seq_id → index in seq_group_metadata}
         sid2sg = sid2sgidx(seq_group_metadata)
-
+        logger.critical(f"m.paused_gpu_seqs: {m.paused_gpu_seqs}")
+        logger.critical(f"paused_list: {paused_list}")
         snap = Snapshot(
             mapping          = _freeze_mapping(m),
             free_gpu_blocks  = bm.get_num_free_gpu_blocks(),
@@ -1113,25 +1126,46 @@ class FlattenedCacheEngine(CacheEngineBase):
         total_blocks_bytes = per_token_bytes * self.block_size * total_blocks
 
         return total_blocks_bytes
-    
-    def _select_prefetch_distance(self, snapshot, prefetch_distance, total_context_lens, is_decoding):
-        if self.prefetch_mode == "none":
+    def _select_prefetch_distance(self, snapshot, prefetch_distance, total_context_lens, is_decoding, custom_prefetch_mode=None,
+                        cur_blocks: int = None, # current gpu blocks
+                                  ):
+        self.cache_config.need_solver = False
+        if not is_decoding and self.prefetch_mode == "solver": 
+            prefetch_mode = "flexgen" # Temp, use flexgen for prefill for now, need to move sovler out of schedule running 
+            self.cache_config.need_solver = True
+        else: 
+            prefetch_mode = self.prefetch_mode
+        
+        # override 
+        if custom_prefetch_mode is not None:
+            prefetch_mode = custom_prefetch_mode
+            logger.critical(f"[driver] custom prefetch mode: {prefetch_mode}")
+        
+        if prefetch_mode == "none":
             dist = [-1] * len(snapshot.candidates) 
-        elif self.prefetch_mode  == "static":
+        elif prefetch_mode  == "static":
             dist = [prefetch_distance] * len(snapshot.candidates)
-        elif self.prefetch_mode  == "solver":            
+        elif prefetch_mode  == "solver":       
+            # deprecated branch     
             if not is_decoding and not self._solver_prefill_done:
                 dist = [-1] * len(snapshot.candidates)
                 logger.info(f"[driver] {dist}")
-                self._solver_prefill_done = True                
+                self._solver_prefill_done = True
+                self.cache_config.need_solver = True                
             else:          
                 dist = self.resume_distances
                 logger.info(f"[driver] {dist}") 
-        elif self.prefetch_mode == "flexgen":
-            total_blocks = self.num_gpu_blocks 
-            if not is_decoding:
-                self.flexgen_dist = -1
-            if is_decoding and self.prev_flexgen_distance is None:
+        elif prefetch_mode == "flexgen":
+            if is_decoding:
+                total_blocks = self.num_gpu_blocks 
+            else:
+                total_blocks = snapshot.free_gpu_blocks # prefill should use up to free blocks
+            # if not is_decoding:
+            #     self.flexgen_dist = -1
+            # if is_decoding and self.prev_flexgen_distance is None:
+            if self.prev_flexgen_distance is None:
+                self.prev_flexgen_distance = -1
+            if True: # FIXME Xinyue for test 
                 blocks_per_layer = 0
                 for ctx_len in total_context_lens:
                     blocks_per_layer += math.ceil(ctx_len / self.block_size) +1 # lookahead!! to avoid premption before changing
@@ -1139,10 +1173,11 @@ class FlattenedCacheEngine(CacheEngineBase):
                 num_layers_on_GPU = (total_blocks // blocks_per_layer)
                 num_layers_on_GPU = min(32, num_layers_on_GPU)
                 num_layers_to_offload = 32 - num_layers_on_GPU
+                logger.debug(f"num_layers_on_GPU: {num_layers_on_GPU}, num_layers_to_offload: {num_layers_to_offload}, blocks_per_layer: {blocks_per_layer}")
                 if num_layers_to_offload == 0:
                     self.prev_flexgen_distance = -1
                 else:
-                    self.prev_flexgen_distance = self.block_manager.num_attention_layers // num_layers_to_offload
+                    self.prev_flexgen_distance = math.floor(self.block_manager.num_attention_layers // num_layers_to_offload ) - 1 
                     self.prev_flexgen_distance = max(0, self.prev_flexgen_distance)
                 logger.info(f"[flexgen] prefill → distance set to {self.prev_flexgen_distance}")
                 self.flexgen_dist = self.prev_flexgen_distance
@@ -1150,7 +1185,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             if not is_decoding:
                 self.prev_flexgen_distance = None
 
-        elif self.prefetch_mode == "selectn":
+        elif prefetch_mode == "selectn":
             # NOTE(HONG): flag that refers first decoding step -> update distance and fix it until new prefill
             if not is_decoding:
                 logger.info(f"[driver] Prefill going on")
@@ -1169,9 +1204,9 @@ class FlattenedCacheEngine(CacheEngineBase):
                 self.need_update_selectn = False
 
             dist = [self.prev_selectn_distance] * len(snapshot.candidates)
-        elif self.prefetch_mode == "static_req_wise": 
+        elif prefetch_mode == "static_req_wise": 
             dist = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10][:len(snapshot.candidates)] # FIXME Xinyue hard code
-        elif self.prefetch_mode == "distn_single": 
+        elif prefetch_mode == "distn_single": 
             
             dist = [-1] * len(snapshot.candidates) 
             if len(snapshot.prev_dist_dict) > 0:
@@ -1182,21 +1217,23 @@ class FlattenedCacheEngine(CacheEngineBase):
             # increase the distance by 1 if no free blocks available for next step 
             free_blocks = self.block_manager.get_num_free_gpu_blocks() 
             max_append_blocks = len(snapshot.candidates) * self.num_attention_layers 
-            if free_blocks < max_append_blocks: # more offloading 
+            if (free_blocks < max_append_blocks) or (cur_blocks is not None and cur_blocks > self.block_manager.num_total_gpu_blocks - max_append_blocks): # more offloading 
                 if len(snapshot.prev_dist_dict) > 0:
                    prev_dist = list(snapshot.prev_dist_dict.values())[0]
                 else: 
                     prev_dist = -1
+                logger.critical(f"prev_dist: {prev_dist}")
                 if prev_dist == -1:
                     dist = [self.num_attention_layers//2] * len(snapshot.candidates)
                 elif prev_dist > 0:
                     # should change until the num_gpu_layers change! 
                     new_dist = prev_dist -1 
-                    num_layers_on_GPU_prev = self.num_attention_layers // prev_dist 
-                    num_layers_on_GPU = self.num_attention_layers // (new_dist)
-                    while num_layers_on_GPU_prev == num_layers_on_GPU:
+                    num_layers_on_GPU_prev = self.num_attention_layers // (prev_dist+1)
+                    num_layers_on_GPU = self.num_attention_layers // (new_dist+1)
+                    while num_layers_on_GPU_prev >= num_layers_on_GPU:
                         new_dist -= 1
-                        num_layers_on_GPU = self.num_attention_layers // (new_dist)
+                        num_layers_on_GPU = self.num_attention_layers // (new_dist+1)
+                        logger.critical(f"new_dist: {new_dist}, num_layers_on_GPU_prev: {num_layers_on_GPU_prev}, num_layers_on_GPU: {num_layers_on_GPU}")
                     dist = [new_dist] * len(snapshot.candidates) 
                 else: 
                     dist = [prev_dist] * len(snapshot.candidates)
@@ -1215,15 +1252,15 @@ class FlattenedCacheEngine(CacheEngineBase):
             else: 
                 dist = [prev_dist] * len(snapshot.candidates)
         else:
-            raise ValueError(f"unknown policy {self.prefetch_mode}")
+            raise ValueError(f"unknown policy {prefetch_mode}")
         dist = self._normalise_prefetch_distance(spec=dist, candidates=snapshot.candidates)
         logger.info(f"[driver] prefetch distance: {dist}")
-        return dist, {"policy": self.prefetch_mode}
+        return dist, {"policy": prefetch_mode}
     def _plan_cache_delta(self,
                         snapshot,                 # ← the read-only view
                         dist_dict: Dict[int, int], # ← output of policy step
                         pause_and_resume: bool = False,
-                        ) -> "Plan":
+                        ):
         """
         Derive the minimal set of cache moves required to realise `dist_dict`
         given the current `snapshot`.  Pure function – no state is mutated.
@@ -1261,23 +1298,25 @@ class FlattenedCacheEngine(CacheEngineBase):
                 # else: already in the desired place → nothing to do
 
         # NOTE(HONG): ② dealloc plan following fallback mechanism(pausing)
+        logger.critical(f"pause_and_resume={pause_and_resume}")
         if pause_and_resume:
+            logger.critical(f"paused_gpu_seqs: {snapshot.paused_gpu_seqs}")
             for sid in snapshot.paused_gpu_seqs:
-                logger.info(f"[PAUSE] Processing seq_id={sid}")
+                logger.critical(f"[PAUSE] Processing seq_id={sid}")
                 layer_map = self.mapping.gpu_map.get(sid, {})
                 alive = [lyr for lyr, blks in layer_map.items() if blks]                
                 if len(alive) <= 1:
                     # NOTE(HONG): 첫 레이어만 남았거나 이미 비어 있음 → offload 생략
-                    logger.info(f"[PAUSE] seq_id={sid} has one layer left, skipping")                
+                    logger.critical(f"[PAUSE] seq_id={sid} has one layer left, skipping")                
                     continue
                 first_layer = min(alive)              # HACK(HONG): leaving first layer to prevent from being paused_cpu_seqs
                 layers_to_pause = [lyr for lyr in alive if lyr != first_layer]
-                logger.info(f"[PAUSE] seq_id={sid} → offloading layers except last: {layers_to_pause}")
+                logger.critical(f"[PAUSE] seq_id={sid} → offloading layers except last: {layers_to_pause}")
 
                 pause_layers[sid] = layers_to_pause.copy()
         else:
-            logger.info(f"[driver] No pause and resume feature")
-            pause_layers = None            
+            logger.critical(f"[driver] No pause and resume feature")
+            pause_layers = {}            
 
         # estimate prefetch pages -------------------------------------------------
         need_prefetch = self._estimate_prefetch_blocks(
@@ -1304,17 +1343,18 @@ class FlattenedCacheEngine(CacheEngineBase):
         alloced = sum(alloced)
         total = all_blocks + alloced - freed 
         logger.critical(f"total={total}, cur={all_blocks}, alloced={alloced}, freed={freed}")
-        
-        return Plan(dict(dealloc_layers),
+        if total + len(snapshot.candidates)*self.num_attention_layers > self.block_manager.num_total_gpu_blocks :
+            return None, all_blocks
+        else:
+            return (Plan(dict(dealloc_layers),
                     dict(expected_freed),
                     alloc_layers,
                     prefetch_resize,
-                    pause_layers)
+                    pause_layers), all_blocks)
     
     def _execute_plan(self, plan, seq_group_metadata, attn_meta):
         logger.debug(f"[driver] _execute_plan started")
         logger.debug(f"[driver] Received plan: {plan}")
-
         bm = self.block_manager 
         mapping = self.mapping 
         sid2sgidx_ = sid2sgidx(seq_group_metadata)
@@ -1386,29 +1426,32 @@ class FlattenedCacheEngine(CacheEngineBase):
             mapping._set_gpu_flag(sid, layer, True)
             logger.debug(f"[driver] Updated mapping.gpu_map[{sid}][{layer}] = {new_gpu_blocks}")
             
-            if not is_prefill and sid in sid2row:
+            # if not is_prefill and sid in sid2row:
+            if sid in sid2row:
                 row = sid2sgidx_[sid]
                 seq_group_metadata[row].block_tables[sid][layer] = new_gpu_blocks   # local mapping
                 logger.debug(f"[driver] Updated seq_group_metadata[{row}].block_tables for SID {sid}, layer {layer}")
 
+                # for prefill, change only slot mapping, since it does not contain any blocktables yet
                 row = sid2row[sid]
-                tgt = attn_meta.block_tables[row, layer]             # view (2,)
-                tgt.zero_()
-                logger.debug(f"[driver] alloc assign block table seq {sid}, layer {layer}, len(blt) {tgt.shape} cpu_blocks {cpu_blocks} -> gpu_blocks {new_gpu_blocks}")
-                tgt[:n_blocks] = torch.as_tensor(new_gpu_blocks,
-                                            dtype=tgt.dtype,
-                                            device=tgt.device)
+                if not is_prefill:
+                    tgt = attn_meta.block_tables[row, layer]             # view (2,)
+                    tgt.zero_()
+                    logger.debug(f"[driver] alloc assign block table seq {sid}, layer {layer}, len(blt) {tgt.shape} cpu_blocks {cpu_blocks} -> gpu_blocks {new_gpu_blocks}")
+                    tgt[:n_blocks] = torch.as_tensor(new_gpu_blocks,
+                                                dtype=tgt.dtype,
+                                                device=tgt.device)
                 # for resumed requests... they may came with their old slot mappings... 
+                # FIXME (xinyue) with prefill offload, the slot mapping will be repeated 32 times, source of error; but the offset should be correct?? 
                 temp_mapping = attn_meta.slot_mapping[layer][row] % 16 
                 attn_meta.slot_mapping[layer][row] = temp_mapping + new_gpu_blocks[-1]*16
                 logger.debug(f"[driver] Updated slot_mapping[{layer}][{row}] = {attn_meta.slot_mapping[layer][row]}")
-        logger.info(f"[driver] mapping after resize: {mapping}")
+        logger.debug(f"[driver] mapping after resize: {mapping}")
         logger.debug(f"[driver] GPU map after resize:{mapping.gpu_map}")
         logger.debug(f"[driver] gpu_cpu_cache_map after resize:{mapping.gpu_cpu_cache_map}")
+        
         # ---------------- sync ordered view -----------
         self._sync_active_gpu_cpu_map(seq_row_order)
-        # logger.debug(f"[driver] Final attn_meta.block_tables: {attn_meta.block_tables}")
-        # logger.debug(f"[driver] Final attn_meta.slot_mapping: {attn_meta.slot_mapping}")
         bm.cache_config = self.cache_config
         logger.debug("[driver] _execute_plan completed")
         return to_worker_new_gpu_blocks
@@ -1865,7 +1908,6 @@ class MappingTable:
             if sid in self.active_gpu_seqs 
             and sid in self.gpu_cpu_cache_map
         )
-
     def all_gpu_block_ids(self) -> set[int]:
         """
         Return *all* physical block-IDs currently resident in GPU memory.
@@ -2039,6 +2081,10 @@ class FrozenMapping:
     cpu_map: Dict[int, Dict[int, Tuple[int, ...]]]
     num_layers: int
     seq_row_order: List[int]
+    all_seqs: set[int] 
+    active_gpu_seqs: set[int]
+    paused_gpu_seqs: set[int]
+    paused_cpu_seqs: set[int]
     def get_all_gpu_block_ids(self) -> set[int]:
         """
         Return *all* physical block-IDs currently resident in GPU memory.

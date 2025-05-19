@@ -1,0 +1,26 @@
+\ Model block_solver_copy
+\ LP format - for model browsing. Use MPS format to capture full model detail.
+Maximize
+  0 comp_time + 0 token_time + 0 actual_time[1]
+Subject To
+ no_offload_constraint: resume[0] = 1
+ no_offload_constraint: resume[1] = 1
+ memory_limit: - 22 offload_num[0] - 9 offload_num[1] <= -32
+ comm_time_def: comm_time + [
+   - 9.079685120000001e+06 resume[0] * offload_num[0]
+   - 3.7144166400000001e+06 resume[1] * offload_num[1] ] = 0
+ act_on_1: resume[1] = 1 -> - token_time + actual_time[1] = 0
+Bounds
+ offload_num[0] free
+ offload_num[1] free
+ comm_time free
+ comp_time free
+ token_time free
+ -infinity <= actual_time[1] <= 1e+06
+Binaries
+ resume[0] resume[1]
+Generals
+ offload_num[0] offload_num[1]
+General Constraints
+ token_time_max: token_time = MAX ( comm_time , comp_time )
+End

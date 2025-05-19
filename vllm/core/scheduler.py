@@ -10,7 +10,6 @@ from typing import Set, Tuple, Union
 
 from vllm.config import CacheConfig, LoRAConfig, SchedulerConfig
 from vllm.core.interfaces import AllocStatus, BlockSpaceManager
-from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sequence import (Sequence, SequenceData, SequenceGroup,
@@ -20,7 +19,7 @@ from vllm.utils import Device, PyObjectCache
 from gurobipy import GRB
 from vllm.worker.distn.solver import Request
 from vllm.worker.distn.solver import Solver_updated as Solver
-
+from vllm.logger import init_logger
 logger = init_logger(__name__)
 
 # Test-only. If configured, decode is preempted with
@@ -755,7 +754,6 @@ class Scheduler:
 
                 # Do preemption
                 if do_preempt:
-                    logger.critical("Do preemption")
                     preempted_mode = self._preempt(victim_seq_group,
                                                    blocks_to_swap_out)
                     if preempted_mode == PreemptionMode.RECOMPUTE:
@@ -818,7 +816,6 @@ class Scheduler:
         # per_token_bytes = 2 * 2 * head_size * num_kv_heads
         # block_bytes = per_token_bytes * self.block_manager.block_size
         # block_bandwidth = block_bytes / bandwidth
-        # # logger.critical(f"solver_input: {request_list}")
         # solver_start = time.time()                
         # sol = Solver.solve(                 # 💡 “resume=1” 강제 변형판
         #     request_list,
@@ -836,6 +833,7 @@ class Scheduler:
                 f"[RUNNING] {len(self.running)}  "
                 f"[WAITING] {len(self.waiting)}  "
                 f"[PAUSED]  {len(self.paused)}  "
+                f"[SWAPPED] {len(self.paused_cpu)}  "
                 f"[DECODE_CAND] {len(ret.decode_seq_groups)}  "
                 f"window_left={self.decode_window_left}"
             )
@@ -846,7 +844,7 @@ class Scheduler:
             # TODO(HONG): self.running 대신 ret.decode_seq_groups 으로 해야함. 
             # (xinyue) this puts back the paused right away, wait until some of the running batch finishes 
             if (len(ret.decode_seq_groups)) > 0 and not self.waiting and self.paused:
-                logger.critical(f"No running or waiting seqs; restoring {len(self.paused)} paused requests")
+                logger.debug(f"No running or waiting seqs; restoring {len(self.paused)} paused requests")
                 for pg in list(self.paused):
                     scheduled = self._scheduled_seq_group_cache[self.cache_id].get_object()
                     scheduled.seq_group = pg
@@ -873,21 +871,24 @@ class Scheduler:
             logger.info(f"signature_changed={cur_sig != self.prev_sig}  "
                          f"cur_sig={list(cur_sig)}  prev_sig={list(self.prev_sig)}")
             signature_changed = (cur_sig != self.prev_sig)
-            # if signature_changed:
-            #         self.decode_window_left = 0
+            if signature_changed:
+                    self.decode_window_left = 0
             
             # (xinyue) lots of things not checked here!! 
             # 1. anything preempted, should not happen... Get a signal from cache_engine! 
             # 2. cur_sig != prev_sig, wait, can we use it for everything? 
             cond2 = signature_changed
             need_solver = (                
-                ret.decode_seq_groups and
-                self.decode_window_left == 0
+                (ret.decode_seq_groups and
+                self.decode_window_left == 0)
+                or (ret.prefill_seq_groups)
+                or self.cache_config.need_solver
             )
-
             if need_solver:
+                if self.cache_config.need_solver:
+                    logger.critical(f"solver triggered by cache engine")
                 if self.paused:
-                    logger.critical(f"RESTORE-PAUSED: bringing back {len(self.paused)} paused requests into decode candidates")
+                    logger.debug(f"RESTORE-PAUSED: bringing back {len(self.paused)} paused requests into decode candidates")
                     for pg in list(self.paused):
                         scheduled = self._scheduled_seq_group_cache[self.cache_id].get_object()
                         scheduled.seq_group = pg
@@ -899,7 +900,7 @@ class Scheduler:
                     # TODO(HONG): 이 부분 if not signature_changed가 말이 되는지 확인 필요. 
                     # pause-반복 오버헤드 방지: 동일 signature 이면 기존 pause 유지
                     if not signature_changed: # signiture did not change 
-                        logger.critical(f"skip prev paused {self.paused_solver_ids}")
+                        logger.debug(f"skip prev paused {self.paused_solver_ids}")
                         decode_candidates = [
                             sg for sg in ret.decode_seq_groups
                             if sg.seq_group.request_id not in self.paused_solver_ids
@@ -921,7 +922,7 @@ class Scheduler:
                         logger.info(f"No decode candidates for solver")
                         break                      # ① 후보가 있으면 Solver 실행
                     request_list = self._make_solver_requests(decode_candidates)
-
+                    
                     # TODO(HONG): 매 호출마다 동일 계산 위로 빼는게 좋음. 
                     bandwidth = 25.19 * 1024**3  # B/s
                     head_size = 128
@@ -929,14 +930,18 @@ class Scheduler:
                     per_token_bytes = 2 * 2 * head_size * num_kv_heads
                     block_bytes = per_token_bytes * self.block_manager.block_size
                     block_bandwidth =  bandwidth / block_bytes # DEBUG (xinyue) bandwidth was e-06 
-                    # logger.critical(f"solver_input: {request_list}")
                     solver_start = time.time()                \
                     # put some head room! 
-                    head_room = max(int(self.block_manager.num_total_gpu_blocks)*0.001, 100)
+                    if ret.prefill_seq_groups: # prefill
+                        gpu_cap = self.block_manager.num_free_gpu_blocks 
+                        head_room = max(int(self.block_manager.num_free_gpu_blocks)*0.001, 100)
+                    else: 
+                        gpu_cap = self.block_manager.num_total_gpu_blocks
+                        head_room = max(int(self.block_manager.num_total_gpu_blocks)*0.001, 100, len(decode_candidates)*self.block_manager.num_attention_layers)
                     sol = self.solver.solve(                 # 💡 “resume=1” 강제 변형판
                         request_list,
                         block_bandwidth=block_bandwidth,
-                        gpu_block_capacity=self.block_manager.num_total_gpu_blocks - head_room,                        
+                        gpu_block_capacity=gpu_cap - head_room,                        
                     )                    
                     solver_t = time.time() - solver_start
                     ret.solver_time += solver_t               # 기록
@@ -965,6 +970,7 @@ class Scheduler:
                                     if sg.seq_group.request_id != vid]
                         ret.decode_seq_groups = new_decodes
                         ret.decode_seq_groups_list = [sg.seq_group for sg in new_decodes]                            
+                        ret.solver_estimated_time = 100
                         continue
                     
                     else:
@@ -981,9 +987,9 @@ class Scheduler:
                         logger.info(f"previous_paused_ids: {previous_paused_ids}, resumed_ids: {resumed_ids}")
                         if previous_paused_ids & resumed_ids:
                             is_paused_to_resume = True
+                        ret.solver_estimated_time = sol.batch_time
 
                         break
-                ret.solver_estimated_time = sol.batch_time
                 self.prev_sig = cur_sig
 
         self._scheduler_running_outputs_cache[self.next_cache_id].reset()
@@ -1160,7 +1166,7 @@ class Scheduler:
             elif self.cache_config.prefetch_mode in ['static']: 
                 prefetch_distance = self.cache_config.prefetch_distance # use the same distance as the rest of the scheduler
             elif self.cache_config.prefetch_mode in ['selectn', "flexgen", "distn_single"]:
-                prefetch_distance = -1 # as long as there is blocks enough for 1 layer, we will eventually swap it in #FIXME 
+                prefetch_distance = -2 # as long as there is blocks enough for 1 layer, we will eventually swap it in #FIXME 
             else: 
                 prefetch_distance = -1 # default
             touched_blocks, alloc_status = self.block_manager.can_resume(
@@ -1396,7 +1402,7 @@ class Scheduler:
 
             prompt_limit = self._get_prompt_limit(seq_group)
             if num_new_tokens > prompt_limit:
-                logger.warning(
+                logger.critical(
                     "Input prompt (%d tokens) is too long"
                     " and exceeds limit of %d", num_new_tokens, prompt_limit)
                 for seq in waiting_seqs:
@@ -1411,12 +1417,16 @@ class Scheduler:
                     True, enable_chunking)
 
             # If the sequence group cannot be allocated, stop.
+            if self.cache_config.prefetch_mode in ["solver", "flexgen", "distn_single"]:
+                num_gpu_layers = 1
+            else: 
+                num_gpu_layers = self.scheduler_config.num_gpu_layers
             can_allocate = self.block_manager.can_allocate(
-                seq_group, num_lookahead_slots=num_lookahead_slots)
+                seq_group, num_lookahead_slots=num_lookahead_slots,num_gpu_layers=num_gpu_layers)
             if can_allocate == AllocStatus.LATER:
                 break
             elif can_allocate == AllocStatus.NEVER:
-                logger.warning(
+                logger.critical(
                     "Input prompt (%d tokens) + lookahead slots (%d) is "
                     "too long and exceeds the capacity of block_manager",
                     num_new_tokens, num_lookahead_slots)
@@ -1999,7 +2009,11 @@ class Scheduler:
 
     def _allocate_and_set_running(self, seq_group: SequenceGroup) -> None:
         # (xinyue) allocating new sequence here 
-        self.block_manager.allocate(seq_group)
+        if self.cache_config.prefetch_mode in ["solver", "flexgen", "distn_single"]:
+            num_gpu_layers = 1
+        else:
+            num_gpu_layers = self.scheduler_config.num_gpu_layers
+        self.block_manager.allocate(seq_group,num_gpu_layers=num_gpu_layers)
         for seq in seq_group.get_seqs(status=SequenceStatus.WAITING):
             seq.status = SequenceStatus.RUNNING
 
@@ -2019,7 +2033,6 @@ class Scheduler:
                 slots.
             enable_chunking (bool): True if chunked prefill is enabled.
         """
-        logger.critical(f"append_slots should be called EVERY STEP")
         is_prefill: bool = seq_group.is_prefill()
         num_lookahead_slots: int = self._get_num_lookahead_slots(
             is_prefill, enable_chunking)

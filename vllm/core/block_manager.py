@@ -654,10 +654,12 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
 
     def can_allocate(self,
                      seq_group: SequenceGroup,
-                     num_lookahead_slots: int = 0) -> AllocStatus:
+                     num_lookahead_slots: int = 0,
+                     num_gpu_layers: int = 0) -> AllocStatus:
         # FIXME(woosuk): Here we assume that all sequences in the group share
         # the same prompt. This may not be true for preempted sequences.
-
+        if not num_gpu_layers:
+            num_gpu_layers = self.num_attention_layers
         check_no_caching_or_swa_for_blockmgr_encdec(self, seq_group)
 
         seq = seq_group.get_seqs(status=SequenceStatus.WAITING)[0]
@@ -680,7 +682,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
             num_required_blocks = min(num_required_blocks,
                                       self.max_block_sliding_window)
 
-        num_required_blocks = num_required_blocks * self.num_attention_layers
+        num_required_blocks = num_required_blocks * num_gpu_layers
 
         num_free_gpu_blocks = self.block_allocator.get_num_free_blocks(
             device=Device.GPU)
@@ -695,27 +697,38 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
             return AllocStatus.LATER
 
 
-    def allocate(self, seq_group: SequenceGroup) -> None:
+    def allocate(self, seq_group: SequenceGroup,num_gpu_layers:int=0) -> None:
 
         # Allocate self-attention block tables for decoder sequences
         waiting_seqs = seq_group.get_seqs(status=SequenceStatus.WAITING)
         assert not (set(seq.seq_id for seq in waiting_seqs)
                     & self.block_tables.keys()), "block table already exists"
-
+        if not num_gpu_layers:
+            num_gpu_layers = self.num_attention_layers
         # NOTE: Here we assume that all sequences in the group have the same
         # prompt.
         seq = waiting_seqs[0]
         
-        # (xinyue) let block tables for a sequence holds to  BlockTable, one for GPU and one for CPU
+        # (xinyue) let block tables for a sequence holds to BlockTable, one for GPU and one for CPU
         self.block_tables[seq.seq_id] = []
         self.cpu_block_tables[seq.seq_id] = []
         for i in range(self.num_attention_layers):
-            block_table_gpu: BlockTable = self._allocate_sequence(seq, Device.GPU)
+            if i < num_gpu_layers:
+                block_table_gpu: BlockTable = self._allocate_sequence(seq, Device.GPU)
+                self.block_tables[seq.seq_id].append(block_table_gpu)
+            else: 
+                # empty block table
+                block_table_gpu= BlockTable(
+                    block_size=self.block_size,
+                    block_allocator=self.block_allocator,
+                    max_block_sliding_window=self.max_block_sliding_window,
+                )
+                self.block_tables[seq.seq_id].append(block_table_gpu)
+                
+        for i in range(self.num_attention_layers):
             block_table_cpu: BlockTable = self._allocate_sequence(seq, Device.CPU)
-            self.block_tables[seq.seq_id].append(block_table_gpu)
             self.cpu_block_tables[seq.seq_id].append(block_table_cpu)        
-        logger.debug(f"gpu block_table allocated for seq {seq.seq_id}, {len(self.block_tables[seq.seq_id][0]._blocks)} blocks for {i+1} layers")        
-        logger.debug(f"cpu block_table allocated for seq {seq.seq_id}, {len(self.cpu_block_tables[seq.seq_id][0]._blocks)} blocks for {i+1} layers")
+
         # Track seq
         self._last_access_blocks_tracker.add_seq(seq.seq_id) # Xinyue for prefix caching, relevant? 
 
@@ -778,7 +791,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         num_touched_blocks = 0
         for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
             seq_map = gpu_cpu_cache_map[seq.seq_id]
-            logger.critical(f"seq {seq.seq_id} gpu_cpu_cache_map {seq_map}")
+            # logger.critical(f"seq {seq.seq_id} gpu_cpu_cache_map {seq_map}")
             seq_block_tables = self.block_tables[seq.seq_id]
             for i, block_table in enumerate(seq_block_tables):
                 if seq_map[i]:
@@ -795,7 +808,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
                     # logger.critical(f"seq {seq.seq_id} layer{i},  {_num_touched_blocks} blocks")
                 num_touched_blocks += _num_touched_blocks
                     
-        logger.critical(f"num_touched_blocks {num_touched_blocks}")
+        # logger.critical(f"num_touched_blocks {num_touched_blocks}")
 
         num_free_gpu_blocks = self.block_allocator.get_num_free_blocks(
             Device.GPU)
@@ -947,11 +960,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         for seq_id, layers in seq_blocks.items():
             for layer in layers:
                 # collect the block-ids belonging to this (seq_id, layer) pair
-                try:
-                    freed_blocks.extend(self.block_tables[seq_id][layer].physical_block_ids)
-                except KeyError:
-                    seq_ids = list(self.block_tables.keys())
-                    logger.critical(f"bm free_seq_by_layer {seq_id} {layer} not found in {seq_ids}")
+                freed_blocks.extend(self.block_tables[seq_id][layer].physical_block_ids)
                 # release the memory associated with those blocks
                 self.block_tables[seq_id][layer].free()
         return freed_blocks

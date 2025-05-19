@@ -418,7 +418,8 @@ class Solver_updated:
 # 5.3 comm_time 정의: 필요한 블록 수 ÷ block_bandwidth
 
         # temp (xinyue)
-        per_block_time = self.profiled_estimator.estimate_by_profiled_results(num_tokens, which="Communication", mode="upper_quad") / (32*16) # 32 layer, 16 tokens per block
+        # per_block_time = self.profiled_estimator.estimate_by_profiled_results(num_tokens, which="Communication", mode="linear") / (32*16) # 32 layer, 16 tokens per block
+        per_block_time = self.profiled_estimator.estimate_by_profiled_results(num_tokens, which="Communication", mode="linear") / (32*16) # 32 layer, 16 tokens per block
         block_bandwidth = 1 / per_block_time
         print(f"block_bandwidth: {block_bandwidth} blks/s")
         block_bandwidth = 1/per_block_time
@@ -495,6 +496,7 @@ class Solver_updated:
             return None
 # === 7. 결과 출력 ===
         if model.Status == GRB.OPTIMAL or model.Status == GRB.TIME_LIMIT or model.Status == GRB.SUBOPTIMAL:
+            print(f"Requests: {requests_list}")
             print("\n--- Optimal Solution ---")
             print(" r | resume | offload_num | slo_fail | actual_time")
             print("---|--------|-------------|----------|-------------")

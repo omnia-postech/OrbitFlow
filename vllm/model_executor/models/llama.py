@@ -730,8 +730,6 @@ class LlamaModel(nn.Module):
                             break
                     if prefetch_layer <= 31:
                         with torch.cuda.stream(self._prefetch_streams[0]):
-                            # Copy only needed pages in the cache (efficient)
-                            # shape = [num_blocks, block_size, num_kv_heads, head_size]
                             with nvtx.annotate(f"Key Prefetching{prefetch_layer}"): # FIXME Xinyue 
                                 kv_caches[-1][0][start_page:end_page, :, :, :].copy_(
                                     kv_caches_cpu[prefetch_layer][0][start_page:end_page, :, :, :], non_blocking=True

@@ -435,7 +435,7 @@ def write_all_tbt_figures(df: pd.DataFrame, csv_path: Path) -> List[Path]:
     ax_h.set_ylabel("Δt (s)")
     ax_h.set_title("TBT scatter, upper hull, and quadratic fit")
     ax_h.grid(True, linewidth=0.3)
-    ax_h.set_ylim(0, 0.5)
+    # ax_h.set_ylim(0, 0.5)
     ax_h.legend(frameon=False, fontsize="small")
     plt.tight_layout()
 
@@ -460,6 +460,24 @@ def main(argv) -> None:
     out_path1 = write_all_tbt_figures(df, csv_path)
     print(f"Figure written ➜ {out_path1}")
 
+    csv2 = argv[1] if len(argv) > 1 else None 
+    if csv2:
+        print(f"CSV path: {csv2}")
+        csv_path2 = Path(csv2).expanduser().resolve()
+        if not csv_path2.exists():
+            sys.exit(f"CSV not found: {csv_path2}")
+
+        df2 = load_metrics(csv_path2)
+        out_path2 = write_all_tbt_figures(df2, csv_path2)
+        print(f"Figure written ➜ {out_path2}")
+        
+        df = df[['time_between_tokens', "request_id"]]
+        df3 = df2[['time_between_tokens', "request_id"]]
+        df3['time_between_tokens'][0]= [x-y for x, y in zip(df2['time_between_tokens'][0], df['time_between_tokens'][0])]
+        csv3 = "/home/xinyuema/vllm/outputs/benchmark/Profile/NextLayer/profile_trace/outputs_diff.csv"
+        csv_path3 = Path(csv3).expanduser().resolve()
+        out_path3 = write_all_tbt_figures(df3, csv_path3)
+        print(f"Figure written ➜ {out_path3}")
 if __name__ == "__main__":
     import sys
     main(sys.argv[1:])

@@ -75,7 +75,7 @@ class SequenceStatus(enum.IntEnum):
         if status == SequenceStatus.FINISHED_STOPPED:
             finish_reason = "stop"
         elif status == SequenceStatus.FINISHED_LENGTH_CAPPED:
-            finish_reason = "length"
+            finish_reason = "length_capped"
         elif status == SequenceStatus.FINISHED_ABORTED:
             finish_reason = "abort"
         elif status == SequenceStatus.FINISHED_IGNORED:

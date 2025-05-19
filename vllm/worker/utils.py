@@ -7,6 +7,8 @@ from vllm.worker.model_runner import GPUModelRunnerBase
 from torch import tensor,Tensor, zeros_like, zeros, cat,arange
 from typing import Tuple, Sequence
 from collections.abc import Mapping
+from vllm.logger import init_logger
+logger = init_logger(__name__)
 def assert_enc_dec_mr_supported_scenario(
         enc_dec_mr: GPUModelRunnerBase) -> None:
     '''
