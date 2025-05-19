@@ -843,7 +843,7 @@ class Scheduler:
             # TODO(HONG): 가능성은 작지만 pause된 request들을 한꺼번에 빼는 경우 memory가 부족할 수 있음. 
             # TODO(HONG): self.running 대신 ret.decode_seq_groups 으로 해야함. 
             # (xinyue) this puts back the paused right away, wait until some of the running batch finishes 
-            if (len(ret.decode_seq_groups)) > 0 and not self.waiting and self.paused:
+            if (len(ret.decode_seq_groups)) <= 0 and not self.waiting and self.paused:
                 logger.debug(f"No running or waiting seqs; restoring {len(self.paused)} paused requests")
                 for pg in list(self.paused):
                     scheduled = self._scheduled_seq_group_cache[self.cache_id].get_object()
@@ -854,13 +854,14 @@ class Scheduler:
                 self.paused.clear()
                 self.decode_window_left = 0          # 윈도우 강제 리셋
 
-            preempt_imminent = self._is_preemption(len(ret.decode_seq_groups))
-            if preempt_imminent:
-                logger.info(f"Preemption detected, trigger solver")
-                seq_ids = [sg.seq_group.get_seqs()[0].seq_id for sg in ret.decode_seq_groups]                                                
-                blocks_allocated = {seq_id: sg.seq_group.get_seqs()[0].n_blocks for seq_id, sg in zip(seq_ids, ret.decode_seq_groups)}
-                logger.info(f"total blocks/blocks_allocated: {self.block_manager.num_total_gpu_blocks//32}/{blocks_allocated}")
-                self.decode_window_left = 0
+            # preempt_imminent = self._is_preemption(len(ret.decode_seq_groups))
+        
+            # if preempt_imminent:
+            #     logger.info(f"Preemption detected, trigger solver")
+            #     seq_ids = [sg.seq_group.get_seqs()[0].seq_id for sg in ret.decode_seq_groups]                                                
+            #     blocks_allocated = {seq_id: sg.seq_group.get_seqs()[0].n_blocks for seq_id, sg in zip(seq_ids, ret.decode_seq_groups)}
+            #     logger.info(f"total blocks/blocks_allocated: {self.block_manager.num_total_gpu_blocks//32}/{blocks_allocated}")
+            #     self.decode_window_left = 0
                     
             if self.decode_window_left > 0:
                 logger.info(f"Within decode window (remaining={self.decode_window_left}), skipping solver")
@@ -868,7 +869,7 @@ class Scheduler:
 
             # NOTE(HONG): signature -> 새 요청 도착 / 기존 요청 종료 판단용
             cur_sig = (frozenset(sg.seq_group.request_id for sg in ret.decode_seq_groups) | frozenset(pg.request_id for pg in self.paused))
-            logger.info(f"signature_changed={cur_sig != self.prev_sig}  "
+            logger.critical(f"signature_changed={cur_sig != self.prev_sig}  "
                          f"cur_sig={list(cur_sig)}  prev_sig={list(self.prev_sig)}")
             signature_changed = (cur_sig != self.prev_sig)
             if signature_changed:
@@ -885,8 +886,9 @@ class Scheduler:
                 or self.cache_config.need_solver
             )
             if need_solver:
-                if self.cache_config.need_solver:
-                    logger.critical(f"solver triggered by cache engine")
+                logger.critical(f"need_solver={need_solver}  ret.decode_seq_groups={(ret.decode_seq_groups)}, self.decode_window_left={self.decode_window_left} , self.cache_config.need_solver:{self.cache_config.need_solver}" )
+                # if self.cache_config.need_solver:
+                #     logger.critical(f"solver triggered by cache engine")
                 if signature_changed and self.paused: # new request -> put paused request back to get new solution                 
                     logger.debug(f"RESTORE-PAUSED: bringing back {len(self.paused)} paused requests into decode candidates")
                     for pg in list(self.paused):

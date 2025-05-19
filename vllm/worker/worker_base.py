@@ -329,6 +329,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             'sid2row': cache_engine.mapping.sid2row,
         }
         new_gpu_blocks = []
+        logger.critical(f"cache_plan.pause_layers: {cache_plan.pause_layers}")
         if cache_plan.dealloc_layers or cache_plan.alloc_layers or cache_plan.prefetch_resize or cache_plan.pause_layers:
             new_gpu_blocks=cache_engine._execute_plan(cache_plan, seq_group_metadata, attn_meta)
             cache_engine.mapping.prev_dist_dict = dist
