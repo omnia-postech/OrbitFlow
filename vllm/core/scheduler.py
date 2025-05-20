@@ -869,7 +869,7 @@ class Scheduler:
 
             # NOTE(HONG): signature -> 새 요청 도착 / 기존 요청 종료 판단용
             cur_sig = (frozenset(sg.seq_group.request_id for sg in ret.decode_seq_groups) | frozenset(pg.request_id for pg in self.paused))
-            logger.critical(f"signature_changed={cur_sig != self.prev_sig}  "
+            logger.debug(f"signature_changed={cur_sig != self.prev_sig}  "
                          f"cur_sig={list(cur_sig)}  prev_sig={list(self.prev_sig)}")
             signature_changed = (cur_sig != self.prev_sig)
             if signature_changed:
@@ -886,9 +886,9 @@ class Scheduler:
                 or self.cache_config.need_solver
             )
             if need_solver:
-                logger.critical(f"need_solver={need_solver}  ret.decode_seq_groups={(ret.decode_seq_groups)}, self.decode_window_left={self.decode_window_left} , self.cache_config.need_solver:{self.cache_config.need_solver}" )
+                logger.debug(f"need_solver={need_solver}  ret.decode_seq_groups={(ret.decode_seq_groups)}, self.decode_window_left={self.decode_window_left} , self.cache_config.need_solver:{self.cache_config.need_solver}" )
                 # if self.cache_config.need_solver:
-                #     logger.critical(f"solver triggered by cache engine")
+                #     logger.debug(f"solver triggered by cache engine")
                 if signature_changed and self.paused: # new request -> put paused request back to get new solution                 
                     logger.debug(f"RESTORE-PAUSED: bringing back {len(self.paused)} paused requests into decode candidates")
                     for pg in list(self.paused):
@@ -2114,9 +2114,9 @@ class Scheduler:
             seq.status = SequenceStatus.SWAPPED
         seq_id = seq.seq_id
         seq_layers_to_drop = {seq_id:list(range(self.block_manager.num_attention_layers))}
-        logger.critical(f"seq_layers_to_drop:{seq_layers_to_drop}")
+        logger.debug(f"seq_layers_to_drop:{seq_layers_to_drop}")
         freed_gpu_blocks = self.block_manager.free_seq_by_layer(seq_layers_to_drop)
-        logger.critical(f"freed_gpu_blocks:{freed_gpu_blocks}")
+        logger.debug(f"freed_gpu_blocks:{freed_gpu_blocks}")
         return freed_gpu_blocks
     def _swap_in(
         self,

@@ -306,7 +306,6 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         # 1. update mapping
         cache_engine.update_mapping(attn_meta, seq_group_metadata,
                                     finished_requests, paused_cpu_seq_groups)
-        logger.critical(f"before executing cache plan, mapping:{cache_engine.mapping}")
         
         # 2. build pause/resume plan
         # if cache_engine.pause_and_resume:
@@ -329,7 +328,6 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             'sid2row': cache_engine.mapping.sid2row,
         }
         new_gpu_blocks = []
-        logger.critical(f"cache_plan.pause_layers: {cache_plan.pause_layers}")
         if cache_plan.dealloc_layers or cache_plan.alloc_layers or cache_plan.prefetch_resize or cache_plan.pause_layers:
             new_gpu_blocks=cache_engine._execute_plan(cache_plan, seq_group_metadata, attn_meta)
             cache_engine.mapping.prev_dist_dict = dist
@@ -337,7 +335,6 @@ class LocalOrDistributedWorkerBase(WorkerBase):
 
         cache_engine._sync_active_gpu_cpu_map(cache_engine.mapping.seq_row_order)
 
-        logger.critical(f"after executing cache plan, mapping:{cache_engine.mapping}")
         # bm = cache_engine._get_bm()
         # plan_data['bm'] = bm
 
