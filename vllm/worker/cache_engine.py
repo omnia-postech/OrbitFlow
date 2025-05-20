@@ -648,7 +648,8 @@ class FlattenedCacheEngine(CacheEngineBase):
         logger.info(f"Total Memory: {total_mem / 1024 / 1024} MB")
 
         self._paused_layers_freed: Dict[int, List[int]] = defaultdict(list)
-
+        
+        self.flexgen_tok_estimate = 0 # used by flexgen as an estimate of the token length 
     def register_bm(self, block_manager): 
         self.block_manager = block_manager
         # logger.debug(f"Linking block manager")
@@ -1165,6 +1166,9 @@ class FlattenedCacheEngine(CacheEngineBase):
             if True: # FIXME Xinyue for test 
                 blocks_per_layer = 0
                 for ctx_len in total_context_lens:
+                    # use the estimate 
+                    if ctx_len < self.flexgen_tok_estimate:
+                        ctx_len = self.flexgen_tok_estimate
                     blocks_per_layer += math.ceil(ctx_len / self.block_size) +1 # lookahead!! to avoid premption before changing
                     
                 num_layers_on_GPU = (total_blocks // blocks_per_layer)
@@ -1204,59 +1208,36 @@ class FlattenedCacheEngine(CacheEngineBase):
         elif prefetch_mode == "static_req_wise": 
             dist = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10][:len(snapshot.candidates)] # FIXME Xinyue hard code
         elif prefetch_mode == "distn_single": 
+            valid_dists = [0, 1, 2, 3, 4, 5, 7, 9, 15, 31]
             
+            if is_decoding:
+                total_blocks = self.num_gpu_blocks 
+            else:
+                total_blocks = snapshot.free_gpu_blocks # prefill should use up to free blocks            
+
             dist = [-1] * len(snapshot.candidates) 
-            if len(snapshot.prev_dist_dict) > 0:
-                prev_dist = list(snapshot.prev_dist_dict.values())[0]
-            else: 
-                prev_dist = -1
-                
+            blocks_per_layer = 0
+            for ctx_len in total_context_lens:
+                blocks_per_layer += math.ceil(ctx_len / self.block_size) +1 # lookahead!! to avoid premption before changing
+            num_layers_on_GPU = (total_blocks // blocks_per_layer)
+            num_layers_on_GPU = min(32, num_layers_on_GPU)
+            num_layers_to_offload = 32 - num_layers_on_GPU
             # increase the distance by 1 if no free blocks available for next step 
             free_blocks = self.block_manager.get_num_free_gpu_blocks() 
-            max_append_blocks = len(snapshot.candidates) * self.num_attention_layers 
-            if (free_blocks < max_append_blocks) and not (cur_blocks is not None and cur_blocks > self.block_manager.num_total_gpu_blocks - max_append_blocks): # more offloading 
-                logger.debug(f"distn_single: branch1")
-                if len(snapshot.prev_dist_dict) > 0:
-                   prev_dist = list(snapshot.prev_dist_dict.values())[0]
-                else: 
-                    prev_dist = -1
-                logger.debug(f"prev_dist: {prev_dist}")
-                if prev_dist == -1:
-                    dist = [self.num_attention_layers//2] * len(snapshot.candidates)
-                elif prev_dist > 0:
-                    # should change until the num_gpu_layers change! 
-                    new_dist = prev_dist -1 
-                    num_layers_on_GPU_prev = self.num_attention_layers // (prev_dist+1)
-                    num_layers_on_GPU = self.num_attention_layers // (new_dist+1)
-                    while num_layers_on_GPU_prev >= num_layers_on_GPU and new_dist > 0:
-                        new_dist -= 1
-                        num_layers_on_GPU = self.num_attention_layers // (new_dist+1)
-                        logger.debug(f"new_dist: {new_dist}, num_layers_on_GPU_prev: {num_layers_on_GPU_prev}, num_layers_on_GPU: {num_layers_on_GPU}")
-                    dist = [new_dist] * len(snapshot.candidates) 
-                else: 
-                    dist = [prev_dist] * len(snapshot.candidates)
-            elif (free_blocks > self.num_gpu_blocks * 0.3 and prev_dist > -1) or (cur_blocks is not None and cur_blocks > self.block_manager.num_total_gpu_blocks - max_append_blocks): # fresh reconfigure
-                logger.debug(f"distn_single: branch2")
-                # lets add, free block enough for at least 
-                num_block_per_layer = 0
-                for ctx_len in total_context_lens:
-                    num_block_per_layer += math.ceil(ctx_len / self.block_size)
-                logger.debug(f"num_block_per_layer: {num_block_per_layer}")
-                logger.debug(f"total_context_lens: {total_context_lens}")
-                num_layers_on_GPU = min(32, (self.num_gpu_blocks // num_block_per_layer) )
-                logger.debug(f"num_layers_on_GPU: {num_layers_on_GPU}")
-                num_layers_on_CPU = self.num_attention_layers- num_layers_on_GPU
-                logger.debug(f"num_layers_on_CPU: {num_layers_on_CPU}")
-                if num_layers_on_CPU == 0:
-                    dist = [-1] * len(snapshot.candidates)
-                else:
-                    _dist = min(math.floor(self.num_attention_layers / num_layers_on_CPU)-1, 0)
-                    dist = [_dist] * len(snapshot.candidates)
-            else: 
-                dist = [prev_dist] * len(snapshot.candidates)
+            if num_layers_to_offload == 0:
+                dist = -1
+            else:
+                dist = math.floor(self.block_manager.num_attention_layers // num_layers_to_offload ) - 1 
+                dist = max(0, dist)
+                dist = [dist] * len(snapshot.candidates)
         else:
             raise ValueError(f"unknown policy {prefetch_mode}")
         dist = self._normalise_prefetch_distance(spec=dist, candidates=snapshot.candidates)
+        ## disable distance 0 for dynamic policies, solver side handled by solver
+        if prefetch_mode in ["distn", "flexgen"]:
+            for s, d in dist.items():
+                if d == 0:
+                    dist[s] = 1
         logger.info(f"[driver] prefetch distance: {dist}")
         return dist, {"policy": prefetch_mode}
     

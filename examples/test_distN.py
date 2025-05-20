@@ -328,6 +328,12 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
     ])
     if write_header:
         csv_writer.writeheader()
+        
+        
+    # compute the average length of the requests as an oracle for Flexgen to make desicions 
+    trace_token_count = sum([req_obj.input_length + req_obj.output_length for _, req_obj in requests_sorted])
+    trace_avg_token_count = trace_token_count / len(requests_sorted)
+    engine.model_executor.driver_worker.cache_engine[0].flexgen_tok_estimate = trace_avg_token_count 
     step_count = 1
     # The main simulation loop
     while queue or request_metadata:
@@ -345,8 +351,8 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                 else: 
                     # max_slo = PROFILED_A*(req_obj.input_length + req_obj.output_length) + PROFILED_B
                     max_slo = estimator.estimate_by_profiled_results(tokens=req_obj.input_length + req_obj.output_length,
-                                                which="NoPrefetch" ,
-                                                mode="upper_quad")
+                                                                                                    which="NoPrefetch" ,
+                                                                                                    mode="upper_quad")
                     slo = sim.register(req_id, max_slo)
                 logger.critical(f"Enqueued request {req_id} with max_slo {max_slo} and SLO {(1/sim.v[req_id]):.3f} ms per token")
             # Remove them from the queue
