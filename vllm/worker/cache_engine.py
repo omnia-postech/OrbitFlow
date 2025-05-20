@@ -612,6 +612,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         self.merge_prefetch_buffer = cache_config.merge_prefetch_buffer     
         self.pause_and_resume = cache_config.pause_and_resume
         self.static_batching = cache_config.static_batching
+        self.removable_cache = cache_config.removable_cache
         # prefetch_enabled = True 
         # Initialize the cache.
         self.gpu_cache = self._allocate_kv_cache_gpu(
@@ -1340,65 +1341,58 @@ class FlattenedCacheEngine(CacheEngineBase):
         # NOTE(HONG): ② Removable-cache: dealloc plan following fallback mechanism(pausing) - free extra blocks from paused GPU
         missing = 0
         if pause_and_resume:
+            if self.removable_cache:
+                # TOTAL_GPU_BLOCKS = self.block_manager.num_total_gpu_blocks
+                # HEADROOM_RATIO   = 0.05
+                # headroom = max(int(TOTAL_GPU_BLOCKS * HEADROOM_RATIO), HEADROOM_MIN)
+                HEADROOM_MIN     = self.block_manager.num_attention_layers * len(snapshot.candidates)            
+                headroom = HEADROOM_MIN
+                logger.critical(f"[RC] headroom={headroom} (min={HEADROOM_MIN})")
 
-            # TOTAL_GPU_BLOCKS = self.block_manager.num_total_gpu_blocks
-            # HEADROOM_RATIO   = 0.05
-            # headroom = max(int(TOTAL_GPU_BLOCKS * HEADROOM_RATIO), HEADROOM_MIN)
-            HEADROOM_MIN     = self.block_manager.num_attention_layers * len(snapshot.candidates)            
-            headroom = HEADROOM_MIN
-            logger.critical(f"[RC] headroom={headroom} (min={HEADROOM_MIN})")
+                free_now = snapshot.free_gpu_blocks + sum(len(v) for v in expected_freed.values())
+                logger.critical(f"[RC] free_gpu_blocks={snapshot.free_gpu_blocks}, expected_freed_sum={sum(len(v) for v in expected_freed.values())}")
+                alloc_need = sum(len(t[2]) for t in alloc_layers)
+                if free_now < alloc_need + headroom:
+                    missing = alloc_need + headroom - free_now
+                logger.critical("[RC] free_now=%d, alloc_need=%d, headroom= %d, missing=%d", free_now, alloc_need, headroom, missing)
 
-            free_now = snapshot.free_gpu_blocks + sum(len(v) for v in expected_freed.values())
-            logger.critical(f"[RC] free_gpu_blocks={snapshot.free_gpu_blocks}, expected_freed_sum={sum(len(v) for v in expected_freed.values())}")
-            alloc_need = sum(len(t[2]) for t in alloc_layers)
-            if free_now < alloc_need + headroom:
-                missing = alloc_need + headroom - free_now
-            logger.critical("[RC] free_now=%d, alloc_need=%d, headroom= %d, missing=%d", free_now, alloc_need, headroom, missing)
-
-            freed_paused_blks = 0
-            if missing > 0:
-                logger.critical(f"[RC] Need {missing} additional blocks – scavenging paused seqs")
-                # Calculate blocks needed per paused sequence
-                num_paused = len(snapshot.paused_gpu_seqs)
-                if num_paused > 0:
-                    blocks_per_seq = math.ceil(missing / num_paused)
-                    logger.critical(f"[RC] Will remove {blocks_per_seq} blocks from each paused sequence(num_paused={num_paused})")
-                
-                # iterate paused‑GPU seqs in row order – deterministic & fair            \
+                freed_paused_blks = 0
+                if missing > 0:
+                    logger.critical(f"[RC] Need {missing} additional blocks – scavenging paused seqs")
+                    # Calculate blocks needed per paused sequence
+                    num_paused = len(snapshot.paused_gpu_seqs)
+                    if num_paused > 0:
+                        blocks_per_seq = math.ceil(missing / num_paused)
+                        logger.critical(f"[RC] Will remove {blocks_per_seq} blocks from each paused sequence(num_paused={num_paused})")
+                    
+                    # iterate paused‑GPU seqs in row order – deterministic & fair            \
+                    for sid in snapshot.paused_gpu_seqs:
+                        lyr_map = self.mapping.gpu_map.get(sid, {})
+                        to_offload, freed_ids = self._pick_removable_layers(lyr_map, blocks_per_seq)
+                        logger.critical("[RC] seq %d: will off‑load layers %s (free %d blocks)",
+                                    sid, to_offload, len(freed_ids))
+                        if not to_offload:
+                            continue                    
+                        # dealloc_layers[sid].extend(to_offload)
+                        # expected_freed[sid].extend(freed_ids)                    
+                        pause_layers[sid] = to_offload
+                        missing -= len(freed_ids)
+                        freed_paused_blks += len(freed_ids)
+                        logger.critical("[RC] After seq %d → remaining missing=%d", sid, missing)
+                        if missing <= 0:
+                            logger.critical("[RC] Target satisfied – stop scavenging")
+                            logger.critical(f"mapping after scavenging: {self.mapping}")
+                            break
+                    if missing > 0:
+                        logger.critical("[RC] Still short of %d blocks after scavenging paused seqs", missing)
+            else:
+                # When removable_cache is false, pause all layers of paused sequences
                 for sid in snapshot.paused_gpu_seqs:
                     lyr_map = self.mapping.gpu_map.get(sid, {})
-                    to_offload, freed_ids = self._pick_removable_layers(lyr_map, blocks_per_seq)
-                    logger.critical("[RC] seq %d: will off‑load layers %s (free %d blocks)",
-                                sid, to_offload, len(freed_ids))
-                    if not to_offload:
-                        continue                    
-                    # dealloc_layers[sid].extend(to_offload)
-                    # expected_freed[sid].extend(freed_ids)                    
-                    pause_layers[sid] = to_offload
-                    missing -= len(freed_ids)
-                    freed_paused_blks += len(freed_ids)
-                    logger.critical("[RC] After seq %d → remaining missing=%d", sid, missing)
-                    if missing <= 0:
-                        logger.critical("[RC] Target satisfied – stop scavenging")
-                        logger.critical(f"mapping after scavenging: {self.mapping}")
-                        break
-                if missing > 0:
-                    logger.critical("[RC] Still short of %d blocks after scavenging paused seqs", missing)
-
-            # TODO(HONG): deprecated -> use the above code and delete this
-            # for sid in snapshot.paused_gpu_seqs:
-            #     logger.info(f"[PAUSE] Processing seq_id={sid}")
-            #     layer_map = self.mapping.gpu_map.get(sid, {})
-            #     alive = [lyr for lyr, blks in layer_map.items() if blks]                
-            #     if len(alive) <= 1:
-            #         # NOTE(HONG): 첫 레이어만 남았거나 이미 비어 있음 → offload 생략
-            #         logger.info(f"[PAUSE] seq_id={sid} has one layer left, skipping")                
-            #         continue
-            #     first_layer = min(alive)              # HACK(HONG): leaving first layer to prevent from being paused_cpu_seqs
-            #     layers_to_pause = [lyr for lyr in alive if lyr != first_layer]
-            #     logger.info(f"[PAUSE] seq_id={sid} → offloading layers except last: {layers_to_pause}")
-
-            #     pause_layers[sid] = layers_to_pause.copy()                    
+                    alive_layers = [lyr for lyr, blks in lyr_map.items() if blks]
+                    if alive_layers:
+                        pause_layers[sid] = alive_layers
+                        logger.critical("[RC] seq %d: pausing all layers %s", sid, alive_layers)
 
         # estimate prefetch pages -------------------------------------------------
         need_prefetch = self._estimate_prefetch_blocks(
