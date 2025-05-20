@@ -206,6 +206,7 @@ class EngineArgs:
     merge_prefetch_buffer: bool = True
     pause_and_resume: bool = False
     static_batching: bool = False
+    removable_cache: bool = False
     
     def __post_init__(self):
         if not self.tokenizer:
@@ -1084,6 +1085,7 @@ class EngineArgs:
             merge_prefetch_buffer=self.merge_prefetch_buffer,
             pause_and_resume=self.pause_and_resume,
             static_batching=self.static_batching,
+            removable_cache=self.removable_cache,
         )
         parallel_config = ParallelConfig(
             pipeline_parallel_size=self.pipeline_parallel_size,

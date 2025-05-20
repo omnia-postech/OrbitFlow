@@ -996,6 +996,7 @@ class CacheConfig:
         flattened_cache: bool = False,
         pause_and_resume: bool = False,
         static_batching: bool = False,
+        removable_cache: bool = False,
         num_layers: int = 32, 
         need_solver: bool = False,
     ) -> None:
@@ -1016,6 +1017,7 @@ class CacheConfig:
         self.merge_prefetch_buffer = merge_prefetch_buffer 
         self.pause_and_resume = pause_and_resume
         self.static_batching = static_batching
+        self.removable_cache = removable_cache
         self.gpu_cpu_cache_map: Dict[int, List[int]] = defaultdict(list)
 
         self._verify_args()
