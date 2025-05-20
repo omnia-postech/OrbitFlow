@@ -924,7 +924,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             prefetch_mode = "distn_single"
             logger.critical(f"use distn single for this step and notify solver")
             dist_dict, _ = self._select_prefetch_distance(snap, self.prefetch_distance, total_context_lens, is_decoding, custom_prefetch_mode=prefetch_mode,cur_blocks = cur_blocks)
-            logger.critical(f"dist:{dist_dict}")
+            logger.critical(f"fall back dist:{dist_dict}")
             plan,cur_blocks = self._plan_cache_delta(snap, dist_dict, pause_and_resume)
             self.cache_config.need_solver = True
         return plan, dist_dict
@@ -1214,13 +1214,13 @@ class FlattenedCacheEngine(CacheEngineBase):
             # increase the distance by 1 if no free blocks available for next step 
             free_blocks = self.block_manager.get_num_free_gpu_blocks() 
             max_append_blocks = len(snapshot.candidates) * self.num_attention_layers 
-            if (free_blocks < max_append_blocks): # more offloading 
-                logger.critical(f"distn_single: branch1")
+            if (free_blocks < max_append_blocks) and not (cur_blocks is not None and cur_blocks > self.block_manager.num_total_gpu_blocks - max_append_blocks): # more offloading 
+                logger.debug(f"distn_single: branch1")
                 if len(snapshot.prev_dist_dict) > 0:
                    prev_dist = list(snapshot.prev_dist_dict.values())[0]
                 else: 
                     prev_dist = -1
-                logger.critical(f"prev_dist: {prev_dist}")
+                logger.debug(f"prev_dist: {prev_dist}")
                 if prev_dist == -1:
                     dist = [self.num_attention_layers//2] * len(snapshot.candidates)
                 elif prev_dist > 0:
@@ -1228,25 +1228,25 @@ class FlattenedCacheEngine(CacheEngineBase):
                     new_dist = prev_dist -1 
                     num_layers_on_GPU_prev = self.num_attention_layers // (prev_dist+1)
                     num_layers_on_GPU = self.num_attention_layers // (new_dist+1)
-                    while num_layers_on_GPU_prev >= num_layers_on_GPU:
+                    while num_layers_on_GPU_prev >= num_layers_on_GPU and new_dist > 0:
                         new_dist -= 1
                         num_layers_on_GPU = self.num_attention_layers // (new_dist+1)
-                        logger.critical(f"new_dist: {new_dist}, num_layers_on_GPU_prev: {num_layers_on_GPU_prev}, num_layers_on_GPU: {num_layers_on_GPU}")
+                        logger.debug(f"new_dist: {new_dist}, num_layers_on_GPU_prev: {num_layers_on_GPU_prev}, num_layers_on_GPU: {num_layers_on_GPU}")
                     dist = [new_dist] * len(snapshot.candidates) 
                 else: 
                     dist = [prev_dist] * len(snapshot.candidates)
             elif (free_blocks > self.num_gpu_blocks * 0.3 and prev_dist > -1) or (cur_blocks is not None and cur_blocks > self.block_manager.num_total_gpu_blocks - max_append_blocks): # fresh reconfigure
-                logger.critical(f"distn_single: branch2")
+                logger.debug(f"distn_single: branch2")
                 # lets add, free block enough for at least 
                 num_block_per_layer = 0
                 for ctx_len in total_context_lens:
                     num_block_per_layer += math.ceil(ctx_len / self.block_size)
-                logger.critical(f"num_block_per_layer: {num_block_per_layer}")
-                logger.critical(f"total_context_lens: {total_context_lens}")
+                logger.debug(f"num_block_per_layer: {num_block_per_layer}")
+                logger.debug(f"total_context_lens: {total_context_lens}")
                 num_layers_on_GPU = min(32, (self.num_gpu_blocks // num_block_per_layer) )
-                logger.critical(f"num_layers_on_GPU: {num_layers_on_GPU}")
+                logger.debug(f"num_layers_on_GPU: {num_layers_on_GPU}")
                 num_layers_on_CPU = self.num_attention_layers- num_layers_on_GPU
-                logger.critical(f"num_layers_on_CPU: {num_layers_on_CPU}")
+                logger.debug(f"num_layers_on_CPU: {num_layers_on_CPU}")
                 if num_layers_on_CPU == 0:
                     dist = [-1] * len(snapshot.candidates)
                 else:
@@ -1339,6 +1339,8 @@ class FlattenedCacheEngine(CacheEngineBase):
 
         # NOTE(HONG): ② Removable-cache: dealloc plan following fallback mechanism(pausing) - free extra blocks from paused GPU
         missing = 0
+        freed_paused_blks = 0
+        
         if pause_and_resume:
 
             # TOTAL_GPU_BLOCKS = self.block_manager.num_total_gpu_blocks
@@ -1346,29 +1348,28 @@ class FlattenedCacheEngine(CacheEngineBase):
             # headroom = max(int(TOTAL_GPU_BLOCKS * HEADROOM_RATIO), HEADROOM_MIN)
             HEADROOM_MIN     = self.block_manager.num_attention_layers * len(snapshot.candidates)            
             headroom = HEADROOM_MIN
-            logger.critical(f"[RC] headroom={headroom} (min={HEADROOM_MIN})")
+            logger.debug(f"[RC] headroom={headroom} (min={HEADROOM_MIN})")
 
             free_now = snapshot.free_gpu_blocks + sum(len(v) for v in expected_freed.values())
-            logger.critical(f"[RC] free_gpu_blocks={snapshot.free_gpu_blocks}, expected_freed_sum={sum(len(v) for v in expected_freed.values())}")
+            logger.debug(f"[RC] free_gpu_blocks={snapshot.free_gpu_blocks}, expected_freed_sum={sum(len(v) for v in expected_freed.values())}")
             alloc_need = sum(len(t[2]) for t in alloc_layers)
             if free_now < alloc_need + headroom:
                 missing = alloc_need + headroom - free_now
-            logger.critical("[RC] free_now=%d, alloc_need=%d, headroom= %d, missing=%d", free_now, alloc_need, headroom, missing)
+            logger.debug("[RC] free_now=%d, alloc_need=%d, headroom= %d, missing=%d", free_now, alloc_need, headroom, missing)
 
-            freed_paused_blks = 0
             if missing > 0:
-                logger.critical(f"[RC] Need {missing} additional blocks – scavenging paused seqs")
+                logger.debug(f"[RC] Need {missing} additional blocks – scavenging paused seqs")
                 # Calculate blocks needed per paused sequence
                 num_paused = len(snapshot.paused_gpu_seqs)
                 if num_paused > 0:
                     blocks_per_seq = math.ceil(missing / num_paused)
-                    logger.critical(f"[RC] Will remove {blocks_per_seq} blocks from each paused sequence(num_paused={num_paused})")
+                    logger.debug(f"[RC] Will remove {blocks_per_seq} blocks from each paused sequence(num_paused={num_paused})")
                 
                 # iterate paused‑GPU seqs in row order – deterministic & fair            \
                 for sid in snapshot.paused_gpu_seqs:
                     lyr_map = self.mapping.gpu_map.get(sid, {})
                     to_offload, freed_ids = self._pick_removable_layers(lyr_map, blocks_per_seq)
-                    logger.critical("[RC] seq %d: will off‑load layers %s (free %d blocks)",
+                    logger.debug("[RC] seq %d: will off‑load layers %s (free %d blocks)",
                                 sid, to_offload, len(freed_ids))
                     if not to_offload:
                         continue                    
@@ -1377,13 +1378,13 @@ class FlattenedCacheEngine(CacheEngineBase):
                     pause_layers[sid] = to_offload
                     missing -= len(freed_ids)
                     freed_paused_blks += len(freed_ids)
-                    logger.critical("[RC] After seq %d → remaining missing=%d", sid, missing)
+                    logger.debug("[RC] After seq %d → remaining missing=%d", sid, missing)
                     if missing <= 0:
-                        logger.critical("[RC] Target satisfied – stop scavenging")
-                        logger.critical(f"mapping after scavenging: {self.mapping}")
+                        logger.debug("[RC] Target satisfied – stop scavenging")
+                        logger.debug(f"mapping after scavenging: {self.mapping}")
                         break
                 if missing > 0:
-                    logger.critical("[RC] Still short of %d blocks after scavenging paused seqs", missing)
+                    logger.debug("[RC] Still short of %d blocks after scavenging paused seqs", missing)
 
             # TODO(HONG): deprecated -> use the above code and delete this
             # for sid in snapshot.paused_gpu_seqs:
@@ -1426,10 +1427,10 @@ class FlattenedCacheEngine(CacheEngineBase):
         alloced = sum(alloced)
         total = all_blocks + alloced - freed 
         logger.critical(f"total={total}, cur={all_blocks}, alloced={alloced}, freed={freed}")
-        if total + len(snapshot.candidates)*self.num_attention_layers > self.block_manager.num_total_gpu_blocks :
+        if self.prefetch_mode == "solver" and total + len(snapshot.candidates)*self.num_attention_layers > self.block_manager.num_total_gpu_blocks :
             return None, total
         else:
-            logger.critical(f"[plan] pause_layers: {pause_layers}")
+            logger.debug(f"[plan] pause_layers: {pause_layers}")
             return (Plan(
                     dealloc_layers=dict(dealloc_layers),
                     expected_freed=dict(expected_freed),
@@ -1451,24 +1452,24 @@ class FlattenedCacheEngine(CacheEngineBase):
 
         to_worker_new_gpu_blocks: List[Tuple[int, int, List[int]]] = []
         
-        logger.critical(f"[driver] pause_layers: {plan.pause_layers}")
+        logger.debug(f"[driver] pause_layers: {plan.pause_layers}")
         # NOTE(HONG): fallback mechanism (pausing)
         for sid, layers in plan.pause_layers.items():
             freed_ids = bm.free_seq_by_layer({sid: layers})
-            logger.critical(f"[PAUSE] seq_id={sid} freed_block_ids={freed_ids}")
+            logger.debug(f"[PAUSE] seq_id={sid} freed_block_ids={freed_ids}")
             for lyr in layers:
                 mapping.gpu_map[sid][lyr] = []
                 mapping._set_gpu_flag(sid, lyr, False)
             self._paused_layers_freed[sid].extend(layers)
-            logger.critical(f"[PAUSE] sid={sid} offloaded {layers} → freed={freed_ids}")
+            logger.debug(f"[PAUSE] sid={sid} offloaded {layers} → freed={freed_ids}")
             
             remaining = [lyr for lyr, blks in mapping.gpu_map[sid].items() if blks]
-            logger.critical(f"[PAUSE] seq_id={sid} remaining_gpu_layers after offload: {remaining}")
-            logger.critical(f"[PAUSE] self.mapping: {self.mapping}")
+            logger.debug(f"[PAUSE] seq_id={sid} remaining_gpu_layers after offload: {remaining}")
+            logger.debug(f"[PAUSE] self.mapping: {self.mapping}")
         
         freed = bm.free_seq_by_layer(plan.dealloc_layers)
-        logger.critical(f"[driver] Blocks freed by layer: {plan.dealloc_layers}")
-        logger.critical(f"[driver] Returned freed list: {freed}")
+        logger.debug(f"[driver] Blocks freed by layer: {plan.dealloc_layers}")
+        logger.debug(f"[driver] Returned freed list: {freed}")
         assert set(freed) == set(chain.from_iterable(plan.expected_freed.values()))
 
         # ---------- clear bookkeeping for layers we just evicted -----------
@@ -1532,7 +1533,7 @@ class FlattenedCacheEngine(CacheEngineBase):
                 temp_mapping = attn_meta.slot_mapping[layer][row] % 16 
                 attn_meta.slot_mapping[layer][row] = temp_mapping + new_gpu_blocks[-1]*16
                 logger.debug(f"[driver] Updated slot_mapping[{layer}][{row}] = {attn_meta.slot_mapping[layer][row]}")
-        logger.critical(f"[driver] mapping after resize: {mapping}")
+        logger.debug(f"[driver] mapping after resize: {mapping}")
         logger.debug(f"[driver] GPU map after resize:{mapping.gpu_map}")
         logger.debug(f"[driver] gpu_cpu_cache_map after resize:{mapping.gpu_cpu_cache_map}")
         

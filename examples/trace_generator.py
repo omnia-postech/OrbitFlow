@@ -22,7 +22,76 @@ PROFILED_B = 0.049519613282613506
 import json, argparse
 from tqdm import tqdm
 
+# ---------------- Model / cache constants ---------------- #
+BLOCK_SIZE_TOK = 16        # tokens per KV block  (vLLM default)
+def _tok_to_blk(toks: int, block_size: int = BLOCK_SIZE_TOK) -> int:
+    return math.ceil(toks / block_size)
 
+def memory_pressure(trace_path: str) -> Dict[str, float]:
+    """
+    Compute PPR, TPI, OV, and the fraction of steps whose load ≥ 2× capacity.
+    Returns absolute values as well for sanity-checking.
+    """
+    with open(trace_path, "r") as f:
+        jj = json.load(f)
+
+    gpu_blocks = jj["num_gpu_blocks_override"]          # capacity / layer
+
+    # ---------- 1. Parse requests & lifespans ---------- #
+    reqs: List[dict] = []
+    last_step = 0
+    for r in jj["requests"].values():
+        arr, out, inp = map(int, (r["arrival_time"],
+                                  r["output_length"],
+                                  r["input_length"]))
+        end  = arr + out              # inclusive last decoding step
+        last_step = max(last_step, end)
+        reqs.append({"arr": arr, "end": end,
+                     "inp": inp, "out": out})
+
+    if not reqs:
+        raise ValueError("Trace has no requests")
+
+    # ---------- 2. Walk timeline once ------------------ #
+    peak_blocks   = 0
+    peak_step     = 0
+    shortfall_sum = 0                    # Σ over-budget blocks
+    ge2_steps     = 0                    # count(load ≥ 2×capacity)
+
+    for s in range(last_step + 1):       # inclusive
+        live_blocks = 0
+        for r in reqs:
+            if r["arr"] <= s <= r["end"]:
+                decoded = min(s - r["arr"], r["out"])
+                live_blocks += _tok_to_blk(r["inp"] + decoded)
+
+        if live_blocks > peak_blocks:
+            peak_blocks, peak_step = live_blocks, s
+
+        if live_blocks > gpu_blocks:
+            shortfall_sum += (live_blocks - gpu_blocks)
+
+        if live_blocks >= 2 * gpu_blocks:        # ← new threshold test
+            ge2_steps += 1
+
+    steps_total = last_step + 1
+    ppr = peak_blocks / gpu_blocks
+    tpi = (shortfall_sum / gpu_blocks) / steps_total
+    ov  = shortfall_sum                       # “block-steps”
+    ov_frac = ov / (gpu_blocks * steps_total)    # identical to TPI
+    ge2_frac = ge2_steps / steps_total         # ← new metric
+
+    return {
+        "PPR": ppr,
+        "TPI": tpi,
+        "OV_block_step": ov,
+        "OV_frac": ov_frac,
+        "GE2_frac": ge2_frac,            # ≤── add to output
+        "peak_blocks": peak_blocks,
+        "peak_step": peak_step,
+        "gpu_blocks": gpu_blocks,
+        "total_steps": steps_total
+    }
 def build_token_bank(
     text_path: str,
     tokenizer_name: str = "gpt2",
@@ -1583,4 +1652,11 @@ def make_trace_default(
 #         sampling_method="uniform"
 #     )
 if __name__ == "__main__":
-    make_trace_default("/home/sychoy/vllm/samples/traces/benchmark_trace_test.json",)
+    # make_trace_default("/home/sychoy/vllm/samples/traces/benchmark_trace_test.json",)
+    metrics = memory_pressure("/home/xinyuema/vllm/benchmark/test_traces/PPR_based/PPR158_TPI005.json")
+    print(metrics)
+    metrics = memory_pressure("/home/xinyuema/vllm/benchmark/test_traces/PPR_based/PPR250_TPI051.json")
+    print(metrics)
+    metrics = memory_pressure("/home/xinyuema/vllm/benchmark/test_traces/PPR_based/PPR394_TPI099.json")
+    print(metrics)
+    

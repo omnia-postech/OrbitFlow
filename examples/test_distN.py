@@ -52,7 +52,7 @@ test_trace = {
 DEFAULT_PROMPTS = test_trace
 
 class DelaySimulator:
-    def __init__(self, v_tps: float, slo_ratio: float = 0.5, deposit_enabled: bool = True):        
+    def __init__(self, v_tps: float, slo_ratio: float = 2.5, deposit_enabled: bool = True):        
         # v_tps: tokens per second
         self.deposit_enabled = deposit_enabled # if disabled, deposit is empty and the simulator only keeps track of slo violations
         self.v_default = v_tps          # keep for backwards compatibility
@@ -69,7 +69,7 @@ class DelaySimulator:
     def register(self, rid: str, slo_s_per_token: float):
         if slo_s_per_token <= 0:
             raise ValueError("SLO must be > 0")
-        slo_s_per_token = slo_s_per_token / self.slo_ratio # slo = 1.0, ratio = 0.5 => real slo = 2 
+        slo_s_per_token = slo_s_per_token * self.slo_ratio # 
         self.v[rid] = 1.0 / slo_s_per_token
         self.deposit[rid] = 0
         self.violations[rid] = 0
@@ -303,8 +303,8 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
             # Enqueue with the engine
             engine.add_request(req_id, prompt_obj, sampling_params)
 
-    SLO_THRESHOLD = 0.5 # TBT SLO (seconds per token)
-    sim = DelaySimulator(v_tps=1/SLO_THRESHOLD, slo_ratio=0.8, deposit_enabled=enable_deposit)
+    SLO_THRESHOLD = 0.5 # TBT SLO (seconds per token)/
+    sim = DelaySimulator(v_tps=1/SLO_THRESHOLD, slo_ratio=2.5, deposit_enabled=enable_deposit)
 
     if csv_path is None:
         csv_path = "metrics.csv"

@@ -195,7 +195,7 @@ def plot_time_between_tokens_wallclock(df: pd.DataFrame, csv_path: Path) -> Path
     ax.set_ylabel("Per-token latency Δt (s)")
     ax.set_title("TBT with solver (colored by request)")
     ax.grid(True, linewidth=0.3)
-    ax.set_ylim(0, 0.5)
+    # ax.set_ylim(0, 1)
 
     # Place legend outside plot if up to ten entries; otherwise inside upper right
     if df.shape[0] <= 10:
