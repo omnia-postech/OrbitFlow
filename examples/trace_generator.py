@@ -26,25 +26,53 @@ from tqdm import tqdm
 BLOCK_SIZE_TOK = 16        # tokens per KV block  (vLLM default)
 def _tok_to_blk(toks: int, block_size: int = BLOCK_SIZE_TOK) -> int:
     return math.ceil(toks / block_size)
+def _cross_count(curve, thr):
+    """Return the indices where the curve crosses 'thr'."""
+    xs = []
+    for i in range(1, len(curve)):
+        prev, cur = curve[i-1], curve[i]
+        # count a crossing whenever the sign of (prev-thr) and (cur-thr) differ
+        # or one point lies exactly on the line.
+        crossed = (prev - thr) * (cur - thr) < 0.0   # different sides
+        on_prev = prev == thr
+        on_cur  = cur  == thr
+        if crossed or (on_prev and not xs) or (on_prev ^ on_cur):
+            xs.append(i)
+    return xs
 
-def memory_pressure(trace_path: str) -> Dict[str, float]:
+def memory_pressure(trace_path: str, *, plot_PPR: bool = False) -> Dict[str, float]:
     """
-    Compute PPR, TPI, OV, and the fraction of steps whose load ≥ 2× capacity.
-    Returns absolute values as well for sanity-checking.
+    Analyse a trace and (optionally) plot the per-step pressure curve.
+
+    Parameters
+    ----------
+    trace_path : str
+        Path to the JSON trace produced by the simulator.
+    plot_PPR : bool, default False
+        If True, saves a figure "<trace basename>.png" showing
+        live_blocks / gpu_blocks for every decode step.
+
+    Returns
+    -------
+    Dict[str, float]
+        Same stats as before, plus:
+        • 'GE2_frac' – fraction of steps with load ≥ 2× capacity
+        • 'plot_path' – PNG path (only if plot_PPR is True)
     """
+    # ---------- 0. Load trace ----------
     with open(trace_path, "r") as f:
         jj = json.load(f)
 
-    gpu_blocks = jj["num_gpu_blocks_override"]          # capacity / layer
+    gpu_blocks: int = jj["num_gpu_blocks_override"]      # capacity / layer
 
-    # ---------- 1. Parse requests & lifespans ---------- #
+    # ---------- 1. Parse requests ----------
     reqs: List[dict] = []
     last_step = 0
     for r in jj["requests"].values():
         arr, out, inp = map(int, (r["arrival_time"],
                                   r["output_length"],
                                   r["input_length"]))
-        end  = arr + out              # inclusive last decoding step
+        end  = arr + out          # inclusive
         last_step = max(last_step, end)
         reqs.append({"arr": arr, "end": end,
                      "inp": inp, "out": out})
@@ -52,12 +80,13 @@ def memory_pressure(trace_path: str) -> Dict[str, float]:
     if not reqs:
         raise ValueError("Trace has no requests")
 
-    # ---------- 2. Walk timeline once ------------------ #
+    # ---------- 2. Sweep timeline ----------
     peak_blocks   = 0
     peak_step     = 0
     shortfall_sum = 0                    # Σ over-budget blocks
     ge2_steps     = 0                    # count(load ≥ 2×capacity)
-
+    pressure_curve: List[float] = []     # live_blocks / gpu_blocks per step
+    tpi           = 0
     for s in range(last_step + 1):       # inclusive
         live_blocks = 0
         for r in reqs:
@@ -65,33 +94,112 @@ def memory_pressure(trace_path: str) -> Dict[str, float]:
                 decoded = min(s - r["arr"], r["out"])
                 live_blocks += _tok_to_blk(r["inp"] + decoded)
 
+        # record for plot
+        pressure_curve.append(live_blocks / gpu_blocks)
+
         if live_blocks > peak_blocks:
             peak_blocks, peak_step = live_blocks, s
 
         if live_blocks > gpu_blocks:
             shortfall_sum += (live_blocks - gpu_blocks)
-
-        if live_blocks >= 2 * gpu_blocks:        # ← new threshold test
+            # shortfall_sum += (live_blocks)
+            tpi += 1
+        if live_blocks >= 2 * gpu_blocks:
             ge2_steps += 1
 
+    # ---------- 3. Aggregate stats ----------
     steps_total = last_step + 1
-    ppr = peak_blocks / gpu_blocks
-    tpi = (shortfall_sum / gpu_blocks) / steps_total
-    ov  = shortfall_sum                       # “block-steps”
-    ov_frac = ov / (gpu_blocks * steps_total)    # identical to TPI
-    ge2_frac = ge2_steps / steps_total         # ← new metric
+    ppr       = peak_blocks / gpu_blocks
+    ov        = shortfall_sum
+    ov_frac   = ov / (gpu_blocks * tpi)
+    tpi       = tpi / steps_total
+    ge2_frac  = ge2_steps / steps_total
 
-    return {
+    out = {
         "PPR": ppr,
         "TPI": tpi,
         "OV_block_step": ov,
         "OV_frac": ov_frac,
-        "GE2_frac": ge2_frac,            # ≤── add to output
+        "GE2_frac": ge2_frac,
         "peak_blocks": peak_blocks,
         "peak_step": peak_step,
         "gpu_blocks": gpu_blocks,
-        "total_steps": steps_total
+        "total_steps": steps_total,
     }
+
+    # 4. Optional plot
+    if plot_PPR:
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(8, 3))
+        x = np.arange(steps_total, dtype=int)
+        y = np.asarray(pressure_curve)
+        
+
+        # ---- 4a. shade overload segments --------------------------------
+        over = y > 1.0                     # boolean mask
+        segments = []                      # list of (start, end)   end is *exclusive*
+        in_seg = False
+        for i, flag in enumerate(over):
+            if flag and not in_seg:        # start of a new segment
+                seg_start, in_seg = i, True
+            elif not flag and in_seg:      # end of current segment
+                segments.append((seg_start, i))
+                in_seg = False
+        if in_seg:                         # tail segment reaches array end
+            segments.append((seg_start, steps_total))
+
+        for s, e in segments:
+            xs = x[s:e]
+            ys = y[s:e]
+
+            # below the capacity line (0‒1)
+            ax.fill_between(xs, 0.0, 1.0, color="C0", alpha=0.25)
+            # above the capacity line (1‒curve)
+            ax.fill_between(xs, 1.0, ys, color="C1", alpha=0.25)
+        # (b) pressure curve & guides ------------------------------------
+        valid_distances         = [1,   2,  3,  4,  5,  7,  9,  15, 31, -1]
+        valid_offload_layers    = {16,  10, 8,  6,  5,  4,  3,  2,  1,  0}
+        total_layers = 32 
+        lines = [total_layers / (total_layers-ol) for ol in valid_offload_layers]
+        ax.plot(range(steps_total), pressure_curve, linewidth=0.8)
+        for line in lines:
+            ax.axhline(line, linestyle="--", linewidth=0.8)
+        # # (c) annotate crossings (re-uses the helper from earlier) --------
+        # for thr in [1.0, *lines]:
+        #     for s in _cross_count(pressure_curve, thr):
+        #         ax.text(
+        #             s, thr * 1.02,           # just above the guideline
+        #             f"{s}",
+        #             ha="center", va="bottom",
+        #             rotation=90, fontsize="x-small"
+        #         )
+
+        crossings_per_line = {}
+        total_crossings    = 0
+
+        for thr in lines:
+            steps = _cross_count(pressure_curve, thr)
+            crossings_per_line[thr] = len(steps)
+            total_crossings        += len(steps)
+
+        # Optionally: expose the numbers
+        # out["crossings_per_line"] = crossings_per_line
+        out["total_crossings"]    = total_crossings
+
+        # ---------------------------------------------------------------
+        ax.set_xlabel("decode step")
+        ax.set_ylabel("live_blocks / gpu_blocks")
+        ax.set_title(f"PPR={ppr:.2f}, TPI={tpi:.2f}, OV_frac={ov_frac:.2f}, Crossings={total_crossings}")
+        ax.legend(loc="upper right")
+        plt.tight_layout()
+
+        png_path = Path(trace_path).with_suffix(".png")
+        fig.savefig(png_path, dpi=150)
+        plt.close(fig)
+
+        out["plot_path"] = str(png_path)
+    return out
 def build_token_bank(
     text_path: str,
     tokenizer_name: str = "gpt2",
@@ -1653,10 +1761,10 @@ def make_trace_default(
 #     )
 if __name__ == "__main__":
     # make_trace_default("/home/sychoy/vllm/samples/traces/benchmark_trace_test.json",)
-    metrics = memory_pressure("/home/xinyuema/vllm/benchmark/test_traces/PPR_based/PPR158_TPI005.json")
+    metrics = memory_pressure("/home/xinyuema/vllm/benchmark/test_traces/PPR_based/PPR158_TPI005.json", plot_PPR=True)
     print(metrics)
-    metrics = memory_pressure("/home/xinyuema/vllm/benchmark/test_traces/PPR_based/PPR250_TPI051.json")
+    metrics = memory_pressure("/home/xinyuema/vllm/benchmark/test_traces/PPR_based/PPR250_TPI051.json", plot_PPR=True)
     print(metrics)
-    metrics = memory_pressure("/home/xinyuema/vllm/benchmark/test_traces/PPR_based/PPR394_TPI099.json")
+    metrics = memory_pressure("/home/xinyuema/vllm/benchmark/test_traces/PPR_based/PPR394_TPI099.json", plot_PPR=True)
     print(metrics)
     
