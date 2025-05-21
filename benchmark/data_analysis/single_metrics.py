@@ -118,6 +118,7 @@ def _plot_percent(values: List[float], labels: List[str], out_png: Path, *, titl
     fig, ax = plt.subplots(figsize=(3 + 1 * len(values), 5))
     palette = list(plt.cm.tab10.colors)
     colours = (palette * ((len(values) + 9) // 10))[: len(values)]
+    
     bars = ax.bar(labels, values, color=colours)
 
     # styling
@@ -140,7 +141,7 @@ def _plot_grouped(vals: np.ndarray, labels: List[str], metrics: List[str], out_p
     n_traces, n_metrics = vals.shape
     x = np.arange(n_metrics)
     width = 0.8 / n_traces
-    fig, ax = plt.subplots(figsize=(3 + 1 * n_metrics * n_traces, 5))
+    fig, ax = plt.subplots(figsize=(2 + 1 * n_metrics * n_traces, 5))
     palette = list(plt.cm.tab10.colors)
     colours = (palette * ((n_traces + 9) // 10))[: n_traces]
 
@@ -271,7 +272,9 @@ def plot_request_level_slo(csv_tuples: List[Tuple[Path, str]], *, out_dir: Path,
 
 
 def plot_stats_overview_multi(csv_tuples: List[Tuple[Path, str]], *, out_dir: Path, out_name: str, title: str = "Trace stats"):
-    metrics = ["Overall tok/s", "Prefill tok/s", "Decode tok/s"]
+    metrics = ["Overall tokens/s"]
+    # # , "Prefill tok/s", "Decode tok/s"]
+    # metrics = ["Prefill reqs/s", "Decode tok/s"]
     vals_per_trace, labels = [], []
 
     for p, lbl in csv_tuples:
@@ -284,9 +287,25 @@ def plot_stats_overview_multi(csv_tuples: List[Tuple[Path, str]], *, out_dir: Pa
         prefill_tokens = df.get("input_length", pd.Series(1))
         prefill_thr = (prefill_tokens / df["time_to_first_token"]).mean()
         prefill_total_time = df["time_to_first_token"].sum()
-        decode_window = max(wall_time - prefill_total_time, 1e-9)
+        # --- Solver-time adjustment -----------------------------------------
+        solver_total = 0.0
+        if "solver_time" in df.columns:
+            for st_list in df["solver_time"]:
+                if isinstance(st_list, (list, tuple, np.ndarray)):
+                    solver_total += sum(t for t in st_list if t != 100)
+                else:
+                    try:
+                        val = float(st_list)
+                        if val != 100:
+                            solver_total += val
+                    except Exception:
+                        pass
+        print(f"Solver time total: {solver_total}")
+        decode_window = max(wall_time - prefill_total_time - solver_total, 1e-9)
+        overall_thr = total_tokens / wall_time if wall_time else 0.0
         decode_thr = total_decode / decode_window
-        vals_per_trace.append([overall_thr, prefill_thr, decode_thr])
+        vals_per_trace.append([overall_thr])
+        # vals_per_trace.append([prefill_thr, decode_thr])
         labels.append(lbl)
 
     vals = np.array(vals_per_trace)
@@ -307,20 +326,20 @@ if __name__ == "__main__":
         plot_stats_overview_multi(traces, out_dir=FIG_DIR, out_name=f"{tag}", title=f"{descr}-Throughput")
         plot_latency_ratio_multi(traces, [90, 95, 99], out_dir=FIG_DIR, out_name=f"{tag}", title=f"{descr}-Tail-TBT")
 
-    _run_all([
-        (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased/Flexgen/PPR158_TPI005/outputs.csv"), "FlexGen"),
-        (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased/Ours/PPR158_TPI005/outputs.csv"), "Ours"),
-    ], tag="Trace1", descr="Trace1-(PPR158_TPI005)")
+    # _run_all([
+    #     (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased/Flexgen/PPR158_TPI005/outputs.csv"), "FlexGen"),
+    #     (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased/Ours/PPR158_TPI005/outputs.csv"), "Ours"),
+    # ], tag="Trace1", descr="Trace1-(PPR158_TPI005)")
 
-    _run_all([
-        (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased/Flexgen/PPR250_TPI051/outputs.csv"), "FlexGen"),
-        (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased/Ours/PPR250_TPI051/outputs.csv"), "Ours"),
-    ], tag="Trace2", descr="Trace2-(PPR250_TPI051)")
+    # _run_all([
+    #     (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased/Flexgen/PPR250_TPI051/outputs.csv"), "FlexGen"),
+    #     (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased/Ours/PPR250_TPI051/outputs.csv"), "Ours"),
+    # ], tag="Trace2", descr="Trace2-(PPR250_TPI051)")
 
-    _run_all([
-        (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased/Flexgen/PPR394_TPI099/outputs.csv"), "FlexGen"),
-        (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased/Ours/PPR394_TPI099/outputs.csv"), "Ours"),
-    ], tag="Trace3", descr="Trace3-(PPR394_TPI099)")
+    # _run_all([
+    #     (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased/Flexgen/PPR394_TPI099/outputs.csv"), "FlexGen"),
+    #     (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased/Ours/PPR394_TPI099/outputs.csv"), "Ours"),
+    # ], tag="Trace3", descr="Trace3-(PPR394_TPI099)")
 
     FIG_DIR = Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased-SLO2_5/figures/")
     os.makedirs(FIG_DIR, exist_ok=True)
@@ -328,14 +347,17 @@ if __name__ == "__main__":
     _run_all([
         (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased-SLO2_5/Flexgen/PPR158_TPI005/outputs.csv"), "FlexGen"),
         (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased-SLO2_5/Ours/PPR158_TPI005/outputs.csv"), "Ours"),
-    ], tag="Trace1", descr="Trace1-(PPR158_TPI005)")
+        (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5/DistNSingle/PPR158_TPI005/outputs.csv"), "DistNSingle"),
+    ], tag="Trace1", descr="Trace1")
 
     _run_all([
         (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased-SLO2_5/Flexgen/PPR250_TPI051/outputs.csv"), "FlexGen"),
         (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased-SLO2_5/Ours/PPR250_TPI051/outputs.csv"), "Ours"),
-    ], tag="Trace2", descr="Trace2-(PPR250_TPI051)")
+        (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5/DistNSingle/PPR250_TPI051/outputs.csv"), "DistNSingle"),
+    ], tag="Trace2", descr="Trace2")
 
     _run_all([
         (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased-SLO2_5/Flexgen/PPR394_TPI099/outputs.csv"), "FlexGen"),
         (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased-SLO2_5/Ours/PPR394_TPI099/outputs.csv"), "Ours"),
-    ], tag="Trace3", descr="Trace3-(PPR394_TPI099)")
+        (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5/DistNSingle/PPR394_TPI099/outputs.csv"), "DistNSingle"),
+    ], tag="Trace3", descr="Trace3")

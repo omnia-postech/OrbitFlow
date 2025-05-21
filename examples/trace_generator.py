@@ -40,182 +40,149 @@ def _cross_count(curve, thr):
             xs.append(i)
     return xs
 
-def memory_pressure(trace_path: str, *, plot_PPR: bool = False) -> Dict[str, float]:
+def memory_pressure(
+    trace_path: str,
+    *,
+    plot_PPR: bool = False,
+    plot_curve: bool  = True,   # part-1
+    shade_lower: bool = True,   # part-2
+    shade_upper: bool = True,   # part-3
+    plot_guides: bool = True,   # part-4
+    plot_cross1: bool  = True,   # part-5
+    plot_cross2: bool  = True,   # part-5
+) -> Dict[str, float]:
     """
-    Analyse a trace and (optionally) plot the per-step pressure curve.
+    Analyse a trace and optionally plot per-step KV-cache pressure.
 
-    Parameters
-    ----------
-    trace_path : str
-        Path to the JSON trace produced by the simulator.
-    plot_PPR : bool, default False
-        If True, saves a figure "<trace basename>.png" showing
-        live_blocks / gpu_blocks for every decode step.
-
-    Returns
-    -------
-    Dict[str, float]
-        Same stats as before, plus:
-        • 'GE2_frac' – fraction of steps with load ≥ 2× capacity
-        • 'plot_path' – PNG path (only if plot_PPR is True)
+    Each graphic layer can be toggled via keyword switches documented
+    in the function signature above.
     """
     # ---------- 0. Load trace ----------
     with open(trace_path, "r") as f:
         jj = json.load(f)
-
-    gpu_blocks: int = jj["num_gpu_blocks_override"]      # capacity / layer
+    gpu_blocks: int = jj["num_gpu_blocks_override"]
 
     # ---------- 1. Parse requests ----------
-    reqs: List[dict] = []
-    last_step = 0
+    reqs, last_step = [], 0
     for r in jj["requests"].values():
         arr, out, inp = map(int, (r["arrival_time"],
                                   r["output_length"],
                                   r["input_length"]))
-        end  = arr + out          # inclusive
+        end = arr + out
         last_step = max(last_step, end)
-        reqs.append({"arr": arr, "end": end,
-                     "inp": inp, "out": out})
-
+        reqs.append({"arr": arr, "end": end, "inp": inp, "out": out})
     if not reqs:
         raise ValueError("Trace has no requests")
 
     # ---------- 2. Sweep timeline ----------
-    peak_blocks   = 0
-    peak_step     = 0
-    shortfall_sum = 0                    # Σ over-budget blocks
-    ge2_steps     = 0                    # count(load ≥ 2×capacity)
-    pressure_curve: List[float] = []     # live_blocks / gpu_blocks per step
-    tpi           = 0
-    for s in range(last_step + 1):       # inclusive
+    peak_blocks = peak_step = shortfall_sum = ge2_steps = 0
+    pressure_curve, over_steps = [], 0
+    for s in range(last_step + 1):
         live_blocks = 0
         for r in reqs:
             if r["arr"] <= s <= r["end"]:
                 decoded = min(s - r["arr"], r["out"])
                 live_blocks += _tok_to_blk(r["inp"] + decoded)
-
-        # record for plot
         pressure_curve.append(live_blocks / gpu_blocks)
-
         if live_blocks > peak_blocks:
             peak_blocks, peak_step = live_blocks, s
-
         if live_blocks > gpu_blocks:
-            shortfall_sum += (live_blocks - gpu_blocks)
-            # shortfall_sum += (live_blocks)
-            tpi += 1
+            shortfall_sum += live_blocks - gpu_blocks
+            over_steps += 1
         if live_blocks >= 2 * gpu_blocks:
             ge2_steps += 1
 
     # ---------- 3. Aggregate stats ----------
     steps_total = last_step + 1
-    ppr       = peak_blocks / gpu_blocks
-    ov        = shortfall_sum
-    ov_frac   = ov / (gpu_blocks * tpi)
-    tpi       = tpi / steps_total
-    ge2_frac  = ge2_steps / steps_total
-
+    ppr        = peak_blocks / gpu_blocks
+    tpi        = over_steps / steps_total
+    ov_frac    = shortfall_sum / (gpu_blocks * steps_total)
+    ge2_frac   = ge2_steps / steps_total
     out = {
-        "PPR": ppr,
-        "TPI": tpi,
-        "OV_block_step": ov,
-        "OV_frac": ov_frac,
-        "GE2_frac": ge2_frac,
-        "peak_blocks": peak_blocks,
-        "peak_step": peak_step,
-        "gpu_blocks": gpu_blocks,
-        "total_steps": steps_total,
+        "PPR": ppr, "TPI": tpi, "OV_block_step": shortfall_sum,
+        "OV_frac": ov_frac, "GE2_frac": ge2_frac,
+        "peak_blocks": peak_blocks, "peak_step": peak_step,
+        "gpu_blocks": gpu_blocks, "total_steps": steps_total,
     }
 
-    # 4. Optional plot
+    # ---------- 4. Optional plot ----------
     if plot_PPR:
         import matplotlib.pyplot as plt
 
-        fig, ax = plt.subplots(figsize=(8, 3))
-        x = np.arange(steps_total, dtype=int)
+        x = np.arange(steps_total)
         y = np.asarray(pressure_curve)
-        
 
-        # ---- 4a. shade overload segments --------------------------------
-        over = y > 1.0                     # boolean mask
-        segments = []                      # list of (start, end)   end is *exclusive*
-        in_seg = False
-        for i, flag in enumerate(over):
-            if flag and not in_seg:        # start of a new segment
-                seg_start, in_seg = i, True
-            elif not flag and in_seg:      # end of current segment
-                segments.append((seg_start, i))
-                in_seg = False
-        if in_seg:                         # tail segment reaches array end
-            segments.append((seg_start, steps_total))
+        fig, ax = plt.subplots(figsize=(8, 3))
 
-        for s, e in segments:
-            xs = x[s:e]
-            ys = y[s:e]
+        # —A— overload shading ----------------------------------------
+        if shade_lower or shade_upper:
+            over = y > 1.0
+            segments, in_seg = [], False
+            for i, flag in enumerate(over):
+                if flag and not in_seg:
+                    seg_start, in_seg = i, True
+                elif not flag and in_seg:
+                    segments.append((seg_start, i)); in_seg = False
+            if in_seg:
+                segments.append((seg_start, steps_total))
 
-            # below the capacity line (0‒1)
-            ax.fill_between(xs, 0.0, 1.0, color="C0", alpha=0.25)
-            # above the capacity line (1‒curve)
-            ax.fill_between(xs, 1.0, ys, color="C1", alpha=0.25)
-        # (b) pressure curve & guides ------------------------------------
-        valid_distances         = [1,   2,  3,  4,  5,  7,  9,  15, 31, -1]
-        valid_offload_layers    = {16,  10, 8,  6,  5,  4,  3,  2,  1,  0}
-        total_layers = 32 
-        lines = [total_layers / (total_layers-ol) for ol in valid_offload_layers]
-        ax.plot(range(steps_total), pressure_curve, linewidth=0.8)
-        for line in lines:
-            ax.axhline(line, linestyle="--", linewidth=0.8)
+            for s, e in segments:
+                xs, ys = x[s:e], y[s:e]
+                if shade_lower:
+                    ax.fill_between(xs, 0.0, 1.0, color="C0", alpha=0.25)
+                if shade_upper:
+                    ax.fill_between(xs, 1.0, ys, color="C1", alpha=0.25)
 
-        # crossings_per_line = {}
-        # total_crossings    = 0
-        thresholds = [1.0] + lines            # capacity first, then extras
-        type1_pts, type2_pts = [], []         # (step, y_value)
+        # —B— main curve & capacity line ------------------------------
+        if plot_curve:
+            ax.plot(x, y, linewidth=0.8)
+            ax.axhline(1.0, linestyle="--", linewidth=0.8, label="capacity")
 
-        for i in range(1, steps_total):
-            prev, cur = pressure_curve[i-1], pressure_curve[i]
+        # —C— extra horizontal guides ---------------------------------
+        valid_offload_layers = {16, 10, 8, 6, 5, 4, 3, 2, 1, 0}
+        total_layers = 32
+        lines = [total_layers / (total_layers - ol) for ol in valid_offload_layers]
+        if plot_guides:
+            for thr in lines:
+                ax.axhline(thr, linestyle="--", linewidth=0.8)
 
-            crossed_thr = []
-            for thr in thresholds:
-                diff_prev, diff_cur = prev - thr, cur - thr
-                if diff_prev * diff_cur < 0:                 # strict crossing
-                    crossed_thr.append(thr)
-                elif diff_prev == 0 and diff_cur != 0:       # leaving the line
-                    crossed_thr.append(thr)
-                elif diff_cur == 0 and diff_prev != 0:       # arriving on the line
-                    crossed_thr.append(thr)
+        # —— crossings ------------------------------------------------
+        if plot_cross1 or plot_cross2:
+            thresholds = [1.0] + lines
+            type1_pts, type2_pts = [], []
+            for i in range(1, steps_total):
+                prev, cur = y[i-1], y[i]
+                crossed_thr = [thr for thr in thresholds
+                               if (prev-thr)*(cur-thr) < 0
+                               or (prev == thr) ^ (cur == thr)]
+                if len(crossed_thr) == 1:
+                    type1_pts.append((i, crossed_thr[0]))
+                elif len(crossed_thr) > 1:
+                    type2_pts.append((i, max(crossed_thr)))
 
-            if len(crossed_thr) == 1:
-                # Type-1: single guideline crossed – draw at that guideline
-                type1_pts.append((i, crossed_thr[0]))
-            elif len(crossed_thr) > 1:
-                # Type-2: ≥2 guidelines crossed – draw at the higher pressure
-                type2_pts.append((i, max(crossed_thr)))  
+            out["type1_count"] = len(type1_pts)
+            out["type2_count"] = len(type2_pts)
 
-        # optional: counts for downstream use
-        out["type1_count"] = len(type1_pts)
-        out["type2_count"] = len(type2_pts)
-        # markers for Type 1
-        if type1_pts:
-            ax.scatter([x for x, _ in type1_pts],
-                    [y for _, y in type1_pts],
-                    marker="o", s=20, label="Type 1")
+            if plot_cross1 and type1_pts:            # draw Type-1 only if enabled
+                ax.scatter(*zip(*type1_pts),
+                           marker="o", s=20, label="Type 1")
 
-        if type2_pts:
-            ax.scatter([x for x, _ in type2_pts],
-                    [y for _, y in type2_pts],
-                    marker="s", s=30, label="Type 2")
-        # ---------------------------------------------------------------
+            if plot_cross2 and type2_pts:            # draw Type-2 only if enabled
+                ax.scatter(*zip(*type2_pts),
+                           marker="s", s=30, label="Type 2")
+
+        # —E— cosmetics & save ----------------------------------------
         ax.set_xlabel("decode step")
         ax.set_ylabel("live_blocks / gpu_blocks")
-        ax.set_title(f"PPR={ppr:.2f}, TPI={tpi:.2f}, OV_frac={ov_frac:.2f}, TC={len(type1_pts)}, BC={len(type2_pts)}")
+        ax.set_title(f"MPR={ppr:.2f}  OTF={tpi:.2f}  OVF={ov_frac:.2f},TJ={len(type1_pts)}, BJ={len(type2_pts)}")
         ax.legend(loc="upper right")
         plt.tight_layout()
 
         png_path = Path(trace_path).with_suffix(".png")
         fig.savefig(png_path, dpi=150)
         plt.close(fig)
-
         out["plot_path"] = str(png_path)
+
     return out
 def build_token_bank(
     text_path: str,
@@ -1778,10 +1745,10 @@ def make_trace_default(
 #     )
 if __name__ == "__main__":
     # make_trace_default("/home/sychoy/vllm/samples/traces/benchmark_trace_test.json",)
-    metrics = memory_pressure("/home/xinyuema/vllm/benchmark/test_traces/PPR_based/PPR158_TPI005.json", plot_PPR=True)
+    metrics = memory_pressure("/home/xinyuema/vllm/benchmark/test_traces/PPR_based/PPR158_TPI005.json", plot_PPR=True, shade_lower=True,shade_upper=True, plot_cross1=True,plot_cross2=True, plot_guides=True)
     print(metrics)
-    metrics = memory_pressure("/home/xinyuema/vllm/benchmark/test_traces/PPR_based/PPR250_TPI051.json", plot_PPR=True)
+    metrics = memory_pressure("/home/xinyuema/vllm/benchmark/test_traces/PPR_based/PPR250_TPI051.json", plot_PPR=True, shade_lower=True,shade_upper=True, plot_cross1=True,plot_cross2=True, plot_guides=True)
     print(metrics)
-    metrics = memory_pressure("/home/xinyuema/vllm/benchmark/test_traces/PPR_based/PPR394_TPI099.json", plot_PPR=True)
+    metrics = memory_pressure("/home/xinyuema/vllm/benchmark/test_traces/PPR_based/PPR394_TPI099.json", plot_PPR=True, shade_lower=True,shade_upper=True, plot_cross1=True,plot_cross2=True, plot_guides=True)
     print(metrics)
     
