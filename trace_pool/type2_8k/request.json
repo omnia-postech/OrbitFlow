@@ -1,0 +1,17 @@
+{
+  "batch_size":4,
+  "request_type_probs":[["Long-Short ShareGPT",0.5],["Short-Long ShareGPT",0.5]],
+  "vocab":[200,30000],
+  "requests":{
+    "request_0":{"category":"Short-Long ShareGPT","input_length":141,"output_length":2097},
+    "request_1":{"category":"Long-Short ShareGPT","input_length":2389,"output_length":117},
+    "request_2":{"category":"Short-Long ShareGPT","input_length":321,"output_length":2231},
+    "request_3":{"category":"Short-Long ShareGPT","input_length":225,"output_length":2975},
+    "request_4":{"category":"Long-Short ShareGPT","input_length":2406,"output_length":401},
+    "request_5":{"category":"Short-Long ShareGPT","input_length":103,"output_length":2007},
+    "request_6":{"category":"Short-Long ShareGPT","input_length":104,"output_length":2258},
+    "request_7":{"category":"Long-Short ShareGPT","input_length":2877,"output_length":467},
+    "request_8":{"category":"Short-Long ShareGPT","input_length":342,"output_length":2170},
+    "request_9":{"category":"Long-Short ShareGPT","input_length":2999,"output_length":229}
+  }
+}
