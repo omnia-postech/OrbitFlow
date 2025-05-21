@@ -17,8 +17,8 @@ class Request:
         self.gpu_layers_on_gpu = gpu_layers_on_gpu
 """
 import torch 
-from solver  import Solver_updated as Solver
-# from solver import LatencySolver as Solver
+# from solver  import Solver_updated as Solver
+from solver import LatencySolver as Solver
 from solver import Request
 # from solver  import Solver as Solver
 import time

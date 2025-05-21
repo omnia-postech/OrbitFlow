@@ -251,6 +251,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
 
     running_requests = set()
     received_requests = []
+    sum_solver_time = 0.0
 
     def enqueue_batch(engine, batch, request_metadata):
         """Enqueue a batch of requests into the vLLM engine."""
@@ -435,7 +436,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                     break
         
         assert(elapsed_time_step > solver_time) 
-
+        sum_solver_time += solver_time
         for output in step_outputs:
             rid = output.request_id
             # Prefill
@@ -591,6 +592,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
         print(f"Decode  time     : {finished_decode_tokens } tokens over {decode_wall:.3f} s "
             f"({finished_decode_tokens / decode_wall: .2f} t/s)")
         print(f"Preemptions  time     : {engine.scheduler[0].num_cumulative_preemption}")
+        print(f"Overall solver time: {sum_solver_time:.3f} s")
     else:
         print("No valid start/end time for throughput calculation.")
 def main(configs):

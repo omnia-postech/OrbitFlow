@@ -165,32 +165,49 @@ def memory_pressure(trace_path: str, *, plot_PPR: bool = False) -> Dict[str, flo
         ax.plot(range(steps_total), pressure_curve, linewidth=0.8)
         for line in lines:
             ax.axhline(line, linestyle="--", linewidth=0.8)
-        # # (c) annotate crossings (re-uses the helper from earlier) --------
-        # for thr in [1.0, *lines]:
-        #     for s in _cross_count(pressure_curve, thr):
-        #         ax.text(
-        #             s, thr * 1.02,           # just above the guideline
-        #             f"{s}",
-        #             ha="center", va="bottom",
-        #             rotation=90, fontsize="x-small"
-        #         )
 
-        crossings_per_line = {}
-        total_crossings    = 0
+        # crossings_per_line = {}
+        # total_crossings    = 0
+        thresholds = [1.0] + lines            # capacity first, then extras
+        type1_pts, type2_pts = [], []         # (step, y_value)
 
-        for thr in lines:
-            steps = _cross_count(pressure_curve, thr)
-            crossings_per_line[thr] = len(steps)
-            total_crossings        += len(steps)
+        for i in range(1, steps_total):
+            prev, cur = pressure_curve[i-1], pressure_curve[i]
 
-        # Optionally: expose the numbers
-        # out["crossings_per_line"] = crossings_per_line
-        out["total_crossings"]    = total_crossings
+            crossed_thr = []
+            for thr in thresholds:
+                diff_prev, diff_cur = prev - thr, cur - thr
+                if diff_prev * diff_cur < 0:                 # strict crossing
+                    crossed_thr.append(thr)
+                elif diff_prev == 0 and diff_cur != 0:       # leaving the line
+                    crossed_thr.append(thr)
+                elif diff_cur == 0 and diff_prev != 0:       # arriving on the line
+                    crossed_thr.append(thr)
 
+            if len(crossed_thr) == 1:
+                # Type-1: single guideline crossed – draw at that guideline
+                type1_pts.append((i, crossed_thr[0]))
+            elif len(crossed_thr) > 1:
+                # Type-2: ≥2 guidelines crossed – draw at the higher pressure
+                type2_pts.append((i, max(crossed_thr)))  
+
+        # optional: counts for downstream use
+        out["type1_count"] = len(type1_pts)
+        out["type2_count"] = len(type2_pts)
+        # markers for Type 1
+        if type1_pts:
+            ax.scatter([x for x, _ in type1_pts],
+                    [y for _, y in type1_pts],
+                    marker="o", s=20, label="Type 1")
+
+        if type2_pts:
+            ax.scatter([x for x, _ in type2_pts],
+                    [y for _, y in type2_pts],
+                    marker="s", s=30, label="Type 2")
         # ---------------------------------------------------------------
         ax.set_xlabel("decode step")
         ax.set_ylabel("live_blocks / gpu_blocks")
-        ax.set_title(f"PPR={ppr:.2f}, TPI={tpi:.2f}, OV_frac={ov_frac:.2f}, Crossings={total_crossings}")
+        ax.set_title(f"PPR={ppr:.2f}, TPI={tpi:.2f}, OV_frac={ov_frac:.2f}, TC={len(type1_pts)}, BC={len(type2_pts)}")
         ax.legend(loc="upper right")
         plt.tight_layout()
 

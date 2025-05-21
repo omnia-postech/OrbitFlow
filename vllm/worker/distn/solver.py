@@ -595,7 +595,8 @@ class LatencySolver:
             if n_off not in best_d_for_n or d > best_d_for_n[n_off]:
                 best_d_for_n[n_off] = d
 
-        valid_dist = sorted(best_d_for_n.values())   
+        valid_dist = sorted(best_d_for_n.values())  
+        valid_dist = valid_dist[1:]  # remove 0 
         print(floor_val)
         print(valid_dist)  # valid strides
 # === 3. 모델 생성 및 설정 ===

@@ -939,28 +939,34 @@ class Scheduler:
                         # logger.info(f"Solver infeasible ❌, decode_candidates={decode_candidates}")
                         # 가장 긴 요청 1개 선택 
                         # TODO(HONG): tie-break 구현
-                        victim_sg = max(
-                            decode_candidates,
-                            key=lambda sg: len(
-                                sg.seq_group.get_seqs()[0].data._cached_all_token_ids   # 💡 길이 비교
+                        if self.cache_config.pause_and_resume:
+                            victim_sg = max(
+                                decode_candidates,
+                                key=lambda sg: len(
+                                    sg.seq_group.get_seqs()[0].data._cached_all_token_ids   # 💡 길이 비교
+                                )
                             )
-                        )
-                        vid = victim_sg.seq_group.request_id
-                        logger.critical(f"[Solver-fallback] pause '{vid}' (longest length)")
+                            vid = victim_sg.seq_group.request_id
+                            logger.critical(f"[Solver-fallback] pause '{vid}' (longest length)")
 
-                        decode_ids = {sg.seq_group.get_seqs()[0].seq_id for sg in ret.decode_seq_groups}
-                        self.paused.append(victim_sg.seq_group)
-                        self.paused_solver_ids.add(vid)
+                            decode_ids = {sg.seq_group.get_seqs()[0].seq_id for sg in ret.decode_seq_groups}
+                            self.paused.append(victim_sg.seq_group)
+                            self.paused_solver_ids.add(vid)
 
-                        # decode 후보 리스트 갱신
-                        new_decodes = [sg for sg in ret.decode_seq_groups
-                                    if sg.seq_group.request_id != vid]
-                        ret.decode_seq_groups = new_decodes
-                        ret.decode_seq_groups_list = [sg.seq_group for sg in new_decodes]
-                        ret.solver_estimated_time = 100
-                        logger.info(f"decode_candidates after pause={decode_candidates}")                          
-                        continue
-                    
+                            # decode 후보 리스트 갱신
+                            new_decodes = [sg for sg in ret.decode_seq_groups
+                                        if sg.seq_group.request_id != vid]
+                            ret.decode_seq_groups = new_decodes
+                            ret.decode_seq_groups_list = [sg.seq_group for sg in new_decodes]
+                            ret.solver_estimated_time = 100
+                            logger.info(f"decode_candidates after pause={decode_candidates}")                          
+                            continue
+                        else: # no pause and resume, just set the distance to all -1, so distn_single will take over in cache engine
+                            self.resume_distances = {s.id: -1 for s in request_list}
+                            self.decode_window_left = 128 # FIXME this is a default parameter, pretty ad-hoc (xinyue)
+                            ret.solver_estimated_time = 100
+                            logger.critical("[Solver-fallback] no pause and resume, use distn single")
+                            break
                     else:
                         # ---------- ② feasible -----------------------------------------
                         logger.critical(f"################# Solver feasible")
