@@ -1224,7 +1224,7 @@ class FlattenedCacheEngine(CacheEngineBase):
                 dist = -1
             else:
                 dist = math.floor(self.block_manager.num_attention_layers / num_layers_to_offload ) - 1 
-                dist = max(0, dist)
+                dist = max(1, dist)
                 dist = [dist] * len(snapshot.candidates)
         else:
             raise ValueError(f"unknown policy {prefetch_mode}")
