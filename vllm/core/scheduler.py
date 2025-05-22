@@ -827,7 +827,8 @@ class Scheduler:
 
         ret.solver_time = 0.0
         ret.solver_estimated_time = 0.0
-        if self.cache_config.pause_and_resume and self.cache_config.prefetch_mode == "solver":            
+        if self.cache_config.prefetch_mode == "solver":
+
             # ────────────── [ENTRY] ──────────────
             logger.info(
                 f"[RUNNING] {len(self.running)}  "
@@ -838,21 +839,23 @@ class Scheduler:
                 f"window_left={self.decode_window_left}"
             )
 
-            previous_paused_ids = {seq_group.get_seqs()[0].seq_id for seq_group in self.paused}
-
-            # TODO(HONG): 가능성은 작지만 pause된 request들을 한꺼번에 빼는 경우 memory가 부족할 수 있음. 
-            # TODO(HONG): self.running 대신 ret.decode_seq_groups 으로 해야함. 
-            # (xinyue) this puts back the paused right away, wait until some of the running batch finishes 
-            if (len(ret.decode_seq_groups)) <= 0 and not self.waiting and self.paused:
-                logger.debug(f"No running or waiting seqs; restoring {len(self.paused)} paused requests")
-                for pg in list(self.paused):
-                    scheduled = self._scheduled_seq_group_cache[self.cache_id].get_object()
-                    scheduled.seq_group = pg
-                    scheduled.token_chunk_size = 1
-                    ret.decode_seq_groups.append(scheduled)
-                    ret.decode_seq_groups_list.append(pg)
-                self.paused.clear()
-                self.decode_window_left = 0          # 윈도우 강제 리셋
+            if self.cache_config.pause_and_resume:
+                previous_paused_ids = {seq_group.get_seqs()[0].seq_id for seq_group in self.paused}
+                # TODO(HONG): 가능성은 작지만 pause된 request들을 한꺼번에 빼는 경우 memory가 부족할 수 있음. 
+                # TODO(HONG): self.running 대신 ret.decode_seq_groups 으로 해야함. 
+                # (xinyue) this puts back the paused right away, wait until some of the running batch finishes
+                if (len(ret.decode_seq_groups)) <= 0 and not self.waiting and self.paused:
+                    logger.debug(f"No running or waiting seqs; restoring {len(self.paused)} paused requests")
+                    for pg in list(self.paused):
+                        scheduled = self._scheduled_seq_group_cache[self.cache_id].get_object()
+                        scheduled.seq_group = pg
+                        scheduled.token_chunk_size = 1
+                        ret.decode_seq_groups.append(scheduled)
+                        ret.decode_seq_groups_list.append(pg)
+                    self.paused.clear()
+                    self.decode_window_left = 0          # 윈도우 강제 리셋
+            else: 
+                previous_paused_ids = set()            
 
             # preempt_imminent = self._is_preemption(len(ret.decode_seq_groups))
         
@@ -868,7 +871,8 @@ class Scheduler:
                 self.decode_window_left -= 1
 
             # NOTE(HONG): signature -> 새 요청 도착 / 기존 요청 종료 판단용
-            cur_sig = (frozenset(sg.seq_group.request_id for sg in ret.decode_seq_groups) | frozenset(pg.request_id for pg in self.paused))
+            # cur_sig = (frozenset(sg.seq_group.request_id for sg in ret.decode_seq_groups) | frozenset(pg.request_id for pg in self.paused))
+            cur_sig = (frozenset(sg.seq_group.request_id for sg in ret.decode_seq_groups) | (frozenset(pg.request_id for pg in self.paused) if self.cache_config.pause_and_resume else frozenset()))
             logger.debug(f"signature_changed={cur_sig != self.prev_sig}  "
                          f"cur_sig={list(cur_sig)}  prev_sig={list(self.prev_sig)}")
             signature_changed = (cur_sig != self.prev_sig)
@@ -882,7 +886,7 @@ class Scheduler:
             need_solver = (                
                 (ret.decode_seq_groups and
                 self.decode_window_left == 0)
-                or (ret.prefill_seq_groups)
+                or ret.prefill_seq_groups
                 or self.cache_config.need_solver
             )
             if need_solver:
@@ -978,14 +982,17 @@ class Scheduler:
 
                         resumed_ids = {sg.seq_group.get_seqs()[0].seq_id for sg in ret.decode_seq_groups}                
                         logger.info(f"previous_paused_ids: {previous_paused_ids}, resumed_ids: {resumed_ids}")
-                        if previous_paused_ids & resumed_ids:
-                            is_paused_to_resume = True
+                        if self.cache_config.pause_and_resume:
+                            if previous_paused_ids & resumed_ids:
+                                is_paused_to_resume = True
                         ret.solver_estimated_time = sol.batch_time
 
                         break
                 self.prev_sig = cur_sig
                 solver_t = time.time() - solver_start
-                ret.solver_time += solver_t               # 기록
+                ret.solver_time += solver_t
+            else:                
+                logger.debug(f"need_solver={need_solver}  ret.decode_seq_groups={(ret.decode_seq_groups)}, self.decode_window_left={self.decode_window_left} , self.cache_config.need_solver:{self.cache_config.need_solver}" )
         self._scheduler_running_outputs_cache[self.next_cache_id].reset()
         self._scheduled_seq_group_cache[self.next_cache_id].reset()
 
@@ -1540,10 +1547,16 @@ class Scheduler:
         swapped_in = SchedulerSwappedInOutputs.create_empty()
 
         # If any requests are swapped, prioritized swapped requests.
-        if self.cache_config.static_batching:
-            logger.info(f"swapped: {[seq.request_id for seq in self.swapped]}, paused_cpu: {[seq.request_id for seq in self.paused_cpu]}")            
-            logger.info(f"running: {[seq.request_id for seq in self.running]}, paused by fallback mechanism: {[seq.request_id for seq in self.paused]}")            
-            logger.info(f"waiting: {[seq.request_id for seq in self.waiting]}")
+        logger.info(f"===================================================scheduler state===================================================")
+        logger.info(f"swapped: {[seq.request_id for seq in self.swapped]}, paused_cpu: {[seq.request_id for seq in self.paused_cpu]}")
+        logger.info(f"running: {[seq.request_id for seq in self.running]}, paused by fallback mechanism: {[seq.request_id for seq in self.paused]}")        
+        logger.info(f"waiting: {[seq.request_id for seq in self.waiting]}")
+        logger.info(f"waiting seq ids: {[seq.get_seqs()[0].seq_id for seq in self.waiting]}")
+        logger.info(f"running seq ids: {[seq.get_seqs()[0].seq_id for seq in self.running]}")
+        logger.info(f"swapped seq ids: {[seq.get_seqs()[0].seq_id for seq in self.swapped]}")
+        logger.info(f"paused_cpu seq ids: {[seq.get_seqs()[0].seq_id for seq in self.paused_cpu]}")
+        logger.info(f"paused seq ids: {[seq.get_seqs()[0].seq_id for seq in self.paused]}")
+        if self.cache_config.static_batching:            
             num_current_requests = len(self.running) + len(self.swapped) + len(self.paused_cpu) + len(self.paused)
             logger.info(f"live requests in batch: {num_current_requests}")
             if not self.swapped and not self.paused_cpu and num_current_requests == 0:
@@ -1556,6 +1569,12 @@ class Scheduler:
                 prefills = self._schedule_prefills(budget,
                                                curr_loras,
                                                enable_chunking=False)
+                
+        if len(prefills.seq_groups) > 0:
+            logger.info(f"prefill stage!!!!!!")
+            logger.debug(f"prefill sid after _schedule_prefills(): {[s.seq_group.request_id for s in prefills.seq_groups]}")
+        else:
+            logger.info(f"decoding stage!!!!!!")
 
         # if self.cache_config.pause_and_resume and self.cache_config.prefetch_mode == "solver":
         #     if prefills.seq_groups:
@@ -1573,6 +1592,7 @@ class Scheduler:
             running_scheduled, is_paused_to_resume = self._schedule_running(budget,
                                                        curr_loras,
                                                        enable_chunking=False)
+            logger.debug(f"Real decoding sequence ids after _schedule_running(): {[s.seq_group.request_id for s in running_scheduled.decode_seq_groups]}")            
             # If any sequence group is preempted, do not swap in any sequence
             # group. because it means there's no slot for new running requests.
             cond1 = len(running_scheduled.preempted) + len(
