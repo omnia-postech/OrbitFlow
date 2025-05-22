@@ -350,10 +350,14 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                     max_slo = req_obj.slo
                     slo = sim.register(req_id, max_slo)
                 else: 
-                    # max_slo = PROFILED_A*(req_obj.input_length + req_obj.output_length) + PROFILED_B
-                    max_slo = estimator.estimate_by_profiled_results(tokens=req_obj.input_length + req_obj.output_length,
-                                                                                                    which="NoPrefetch" ,
-                                                                                                    mode="upper_quad")
+                    token_limit = trace_obj.num_gpu_blocks_override * BLOCK_SIZE 
+                    max_slo = estimator.estimate_by_profiled_results(tokens=token_limit,
+                                                                    which="NoPrefetch" ,
+                                                                    mode="upper_quad")
+    
+                    # max_slo = estimator.estimate_by_profiled_results(tokens=req_obj.input_length + req_obj.output_length,
+                    #                                                 which="NoPrefetch" ,
+                    #                                                 mode="upper_quad")
                     slo = sim.register(req_id, max_slo)
                 logger.critical(f"Enqueued request {req_id} with max_slo {max_slo} and SLO {(1/sim.v[req_id]):.3f} ms per token")
             # Remove them from the queue
@@ -524,7 +528,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                     "decode_length": decode_length,
                     "end_to_end_time": finished_time_local - arrival_time_local,
                     "decode_time": finished_time_local - first_token_time_local,
-                    "time_per_output_token": avg_token_latency,
+                    "time_per_output_token": request_metadata[rid]["time_between_tokens"] / decode_length if decode_length > 0 else 0,
                     "finish_reason": finish_reason,
                     # "time_between_tokens": json.dumps(per_token_latencies),
                     "solver_time": json.dumps(request_metadata[rid]["solver_time"]),

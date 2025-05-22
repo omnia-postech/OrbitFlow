@@ -934,8 +934,6 @@ class Scheduler:
                         block_bandwidth=block_bandwidth,
                         gpu_block_capacity=gpu_cap - head_room,                        
                     )                    
-                    solver_t = time.time() - solver_start
-                    ret.solver_time += solver_t               # 기록
 
                     # ---------- ② infeasible → victim pause ------------------------
                     if sol is None:                           # ② infeasible ⇒ fallback
@@ -991,6 +989,8 @@ class Scheduler:
 
                         break
                 self.prev_sig = cur_sig
+                solver_t = time.time() - solver_start
+                ret.solver_time += solver_t
             else:                
                 logger.debug(f"need_solver={need_solver}  ret.decode_seq_groups={(ret.decode_seq_groups)}, self.decode_window_left={self.decode_window_left} , self.cache_config.need_solver:{self.cache_config.need_solver}" )
         self._scheduler_running_outputs_cache[self.next_cache_id].reset()
