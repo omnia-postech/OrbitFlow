@@ -628,6 +628,7 @@ class Trace:
         )
     
     def add_estimate_sched(self,
+                           max_model_len: int,
                            num_gpu_blocks: int,
                            block_size: int = 16,
                            max_parallel: int = 1) -> None:
@@ -645,7 +646,7 @@ class Trace:
         """
         self.num_gpu_blocks_override = num_gpu_blocks
         self.batch_size = max_parallel
-        self.max_model_len = num_gpu_blocks*block_size
+        self.max_model_len = max_model_len
         # 1) Convert to a list of (req_key, Request), sorted by arrival_time
         items_sorted = sorted(self.requests.items(), key=lambda x: x[1].arrival_time)
         # e.g. items_sorted = [("request_0", reqObj), ("request_1", reqObj), ...]
@@ -1013,6 +1014,7 @@ def build_sched_save(
 
                 # GPU-capacity scheduling simulation
                 trace_obj.add_estimate_sched(
+                    max_model_len = max_model_len,
                     num_gpu_blocks=num_gpu_blocks, block_size=block_size,
                     max_parallel=batch_size
                 )
