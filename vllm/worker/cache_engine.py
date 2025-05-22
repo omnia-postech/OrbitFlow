@@ -1390,7 +1390,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         will_alloc_blk = _count_blocks(t[2] for t in alloc_layers)          # CPU -> GPU
         post_gpu_blk = current_gpu_blk + will_alloc_blk - will_free_blk
 
-        logger.critical("GPU-blk forecast: now=%d  +alloc=%d  −free=%d  ⇒ after=%d", current_gpu_blk, will_alloc_blk, will_free_blk, post_gpu_blk)
+        logger.critical("GPU-blk forecast: now=%d  +alloc=%d  −free=%d  ⇒ after=%d ⇒ total=%d  left=%d for %d requests", current_gpu_blk, will_alloc_blk, will_free_blk, post_gpu_blk, self.block_manager.num_total_gpu_blocks, self.block_manager.num_total_gpu_blocks - post_gpu_blk, len(snapshot.candidates))
 
         # NOTE(HONG): conservative estimate of worst-case extra blocks
         def _needs_solver(self, post_gpu_blk: int, n_running: int) -> bool:        
@@ -1401,9 +1401,9 @@ class FlattenedCacheEngine(CacheEngineBase):
             )
 
         if _needs_solver(self, post_gpu_blk, len(snapshot.candidates)):
-            logger.debug("Plan exceeds budget → hand over to Solver")
-            empty_plan = Plan({}, {}, [], 0, {})
-            return empty_plan, post_gpu_blk
+            logger.info("Plan exceeds budget → hand over to Solver")
+            # empty_plan = Plan({}, {}, [], 0, {})
+            return None, post_gpu_blk
         
         plan = Plan(
             dealloc_layers=dict(dealloc_layers),
@@ -1417,7 +1417,7 @@ class FlattenedCacheEngine(CacheEngineBase):
     
     def _execute_plan(self, plan, seq_group_metadata, attn_meta):
         logger.debug(f"[driver] _execute_plan started")
-        logger.debug(f"[driver] Received plan: {plan}")
+        # logger.debug(f"[driver] Received plan: {plan}")
         bm = self.block_manager 
         mapping = self.mapping 
         sid2sgidx_ = sid2sgidx(seq_group_metadata)
@@ -1473,28 +1473,28 @@ class FlattenedCacheEngine(CacheEngineBase):
             n_blocks = len(cpu_blocks)
             new_gpu_blocks = bm.allocate_seq_by_layer(sid, layer, n_blocks)   # → List[int]             
             logger.debug(f"[driver] free_blocks: {bm.get_num_free_gpu_blocks()}")
-            logger.debug(f"[driver] cpu_blocks:{cpu_blocks}")
-            logger.debug(f"[driver] new_gpu_blocks:{new_gpu_blocks}")
+            # logger.debug(f"[driver] cpu_blocks:{cpu_blocks}")
+            # logger.debug(f"[driver] new_gpu_blocks:{new_gpu_blocks}")
             
             # copy payload CPU → GPU
             for dst, src in zip(new_gpu_blocks, cpu_blocks):
-                logger.debug(f"[driver] copying CPU[{src}] to GPU[{dst}]")
+                # logger.debug(f"[driver] copying CPU[{src}] to GPU[{dst}]")
                 self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][src],non_blocking=False)
                 self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][src],non_blocking=False)
-                logger.debug(f"Copy complete for dst={dst}, src={src}")
+                # logger.debug(f"Copy complete for dst={dst}, src={src}")
             
             mapping.gpu_map.setdefault(sid, {})[layer] = new_gpu_blocks
             to_worker_new_gpu_blocks.append((sid, layer, new_gpu_blocks.copy()))
 
             # keep the 1/0 bitmap in sync
             mapping._set_gpu_flag(sid, layer, True)
-            logger.debug(f"[driver] Updated mapping.gpu_map[{sid}][{layer}] = {new_gpu_blocks}")
+            # logger.debug(f"[driver] Updated mapping.gpu_map[{sid}][{layer}] = {new_gpu_blocks}")
             
             # if not is_prefill and sid in sid2row:
             if sid in sid2row:
                 row = sid2sgidx_[sid]
                 seq_group_metadata[row].block_tables[sid][layer] = new_gpu_blocks   # local mapping
-                logger.debug(f"[driver] Updated seq_group_metadata[{row}].block_tables for SID {sid}, layer {layer}")
+                # logger.debug(f"[driver] Updated seq_group_metadata[{row}].block_tables for SID {sid}, layer {layer}")
 
                 # for prefill, change only slot mapping, since it does not contain any blocktables yet
                 row = sid2row[sid]
@@ -1509,10 +1509,10 @@ class FlattenedCacheEngine(CacheEngineBase):
                 # FIXME (xinyue) with prefill offload, the slot mapping will be repeated 32 times, source of error; but the offset should be correct?? 
                 temp_mapping = attn_meta.slot_mapping[layer][row] % 16 
                 attn_meta.slot_mapping[layer][row] = temp_mapping + new_gpu_blocks[-1]*16
-                logger.debug(f"[driver] Updated slot_mapping[{layer}][{row}] = {attn_meta.slot_mapping[layer][row]}")
+                # logger.debug(f"[driver] Updated slot_mapping[{layer}][{row}] = {attn_meta.slot_mapping[layer][row]}")
         logger.debug(f"[driver] mapping after resize: {mapping}")
-        logger.debug(f"[driver] GPU map after resize:{mapping.gpu_map}")
-        logger.debug(f"[driver] gpu_cpu_cache_map after resize:{mapping.gpu_cpu_cache_map}")
+        # logger.debug(f"[driver] GPU map after resize:{mapping.gpu_map}")
+        # logger.debug(f"[driver] gpu_cpu_cache_map after resize:{mapping.gpu_cpu_cache_map}")
         
         # ---------------- sync ordered view -----------
         self._sync_active_gpu_cpu_map(seq_row_order)
@@ -1847,7 +1847,7 @@ class MappingTable:
     def update_mapping_table(self, attn_meta, seq_group_metadata, finished_requests: List[str], paused_cpu_seq_groups:List=[] ):
         """ update seq dicts and maps; Ignore prefetch map for now"""
         logger.debug(f"===== start update_mapping_table =====")
-        logger.debug(f"update_mapping_table {seq_group_metadata}")
+        # logger.debug(f"update_mapping_table {seq_group_metadata}")
 
         if len(finished_requests) > 0:
             finished_requests = set(finished_requests)
