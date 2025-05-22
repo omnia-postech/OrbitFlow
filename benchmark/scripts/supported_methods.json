@@ -83,7 +83,8 @@
         "--prefetch-distance",    "1",
         "--flattened-cache",      "true",
         "--merge-prefetch-buffer", "true",
-        "--enable-deposit"
+        "--enable-deposit",
+        "--removable-cache"
     ],
     "Ours_fallback": [
         "--prefetch-mode",        "solver",

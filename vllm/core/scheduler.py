@@ -606,8 +606,6 @@ class Scheduler:
             # ② layer_time  (토큰 수로부터 선형추정: 기존 상수 그대로)
             num_toks   = len(seq.data._cached_all_token_ids)
             layer_time = (1.001743183e-06 * num_toks + 0.0495196) / 32
-# PROFILED_A = 1.0017431830666432e-06
-# PROFILED_B = 0.049519613282613506
             # ③ deposit / SLO
             deposit = self.deposit_map.get(str(seq_id), 0)
             slo     = 1 / self.slo_from_delaysim[req_id]
@@ -949,7 +947,12 @@ class Scheduler:
                                 )
                             )
                             vid = victim_sg.seq_group.request_id
+                            msg = ""
+                            for request in request_list:
+                                msg += (f"{request.id}: ({request.deposit_count}) \n")
+                            
                             logger.critical(f"[Solver-fallback] pause '{vid}' (longest length)")
+                            logger.critical(msg)
 
                             decode_ids = {sg.seq_group.get_seqs()[0].seq_id for sg in ret.decode_seq_groups}
                             self.paused.append(victim_sg.seq_group)

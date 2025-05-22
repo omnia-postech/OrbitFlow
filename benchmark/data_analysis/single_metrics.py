@@ -67,16 +67,20 @@ def _extract_request_tpot_attainment(df: pd.DataFrame) -> tuple[int, int]:
     TPOT <= mean(threshold).
     """
     if {"time_per_output_token", "slo_threshold"}.issubset(df.columns):
-        tpot = pd.to_numeric(df["time_per_output_token"], errors="coerce").to_numpy()
-        thr_mean = np.array([
-            float(np.mean(v)) if isinstance(v, (list, tuple, np.ndarray)) and len(v)
-            else pd.to_numeric(v, errors="coerce")
-            for v in df["slo_threshold"]
-        ])
-        valid = ~np.isnan(tpot) & ~np.isnan(thr_mean)
-        attain = (tpot[valid] <= thr_mean[valid]).sum()
+        # tpot = pd.to_numeric(df["time_per_output_token"], errors="coerce").to_numpy()
+        # print(f"tpot: {tpot}")
+        # temp, compute from time_between_tokens
+        tpot = np.array([np.mean(tbt) for tbt in df["time_between_tokens"]])
+        # print(f"tpop computed: {tpot}")
+        thr = pd.to_numeric(df["slo_threshold"], errors="coerce").to_numpy()
+        assert thr.mean() == thr.max() == thr.min(), "SLO threshold must be constant"
+        thr = thr.mean()
+        valid = ~np.isnan(tpot) & ~np.isnan(thr)
+        attain = (tpot[valid] <= thr).sum()
         return int(attain), int(valid.sum())
-    return 0, 0
+    else:
+        print("Missing columns: time_per_output_token, slo_threshold")
+        return 0, 0
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -87,21 +91,34 @@ def _extract_percentile_ratio_lists(df: pd.DataFrame, percentiles: List[int]) ->
     """For each percentile, return a list of Pxx/SLO ratios (one per request)."""
     lists = [[] for _ in percentiles]
     if {"time_between_tokens", "slo_threshold"}.issubset(df.columns):
-        for tbt, thr in zip(df["time_between_tokens"], df["slo_threshold"]):
-            if not isinstance(tbt, (list, tuple, np.ndarray)) or not tbt:
-                continue
-            if isinstance(thr, (list, tuple, np.ndarray)) and len(thr):
-                thr_val = float(np.mean(thr))
-            else:
-                try:
-                    thr_val = float(thr)
-                except Exception:
-                    continue
-            if thr_val <= 0:
-                continue
+        if df["slo_threshold"].mean() == df['slo_threshold'].max() == df['slo_threshold'].min(): # system-wise SLO 
+            # flatten time_between_tokens
+            tbt = []
+            for tbt_list in df["time_between_tokens"]:
+                tbt.extend(tbt_list if isinstance(tbt_list, (list, tuple, np.ndarray)) else [tbt_list])
+            # get the system-wise SLO
+            thr = df["slo_threshold"].mean()
+            assert(isinstance(thr,float))
             for idx, pct in enumerate(percentiles):
                 px = np.percentile(tbt, pct)
-                lists[idx].append(px / thr_val)
+                lists[idx] = [px / thr]
+        else:
+            print(f"wrong branch")
+            for tbt, thr in zip(df["time_between_tokens"], df["slo_threshold"]):
+                if not isinstance(tbt, (list, tuple, np.ndarray)) or not tbt:
+                    continue
+                if isinstance(thr, (list, tuple, np.ndarray)) and len(thr):
+                    thr_val = float(np.mean(thr))
+                else:
+                    try:
+                        thr_val = float(thr)
+                    except Exception:
+                        continue
+                if thr_val <= 0:
+                    continue
+                for idx, pct in enumerate(percentiles):
+                    px = np.percentile(tbt, pct)
+                    lists[idx].append(px / thr_val)
     return lists
 
 
@@ -173,64 +190,117 @@ def plot_latency_ratio_multi(
     out_name: str,
     title: str = "Latency percentile / SLO",
 ):
-    """Draw box‑plots of Pxx/SLO ratios across traces.
+    """Visualise tail-latency/SLO ratios for multiple traces.
 
-    * `percentiles` – list like `[90,95,99]`.
-    * For each percentile we show one box per trace (grouped by percentile).
-    * The distribution comes from per‑request ratios.
+    Behaviour
+    ---------
+    • If *_extract_percentile_ratio_lists* returns ≥2 values per percentile
+      (the usual case), draw **box-plots** exactly as before.
+    • If every percentile list has length 1 (only one request / one ratio),
+      draw a **scatter-plus-line plot** – one line per trace – because a
+      box-plot would be meaningless.
+
+    Parameters
+    ----------
+    *Same signature and semantics as the original function.*
     """
+    import matplotlib.pyplot as plt
+
     percentiles = sorted(percentiles)
     n_p = len(percentiles)
     n_traces = len(csv_tuples)
 
-    # Collect ratio lists
+    # ------------------------------------------------------------------ #
+    # 1. Collect data
+    # ------------------------------------------------------------------ #
     ratios_per_percentile: list[list[list[float]]] = [[ ] for _ in range(n_p)]
     trace_labels = []
-    for trace_idx, (pth, lbl) in enumerate(csv_tuples):
+    for pth, lbl in csv_tuples:
         trace_labels.append(lbl)
         lists = _extract_percentile_ratio_lists(_load_csv(pth), percentiles)
         for p_idx, lst in enumerate(lists):
             ratios_per_percentile[p_idx].append(lst)
 
-    # Build boxplot data & positions
-    box_data = []
-    positions = []
-    xticks = []
-    for p_idx in range(n_p):
-        base = p_idx * (n_traces + 1)
-        xticks.append(base + (n_traces - 1) / 2)
-        for t_idx in range(n_traces):
-            positions.append(base + t_idx)
-            box_data.append(ratios_per_percentile[p_idx][t_idx])
-
-    fig, ax = plt.subplots(figsize=(3 + 1.5 * n_p, 6))
-    palette = list(plt.cm.tab10.colors)
-    colours = (palette * ((n_traces + 9)//10))[:n_traces]
-
-    bp = ax.boxplot(
-        box_data,
-        positions=positions,
-        patch_artist=True,
-        showfliers=False,
-        widths=0.6,
-        medianprops={"color": "black"},
+    # Detect whether we only have single-point lists
+    single_value = all(
+        len(lst) == 1
+        for p_lists in ratios_per_percentile
+        for lst in p_lists
     )
-    for idx, patch in enumerate(bp['boxes']):
-        patch.set_facecolor(colours[idx % n_traces])
-        patch.set_edgecolor('black')
 
-    ax.set_xticks(xticks)
-    ax.set_xticklabels([f"P{p}" for p in percentiles], fontsize=TICK_FONTSIZE)
-    ax.set_title(title, fontsize=TITLE_FONTSIZE)
-    ax.set_ylabel("Tail Latency / SLO", fontsize=AXIS_FONTSIZE)
-    ax.tick_params(axis="y", labelsize=TICK_FONTSIZE)
+    # Colour palette (re-used in both branches)
+    palette = list(plt.cm.tab10.colors)
+    colours = (palette * ((n_traces + 9) // 10))[:n_traces]
 
-    legend_handles = [plt.Line2D([0],[0], color=colours[i], lw=6) for i in range(n_traces)]
-    ax.legend(legend_handles, trace_labels, fontsize=LEGEND_FONTSIZE, title="Trace")
+    # ------------------------------------------------------------------ #
+    # 2A. Scatter-with-lines branch
+    # ------------------------------------------------------------------ #
+    if single_value:
+        fig, ax = plt.subplots(figsize=(3 + 1.5 * n_p, 5))
 
+        for t_idx in range(n_traces):
+            y_vals = [ratios_per_percentile[p_idx][t_idx][0] for p_idx in range(n_p)]
+            ax.plot(
+                percentiles,
+                y_vals,
+                marker="o",
+                linestyle="-",
+                linewidth=1.5,
+                markersize=6,
+                color=colours[t_idx],
+                label=trace_labels[t_idx],
+            )
+
+        ax.set_xticks(percentiles)
+        ax.set_xticklabels([f"P{p}" for p in percentiles], fontsize=TICK_FONTSIZE)
+        ax.set_ylabel("SLO Scale", fontsize=AXIS_FONTSIZE)
+        ax.set_title(title, fontsize=TITLE_FONTSIZE)
+        ax.tick_params(axis="y", labelsize=TICK_FONTSIZE)
+        ax.legend(fontsize=LEGEND_FONTSIZE, title="Trace")
+
+    # ------------------------------------------------------------------ #
+    # 2B. Box-plot branch (original implementation)
+    # ------------------------------------------------------------------ #
+    else:
+        # Build box-plot data and positions
+        box_data, positions, xticks = [], [], []
+        for p_idx in range(n_p):
+            base = p_idx * (n_traces + 1)
+            xticks.append(base + (n_traces - 1) / 2)
+            for t_idx in range(n_traces):
+                positions.append(base + t_idx)
+                box_data.append(ratios_per_percentile[p_idx][t_idx])
+
+        fig, ax = plt.subplots(figsize=(3 + 1.5 * n_p, 6))
+        bp = ax.boxplot(
+            box_data,
+            positions=positions,
+            patch_artist=True,
+            showfliers=False,
+            widths=0.6,
+            medianprops={"color": "black"},
+        )
+        for idx, patch in enumerate(bp["boxes"]):
+            patch.set_facecolor(colours[idx % n_traces])
+            patch.set_edgecolor("black")
+
+        ax.set_xticks(xticks)
+        ax.set_xticklabels([f"P{p}" for p in percentiles], fontsize=TICK_FONTSIZE)
+        ax.set_ylabel("Tail Latency / SLO", fontsize=AXIS_FONTSIZE)
+        ax.set_title(title, fontsize=TITLE_FONTSIZE)
+        ax.tick_params(axis="y", labelsize=TICK_FONTSIZE)
+
+        legend_handles = [
+            plt.Line2D([0], [0], color=colours[i], lw=6) for i in range(n_traces)
+        ]
+        ax.legend(legend_handles, trace_labels, fontsize=LEGEND_FONTSIZE, title="Trace")
+
+    # ------------------------------------------------------------------ #
+    # 3. Save figure
+    # ------------------------------------------------------------------ #
     plt.tight_layout()
-    out_png = out_dir / f"{out_name}_pXX.png"
     out_dir.mkdir(parents=True, exist_ok=True)
+    out_png = out_dir / f"{out_name}_pXX.png"
     fig.savefig(out_png, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"Figure written ➜ {out_png}")
@@ -326,38 +396,45 @@ if __name__ == "__main__":
         plot_stats_overview_multi(traces, out_dir=FIG_DIR, out_name=f"{tag}", title=f"{descr}-Throughput")
         plot_latency_ratio_multi(traces, [90, 95, 99], out_dir=FIG_DIR, out_name=f"{tag}", title=f"{descr}-Tail-TBT")
 
-    # _run_all([
-    #     (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased/Flexgen/PPR158_TPI005/outputs.csv"), "FlexGen"),
-    #     (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased/Ours/PPR158_TPI005/outputs.csv"), "Ours"),
-    # ], tag="Trace1", descr="Trace1-(PPR158_TPI005)")
+
+    # FIG_DIR = Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/figures/")
+    # os.makedirs(FIG_DIR, exist_ok=True)
 
     # _run_all([
-    #     (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased/Flexgen/PPR250_TPI051/outputs.csv"), "FlexGen"),
-    #     (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased/Ours/PPR250_TPI051/outputs.csv"), "Ours"),
-    # ], tag="Trace2", descr="Trace2-(PPR250_TPI051)")
+    #     (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/Flexgen/PPR158_TPI005/outputs.csv"), "FlexGen"),
+    #     (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/Ours/PPR158_TPI005/outputs.csv"), "Ours"),
+    #     (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/DistNSingle/PPR158_TPI005/outputs.csv"), "DistNSingle"),
+    # ], tag="Trace1", descr="Trace1")
 
     # _run_all([
-    #     (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased/Flexgen/PPR394_TPI099/outputs.csv"), "FlexGen"),
-    #     (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased/Ours/PPR394_TPI099/outputs.csv"), "Ours"),
-    # ], tag="Trace3", descr="Trace3-(PPR394_TPI099)")
+    #     (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/Flexgen/PPR250_TPI051/outputs.csv"), "FlexGen"),
+    #     (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/Ours/PPR250_TPI051/outputs.csv"), "Ours"),
+    #     (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/DistNSingle/PPR250_TPI051/outputs.csv"), "DistNSingle"),
+    # ], tag="Trace2", descr="Trace2")
 
-    FIG_DIR = Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased-SLO2_5/figures/")
+    # _run_all([
+    #     (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/Flexgen/PPR394_TPI099/outputs.csv"), "FlexGen"),
+    #     (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/Ours/PPR394_TPI099/outputs.csv"), "Ours"),
+    #     (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/DistNSingle/PPR394_TPI099/outputs.csv"), "DistNSingle"),
+    # ], tag="Trace3", descr="Trace3")
+
+    FIG_DIR = Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/figures_design_val/")
     os.makedirs(FIG_DIR, exist_ok=True)
 
     _run_all([
-        (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased-SLO2_5/Flexgen/PPR158_TPI005/outputs.csv"), "FlexGen"),
-        (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased-SLO2_5/Ours/PPR158_TPI005/outputs.csv"), "Ours"),
-        (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5/DistNSingle/PPR158_TPI005/outputs.csv"), "DistNSingle"),
+        (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/Ours/PPR158_TPI005/outputs.csv"), "Ours"),
+        (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/OursMinusDeposit/PPR158_TPI005/outputs.csv"), "OursMinusDeposit"),
+        (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/OursMinusRC/PPR158_TPI005/outputs.csv"), "OursMinusRC"),
     ], tag="Trace1", descr="Trace1")
 
     _run_all([
-        (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased-SLO2_5/Flexgen/PPR250_TPI051/outputs.csv"), "FlexGen"),
-        (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased-SLO2_5/Ours/PPR250_TPI051/outputs.csv"), "Ours"),
-        (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5/DistNSingle/PPR250_TPI051/outputs.csv"), "DistNSingle"),
+        (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/Ours/PPR250_TPI051/outputs.csv"), "Ours"),
+        (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/OursMinusDeposit/PPR250_TPI051/outputs.csv"), "OursMinusDeposit"),
+        (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/OursMinusRC/PPR250_TPI051/outputs.csv"), "OursMinusRC"),
     ], tag="Trace2", descr="Trace2")
 
     _run_all([
-        (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased-SLO2_5/Flexgen/PPR394_TPI099/outputs.csv"), "FlexGen"),
-        (Path("/home/xinyuema/vllm/outputs/benchmark/TestPPRBased-SLO2_5/Ours/PPR394_TPI099/outputs.csv"), "Ours"),
-        (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5/DistNSingle/PPR394_TPI099/outputs.csv"), "DistNSingle"),
+        (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/Ours/PPR394_TPI099/outputs.csv"), "Ours"),
+        (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/OursMinusDeposit/PPR394_TPI099/outputs.csv"), "OursMinusDeposit"),
+        (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/OursMinusRC/PPR394_TPI099/outputs.csv"), "OursMinusRC"),
     ], tag="Trace3", descr="Trace3")

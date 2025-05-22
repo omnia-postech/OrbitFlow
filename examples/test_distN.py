@@ -85,7 +85,7 @@ class DelaySimulator:
         if rid not in self.last_time: 
             self.last_time[rid] = step_time
             logger.debug(f"[on_token] first token for {rid}, setting last_time[{rid}] = {step_time:.6f}")
-        logger.debug(f"[on_token] rid={rid} @ {step_time:.6f}: deposit {before} -> {after}")
+        logger.critical(f"[on_token] rid={rid} @ {step_time:.6f}: deposit {before} -> {after}")
 
 
     def pop(self, step_time: float, solver_time: float = 0.0):
@@ -528,7 +528,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                     "decode_length": decode_length,
                     "end_to_end_time": finished_time_local - arrival_time_local,
                     "decode_time": finished_time_local - first_token_time_local,
-                    "time_per_output_token": request_metadata[rid]["time_between_tokens"] / decode_length if decode_length > 0 else 0,
+                    "time_per_output_token": sum(request_metadata[rid]["time_between_tokens"]) / decode_length if decode_length > 0 else 0,
                     "finish_reason": finish_reason,
                     # "time_between_tokens": json.dumps(per_token_latencies),
                     "solver_time": json.dumps(request_metadata[rid]["solver_time"]),
