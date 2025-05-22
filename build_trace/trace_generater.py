@@ -874,6 +874,7 @@ def create_instances_from_json(json_data):
 def generate_trace(
     request_data, 
     arrival_pattern_obj,
+    arrival_times,
     max_model_len,
     static: bool = False,
 ):
@@ -883,8 +884,6 @@ def generate_trace(
     request_type_probs = request_data["request_type_probs"]
     
     num_requests = len(json_requests)
-    arrival_times = arrival_pattern_obj.generate_arrival_times(num_requests)
-    arrival_times.sort()
 
     for i in range(min(batch_size, num_requests)):
         arrival_times[i] = 0
@@ -957,6 +956,8 @@ def compute_gpu_blocks(request_data, max_model_len, block_size, gpu_block_ranges
         val = round(min(max(val, min_val), max_val))  # Clip to [min_val, max_val]
         gpu_blocks.append(val)
 
+    gpu_blocks = sorted(set(gpu_blocks))
+
     return gpu_blocks, min_val, max_val
 
 def build_sched_save(
@@ -995,21 +996,25 @@ def build_sched_save(
         request_data, max_tokens, block_size, gpu_block_ranges
     )
 
-    for num_gpu_blocks, range in zip(gpu_blocks,gpu_block_ranges):
-        if num_gpu_blocks < min_gpu_blocks or num_gpu_blocks > max_gpu_blocks:
-            print(f"num_gpu_blocks {num_gpu_blocks} is out of range [{min_gpu_blocks}, {max_gpu_blocks}]")
-            continue
-        print()
-        print(f"range: {range} num_gpu_blocks: {num_gpu_blocks}")
-        for arrival_pattern, output in zip(arrival_patterns, output_list):
+    for arrival_pattern, output in zip(arrival_patterns, output_list):
+        print(arrival_pattern)
+        arrival_times = arrival_pattern.generate_arrival_times(len(request_data["requests"]))
+        arrival_times.sort()
+        
+        for num_gpu_blocks, range in zip(gpu_blocks,gpu_block_ranges):
+            if num_gpu_blocks < min_gpu_blocks or num_gpu_blocks > max_gpu_blocks:
+                print(f"num_gpu_blocks {num_gpu_blocks} is out of range [{min_gpu_blocks}, {max_gpu_blocks}]")
+                continue
+            print()
+            print(f"range: {range} num_gpu_blocks: {num_gpu_blocks}")
             try:
-                print(arrival_pattern)
                 output_dir = request_path.parent / output
                 output_dir.mkdir(exist_ok=True)  # 디렉토리 없으면 생성
                 output_json_path = output_dir / f"trace_{num_gpu_blocks}.json"
             
+
                 trace_obj = generate_trace(
-                    request_data, arrival_pattern, max_tokens, static
+                    request_data, arrival_pattern, arrival_times, max_tokens, static
                 )
 
                 # GPU-capacity scheduling simulation
@@ -1150,8 +1155,8 @@ if __name__ == "__main__":
     # max_parallel = 4 # batch size 
 
     build_sched_save(
-        request_json_path="/home/sychoy/vllm/trace_pool/static_8k_pressure/request.json",
-        arrival_json_path="/home/sychoy/vllm/trace_pool/static_8k_pressure/arrivals.json",
+        request_json_path="/home/sychoy/vllm/trace_pool/type2_8K_pressure/request.json",
+        arrival_json_path="/home/sychoy/vllm/trace_pool/type2_8K_pressure/arrivals.json",
         max_tokens=max_model_len,
         block_size=block_size,
         gpu_block_ranges = [-0.6, -0.3, 0, 0.3, 0.6, 1.0],
@@ -1159,5 +1164,5 @@ if __name__ == "__main__":
         skip_token_ids=True,
         postfix_trace="_trace",
         postfix_model="_model",
-        # static=True
+        static=True
     )

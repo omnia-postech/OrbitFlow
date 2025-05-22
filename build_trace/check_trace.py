@@ -159,7 +159,7 @@ def memory_pressure(
 if __name__ == "__main__":
     import glob
 
-    base_dir = "/home/sychoy/vllm/trace_pool/static_8k_pressure/bimodal/"
+    base_dir = "/home/sychoy/vllm/trace_pool/type2_8K_pressure/bimodal/"
     trace_paths = glob.glob(f"{base_dir}/trace_*.json")
 
     for path in trace_paths:  # 정렬은 선택 사항
@@ -171,7 +171,7 @@ if __name__ == "__main__":
         print(metrics)
     
 
-    base_dir = "/home/sychoy/vllm/trace_pool/static_8k_pressure/uniform/"
+    base_dir = "/home/sychoy/vllm/trace_pool/type2_8K_pressure/uniform/"
     trace_paths = glob.glob(f"{base_dir}/trace_*.json")
 
     for path in sorted(trace_paths):  # 정렬은 선택 사항

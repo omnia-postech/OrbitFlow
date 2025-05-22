@@ -389,7 +389,7 @@ if __name__ == "__main__":
         DiscreteBimodalArrival(lambda1=0.005, lambda2=0.0001, p=0.7),
     ]
 
-    filepath = "/home/sychoy/vllm/trace_pool/static_8k_pressure/arrivals.json"
+    filepath = "/home/sychoy/vllm/trace_pool/type2_8K_pressure/arrivals.json"
 
     # JSON 구조 생성
     json_data = [extract_params(p) for p in patterns]
