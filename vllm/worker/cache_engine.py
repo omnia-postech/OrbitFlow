@@ -920,7 +920,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         )
         plan = None
         dist_dict, _ = self._select_prefetch_distance(snap, self.prefetch_distance, total_context_lens, is_decoding)
-        logger.critical(f"dist:{dist_dict}")
+        logger.critical(f"[driver] distance: {dist_dict}")
         plan, cur_blocks = self._plan_cache_delta(snap, dist_dict, pause_and_resume)
         if plan is None and  self.prefetch_mode == "solver":
             prefetch_mode = "distn_single"
@@ -1129,11 +1129,8 @@ class FlattenedCacheEngine(CacheEngineBase):
                         cur_blocks: int = None, # current gpu blocks
                                   ):
         self.cache_config.need_solver = False
-        if not is_decoding and self.prefetch_mode == "solver": 
-            prefetch_mode = "flexgen" # Temp, use flexgen for prefill for now, need to move sovler out of schedule running 
-            self.cache_config.need_solver = True
-        else: 
-            prefetch_mode = self.prefetch_mode
+        
+        prefetch_mode = self.prefetch_mode
         
         # override 
         if custom_prefetch_mode is not None:
@@ -1148,7 +1145,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             # deprecated branch     
             if not is_decoding and not self._solver_prefill_done:
                 dist = [-1] * len(snapshot.candidates)
-                logger.info(f"[driver] {dist}")
+                logger.info(f"[driver] prefetch distance: {dist}")
                 self._solver_prefill_done = True
                 self.cache_config.need_solver = True                
             else:          
@@ -1383,40 +1380,40 @@ class FlattenedCacheEngine(CacheEngineBase):
                             snapshot.candidates)
         current_prefetch = self.prefetch_blocks
         prefetch_resize = max(0, need_prefetch)
+        
+        def _count_blocks(iterable):    
+            return sum(len(x) for x in iterable)
 
-        # TODO(HONG): build pause and resume plan here.
-        # NOTE(HONG): we need to consdier that distance change -> we are not able to know number of free blocks. 
-        # NOTE(HONG): self.block_manager.get_num_free_gpu_blocks() will return free blocks before changing distance(alloc and dealloc)
+        current_gpu_blk = len(m.get_all_gpu_block_ids())                    # 현재 점유
+        will_free_blk  = _count_blocks(expected_freed.values())             # distance 정책
+        will_free_blk += freed_paused_blks                                  # pause 회수
+        will_alloc_blk = _count_blocks(t[2] for t in alloc_layers)          # CPU -> GPU
+        post_gpu_blk = current_gpu_blk + will_alloc_blk - will_free_blk
 
-        # count the total block usage of the current plan 
-        # CHECKER
-        all_gpu_block_ids = m.get_all_gpu_block_ids() 
-        all_blocks = len(all_gpu_block_ids)
-        ef_dict = dict(expected_freed)
-        freed = [ef_dict[k] for k in ef_dict]
-        freed = [len(v) for v in freed]
-        freed = sum(freed) 
-        freed += freed_paused_blks
-        # alloc_layers: List[Tuple[int, int, List[int]]] = []
-        alloced = [len(t[2]) for t in alloc_layers]
-        alloced = sum(alloced)
-        total = all_blocks + alloced - freed 
-        logger.critical(f"total={total}, cur={all_blocks}, alloced={alloced}, freed={freed}")
-        if self.prefetch_mode == "solver" and total + len(snapshot.candidates)*self.num_attention_layers > self.block_manager.num_total_gpu_blocks:
-            return (Plan(
-                    dealloc_layers={},
-                    expected_freed={},
-                    alloc_layers=[],
-                    prefetch_resize=0,
-                    pause_layers={}), total)
-        else:
-            logger.debug(f"[plan] pause_layers: {pause_layers}")
-            return (Plan(
-                    dealloc_layers=dict(dealloc_layers),
-                    expected_freed=dict(expected_freed),
-                    alloc_layers=alloc_layers,
-                    prefetch_resize=prefetch_resize,
-                    pause_layers=pause_layers), total)
+        logger.critical("GPU-blk forecast: now=%d  +alloc=%d  −free=%d  ⇒ after=%d", current_gpu_blk, will_alloc_blk, will_free_blk, post_gpu_blk)
+
+        # NOTE(HONG): conservative estimate of worst-case extra blocks
+        def _needs_solver(self, post_gpu_blk: int, n_running: int) -> bool:        
+            worst_case_extra = n_running * self.num_attention_layers
+            return (
+                self.prefetch_mode == "solver" and
+                post_gpu_blk + worst_case_extra > self.block_manager.num_total_gpu_blocks
+            )
+
+        if _needs_solver(self, post_gpu_blk, len(snapshot.candidates)):
+            logger.debug("Plan exceeds budget → hand over to Solver")
+            empty_plan = Plan({}, {}, [], 0, {})
+            return empty_plan, post_gpu_blk
+        
+        plan = Plan(
+            dealloc_layers=dict(dealloc_layers),
+            expected_freed=dict(expected_freed),
+            alloc_layers=alloc_layers,
+            prefetch_resize=prefetch_resize,
+            pause_layers=pause_layers,
+        )
+
+        return plan, post_gpu_blk
     
     def _execute_plan(self, plan, seq_group_metadata, attn_meta):
         logger.debug(f"[driver] _execute_plan started")

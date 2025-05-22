@@ -1,0 +1,13 @@
+[
+  {
+    "class": "DiscreteUniformArrival",
+    "max_step": 10000
+  },
+  {
+    "class": "DiscreteBimodalArrival",
+    "lambda1": 0.005,
+    "lambda2": 0.0001,
+    "p": 0.7,
+    "max_steps": 100000
+  }
+]

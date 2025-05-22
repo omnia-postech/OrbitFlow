@@ -1,0 +1,22 @@
+{
+  "arrival_pattern":{"type":"DiscreteBimodalArrival","params":{"lambda1":0.01,"lambda2":0.0005,"p":0.7,"max_steps":100000}},
+  "batch_size":4,
+  "max_model_len":8000,
+  "num_gpu_blocks_override":430,
+  "request_type_probs":[["Long-Short ShareGPT",0.7],["Short-Short ShareGPT",0.3]],
+  "vocab":[200,30000],
+  "requests":{
+    "request_0":{"category":"Long-Short ShareGPT","input_length":2783,"output_length":613,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_1":{"category":"Long-Short ShareGPT","input_length":2783,"output_length":613,"arrival_time":0,"sched_time":0,"wait_time":0},
+    "request_2":{"category":"Long-Short ShareGPT","input_length":2783,"output_length":613,"arrival_time":0,"sched_time":614,"wait_time":614},
+    "request_3":{"category":"Long-Short ShareGPT","input_length":2783,"output_length":613,"arrival_time":0,"sched_time":614,"wait_time":614},
+    "request_4":{"category":"Short-Short ShareGPT","input_length":645,"output_length":992,"arrival_time":615,"sched_time":615,"wait_time":0},
+    "request_5":{"category":"Short-Short ShareGPT","input_length":645,"output_length":992,"arrival_time":615,"sched_time":615,"wait_time":0},
+    "request_6":{"category":"Short-Short ShareGPT","input_length":645,"output_length":992,"arrival_time":615,"sched_time":1228,"wait_time":613},
+    "request_7":{"category":"Short-Short ShareGPT","input_length":645,"output_length":992,"arrival_time":615,"sched_time":1228,"wait_time":613},
+    "request_8":{"category":"Long-Short ShareGPT","input_length":2949,"output_length":698,"arrival_time":1609,"sched_time":1609,"wait_time":0},
+    "request_9":{"category":"Long-Short ShareGPT","input_length":2949,"output_length":698,"arrival_time":1609,"sched_time":1609,"wait_time":0},
+    "request_10":{"category":"Long-Short ShareGPT","input_length":2949,"output_length":698,"arrival_time":1609,"sched_time":2308,"wait_time":699},
+    "request_11":{"category":"Long-Short ShareGPT","input_length":2949,"output_length":698,"arrival_time":1609,"sched_time":2308,"wait_time":699}
+  }
+}
