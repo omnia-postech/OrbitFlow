@@ -628,6 +628,7 @@ class Trace:
         )
     
     def add_estimate_sched(self,
+                           max_model_len: int,
                            num_gpu_blocks: int,
                            block_size: int = 16,
                            max_parallel: int = 1) -> None:
@@ -645,7 +646,7 @@ class Trace:
         """
         self.num_gpu_blocks_override = num_gpu_blocks
         self.batch_size = max_parallel
-        self.max_model_len = num_gpu_blocks*block_size
+        self.max_model_len = max_model_len
         # 1) Convert to a list of (req_key, Request), sorted by arrival_time
         items_sorted = sorted(self.requests.items(), key=lambda x: x[1].arrival_time)
         # e.g. items_sorted = [("request_0", reqObj), ("request_1", reqObj), ...]
@@ -871,19 +872,18 @@ def create_instances_from_json(json_data):
     return instance_list, output_list
 
 def generate_trace(
-        request_data, 
-        arrival_pattern_obj,
-        static: bool = False,
-    ):
-
+    request_data, 
+    arrival_pattern_obj,
+    arrival_times,
+    max_model_len,
+    static: bool = False,
+):
     json_requests = request_data["requests"]
     batch_size = request_data["batch_size"]
     vocab = request_data["vocab"]
     request_type_probs = request_data["request_type_probs"]
     
     num_requests = len(json_requests)
-    arrival_times = arrival_pattern_obj.generate_arrival_times(num_requests)
-    arrival_times.sort()
 
     for i in range(min(batch_size, num_requests)):
         arrival_times[i] = 0
@@ -927,16 +927,44 @@ def generate_trace(
     trace = Trace(
         requests=requests_dict,  # pass the dict instead of a list
         arrival_pattern_name=str(arrival_pattern_obj),
+        max_model_len=max_model_len,
         batch_size=batch_size,
         request_type_probs=request_type_probs,
         vocab=vocab
     )
     return trace
 
+def compute_gpu_blocks(request_data, max_model_len, block_size, gpu_block_ranges):
+    requests = request_data["requests"]
+    
+    # 1. min_val: max of input_length
+    input_lengths = [req["input_length"] for req in requests.values()]
+    min_val = max(input_lengths) // block_size
+
+    # 2. avg_val: average of input_length + output_length
+    total_lens = [req["input_length"] + req["output_length"] for req in requests.values()]
+    avg_val = sum(total_lens) / len(total_lens)
+    avg_val = avg_val // block_size
+
+    # 3. max_val: max_model_len // block_size
+    max_val = max_model_len // block_size
+
+    # 4. Compute gpu_blocks using the formula
+    gpu_blocks = []
+    for r in gpu_block_ranges:
+        val = avg_val + r * (max_val - min_val)
+        val = round(min(max(val, min_val), max_val))  # Clip to [min_val, max_val]
+        gpu_blocks.append(val)
+
+    gpu_blocks = sorted(set(gpu_blocks))
+
+    return gpu_blocks, min_val, max_val
+
 def build_sched_save(
     request_json_path: str, 
     arrival_json_path: str,
-    num_gpu_blocks: int,
+    max_tokens: int,
+    gpu_block_ranges: List[float],
     block_size: int,
     static: bool = False,
     plot_distributions: bool = True,            # ← new flag
@@ -964,154 +992,177 @@ def build_sched_save(
 
     request_path = Path(request_json_path)
 
+    gpu_blocks, min_gpu_blocks, max_gpu_blocks = compute_gpu_blocks(
+        request_data, max_tokens, block_size, gpu_block_ranges
+    )
+
     for arrival_pattern, output in zip(arrival_patterns, output_list):
         print(arrival_pattern)
-        output_dir = request_path.parent / output
-        output_dir.mkdir(exist_ok=True)  # 디렉토리 없으면 생성
-        output_json_path = output_dir / "trace.json"
-    
-        trace_obj = generate_trace(
-            request_data, arrival_pattern, static
-        )
+        arrival_times = arrival_pattern.generate_arrival_times(len(request_data["requests"]))
+        arrival_times.sort()
+        
+        for num_gpu_blocks, range in zip(gpu_blocks,gpu_block_ranges):
+            if num_gpu_blocks < min_gpu_blocks or num_gpu_blocks > max_gpu_blocks:
+                print(f"num_gpu_blocks {num_gpu_blocks} is out of range [{min_gpu_blocks}, {max_gpu_blocks}]")
+                continue
+            print()
+            print(f"range: {range} num_gpu_blocks: {num_gpu_blocks}")
+            try:
+                output_dir = request_path.parent / output
+                output_dir.mkdir(exist_ok=True)  # 디렉토리 없으면 생성
+                output_json_path = output_dir / f"trace_{num_gpu_blocks}.json"
+            
 
-        # GPU-capacity scheduling simulation
-        trace_obj.add_estimate_sched(
-            num_gpu_blocks=num_gpu_blocks, block_size=block_size,
-            max_parallel=batch_size
-        )
+                trace_obj = generate_trace(
+                    request_data, arrival_pattern, arrival_times, max_tokens, static
+                )
 
-        # # ---------- 4. persist JSON ----------
-        trace_obj.save_to_json(output_json_path, skip_token_ids=skip_token_ids)
+                # GPU-capacity scheduling simulation
+                trace_obj.add_estimate_sched(
+                    max_model_len = max_model_len,
+                    num_gpu_blocks=num_gpu_blocks, block_size=block_size,
+                    max_parallel=batch_size
+                )
 
-        # # -------- NEW: write a summary .txt with total token counts -----------------
-        # tot_in  = sum(r.input_length  for r in trace_obj.requests.values())
-        # tot_out = sum(r.output_length for r in trace_obj.requests.values())
+                # # ---------- 4. persist JSON ----------
+                trace_obj.save_to_json(
+                    filename=output_json_path,
+                    skip_token_ids=skip_token_ids
+                )
+            except Exception as e:
+                print(f"Error generating trace: {e}")
+                continue
 
-        # txt_path = Path(output_json_path).with_suffix("")  # strip “.json”
-        # with open(f"{txt_path}_token_totals.txt", "w") as fh:
-        #     fh.write(f"total_input_tokens  {tot_in}\n")
-        #     fh.write(f"total_output_tokens {tot_out}\n")
+            # # -------- NEW: write a summary .txt with total token counts -----------------
+            # tot_in  = sum(r.input_length  for r in trace_obj.requests.values())
+            # tot_out = sum(r.output_length for r in trace_obj.requests.values())
 
-        # # ---------- 5. optional plotting ----------
-        # if not plot_distributions:
-        #     return                                            # nothing else to do
-        # # ---------------- empirical data ----------------
-        # reqs          = list(trace_obj.requests.values())
-        # input_lens    = np.array([r.input_length  for r in reqs])
-        # output_lens   = np.array([r.output_length for r in reqs])
-        # arrivals      = np.sort([r.arrival_time for r in reqs])
-        # inter_arr_emp = np.diff(arrivals)          # empty if len<2
+            # txt_path = Path(output_json_path).with_suffix("")  # strip “.json”
+            # with open(f"{txt_path}_token_totals.txt", "w") as fh:
+            #     fh.write(f"total_input_tokens  {tot_in}\n")
+            #     fh.write(f"total_output_tokens {tot_out}\n")
 
-        # # ---------------- analytic model ----------------
-        # # 1) helper → uniform-mixture PMF
-        # def mixture_uniform_pmf(bounds, probs):
-        #     lo = min(b[0] for b in bounds.values())
-        #     hi = max(b[1] for b in bounds.values())
-        #     xs = np.arange(lo, hi + 1)
-        #     pmf = np.zeros_like(xs, dtype=float)
-        #     for cat, p in probs.items():
-        #         a, b = bounds[cat]
-        #         pmf[(xs >= a) & (xs <= b)] += p / (b - a + 1)
-        #     return xs, pmf
+            # # ---------- 5. optional plotting ----------
+            # if not plot_distributions:
+            #     return                                            # nothing else to do
+            # # ---------------- empirical data ----------------
+            # reqs          = list(trace_obj.requests.values())
+            # input_lens    = np.array([r.input_length  for r in reqs])
+            # output_lens   = np.array([r.output_length for r in reqs])
+            # arrivals      = np.sort([r.arrival_time for r in reqs])
+            # inter_arr_emp = np.diff(arrivals)          # empty if len<2
 
-        # from collections import defaultdict
+            # # ---------------- analytic model ----------------
+            # # 1) helper → uniform-mixture PMF
+            # def mixture_uniform_pmf(bounds, probs):
+            #     lo = min(b[0] for b in bounds.values())
+            #     hi = max(b[1] for b in bounds.values())
+            #     xs = np.arange(lo, hi + 1)
+            #     pmf = np.zeros_like(xs, dtype=float)
+            #     for cat, p in probs.items():
+            #         a, b = bounds[cat]
+            #         pmf[(xs >= a) & (xs <= b)] += p / (b - a + 1)
+            #     return xs, pmf
 
-        # input_by_cat = defaultdict(list)
-        # output_by_cat = defaultdict(list)
+            # from collections import defaultdict
 
-        # for r in reqs:
-        #     input_by_cat[r.category].append(r.input_length)
-        #     output_by_cat[r.category].append(r.output_length)
+            # input_by_cat = defaultdict(list)
+            # output_by_cat = defaultdict(list)
 
-        # # 3) compute in_bounds, out_bounds per category
-        # in_bounds = {
-        #     cat: (min(lengths), max(lengths))
-        #     for cat, lengths in input_by_cat.items()
-        # }
-        # out_bounds = {
-        #     cat: (min(lengths), max(lengths))
-        #     for cat, lengths in output_by_cat.items()
-        # }
+            # for r in reqs:
+            #     input_by_cat[r.category].append(r.input_length)
+            #     output_by_cat[r.category].append(r.output_length)
 
-        # request_type_probs_list = request_data["request_type_probs"]
-        # probs = {cat: prob for cat, prob in request_type_probs_list}
+            # # 3) compute in_bounds, out_bounds per category
+            # in_bounds = {
+            #     cat: (min(lengths), max(lengths))
+            #     for cat, lengths in input_by_cat.items()
+            # }
+            # out_bounds = {
+            #     cat: (min(lengths), max(lengths))
+            #     for cat, lengths in output_by_cat.items()
+            # }
 
-        # xin,  pin  = mixture_uniform_pmf(in_bounds,  probs)
-        # xout, pout = mixture_uniform_pmf(out_bounds, probs)
+            # request_type_probs_list = request_data["request_type_probs"]
+            # probs = {cat: prob for cat, prob in request_type_probs_list}
 
-        # # 2) geometric PMF: P(k) = (1-λ)^{k-1} λ   for k≥1
-        # lam = getattr(arrival_pattern, "lambda_per_step", None)
-        # k_max = (inter_arr_emp.max() if inter_arr_emp.size else 1) + 20
-        # k_vals = np.arange(1, k_max + 1)
-        # if lam is not None and 0 < lam < 1:
-        #     pgeom = (1 - lam) ** (k_vals - 1) * lam
-        # else:                      # continuous pattern or λ invalid → flat 0
-        #     pgeom = np.zeros_like(k_vals, dtype=float)
+            # xin,  pin  = mixture_uniform_pmf(in_bounds,  probs)
+            # xout, pout = mixture_uniform_pmf(out_bounds, probs)
 
-        # # ---------------- save helper ----------------
-        # stem = Path(output_json_path).with_suffix("")  # remove .json
+            # # 2) geometric PMF: P(k) = (1-λ)^{k-1} λ   for k≥1
+            # lam = getattr(arrival_pattern, "lambda_per_step", None)
+            # k_max = (inter_arr_emp.max() if inter_arr_emp.size else 1) + 20
+            # k_vals = np.arange(1, k_max + 1)
+            # if lam is not None and 0 < lam < 1:
+            #     pgeom = (1 - lam) ** (k_vals - 1) * lam
+            # else:                      # continuous pattern or λ invalid → flat 0
+            #     pgeom = np.zeros_like(k_vals, dtype=float)
 
-        # def savefig(tag, postfix):
-        #     out = f"{stem}{postfix}_{tag}.png"
-        #     plt.savefig(out, dpi=150, bbox_inches="tight")
-        #     plt.close()
+            # # ---------------- save helper ----------------
+            # stem = Path(output_json_path).with_suffix("")  # remove .json
 
-        # # ---------------- trace histograms ----------------
-        # plt.figure()
-        # plt.hist(input_lens, bins=50)
-        # plt.xlabel("input length (tokens)"); plt.ylabel("count")
-        # plt.title("Trace: input-length distribution")
-        # savefig("input", postfix_trace)
+            # def savefig(tag, postfix):
+            #     out = f"{stem}{postfix}_{tag}.png"
+            #     plt.savefig(out, dpi=150, bbox_inches="tight")
+            #     plt.close()
 
-        # plt.figure()
-        # plt.hist(output_lens, bins=50)
-        # plt.xlabel("output length (tokens)"); plt.ylabel("count")
-        # plt.title("Trace: output-length distribution")
-        # savefig("output", postfix_trace)
+            # # ---------------- trace histograms ----------------
+            # plt.figure()
+            # plt.hist(input_lens, bins=50)
+            # plt.xlabel("input length (tokens)"); plt.ylabel("count")
+            # plt.title("Trace: input-length distribution")
+            # savefig("input", postfix_trace)
 
-        # if inter_arr_emp.size:
-        #     plt.figure()
-        #     plt.hist(inter_arr_emp, bins=50)
-        #     plt.xlabel("inter-arrival gap"); plt.ylabel("count")
-        #     plt.title("Trace: inter-arrival distribution")
-        #     savefig("inter", postfix_trace)
+            # plt.figure()
+            # plt.hist(output_lens, bins=50)
+            # plt.xlabel("output length (tokens)"); plt.ylabel("count")
+            # plt.title("Trace: output-length distribution")
+            # savefig("output", postfix_trace)
 
-        # # ---------------- analytic PDFs / PMF ----------------
-        # plt.figure()
-        # plt.step(xin, pin, where="mid")
-        # plt.xlabel("input length (tokens)"); plt.ylabel("probability")
-        # plt.title("Model: input-length PDF (mixture of uniforms)")
-        # savefig("input", postfix_model)
+            # if inter_arr_emp.size:
+            #     plt.figure()
+            #     plt.hist(inter_arr_emp, bins=50)
+            #     plt.xlabel("inter-arrival gap"); plt.ylabel("count")
+            #     plt.title("Trace: inter-arrival distribution")
+            #     savefig("inter", postfix_trace)
 
-        # plt.figure()
-        # plt.step(xout, pout, where="mid")
-        # plt.xlabel("output length (tokens)"); plt.ylabel("probability")
-        # plt.title("Model: output-length PDF (mixture of uniforms)")
-        # savefig("output", postfix_model)
+            # # ---------------- analytic PDFs / PMF ----------------
+            # plt.figure()
+            # plt.step(xin, pin, where="mid")
+            # plt.xlabel("input length (tokens)"); plt.ylabel("probability")
+            # plt.title("Model: input-length PDF (mixture of uniforms)")
+            # savefig("input", postfix_model)
 
-        # if lam is not None and 0 < lam < 1:
-        #     plt.figure()
-        #     plt.stem(k_vals, pgeom)
-        #     plt.xlabel("inter-arrival gap (steps)"); plt.ylabel("probability")
-        #     plt.title(f"Model: geometric PMF (λ={lam:g})")
-        #     savefig("inter", postfix_model)
+            # plt.figure()
+            # plt.step(xout, pout, where="mid")
+            # plt.xlabel("output length (tokens)"); plt.ylabel("probability")
+            # plt.title("Model: output-length PDF (mixture of uniforms)")
+            # savefig("output", postfix_model)
+
+            # if lam is not None and 0 < lam < 1:
+            #     plt.figure()
+            #     plt.stem(k_vals, pgeom)
+            #     plt.xlabel("inter-arrival gap (steps)"); plt.ylabel("probability")
+            #     plt.title(f"Model: geometric PMF (λ={lam:g})")
+            #     savefig("inter", postfix_model)
 
 
 # 사용 예시
 if __name__ == "__main__":
     max_model_len = 8000
     block_size = 16
-    num_gpu_blocks = max_model_len//block_size
-    max_parallel = 4 # batch size 
+    # num_gpu_blocks = max_model_len//block_size
+    # max_parallel = 4 # batch size 
 
     build_sched_save(
-        request_json_path="/home/sychoy/vllm/trace_pool/type2_32k/request.json",
-        arrival_json_path="/home/sychoy/vllm/trace_pool/type2_32k/arrivals.json",
-        num_gpu_blocks=num_gpu_blocks,
+        request_json_path="/home/sychoy/vllm/trace_pool/type2_8K_pressure/request.json",
+        arrival_json_path="/home/sychoy/vllm/trace_pool/type2_8K_pressure/arrivals.json",
+        max_tokens=max_model_len,
         block_size=block_size,
+        gpu_block_ranges = [-0.6, -0.3, 0, 0.3, 0.6, 1.0],
         plot_distributions=True,  # Set to True to plot distributions
         skip_token_ids=True,
         postfix_trace="_trace",
         postfix_model="_model",
-        # static=True
+        static=True
     )

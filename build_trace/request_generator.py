@@ -571,9 +571,9 @@ if __name__ == "__main__":
     # )
     shortlong = RequestType(
         category_name="Short-Long ShareGPT",
-        min_input_tokens=1000,
-        max_input_tokens=2000,
-        min_output_tokens=5500,
+        min_input_tokens=300,
+        max_input_tokens=900,
+        min_output_tokens=6500,
         max_output_tokens=7500,
         sampling_method="uniform",
         dataset_name="ShareGPT"
@@ -589,22 +589,22 @@ if __name__ == "__main__":
     # )
     longshort = RequestType(
         category_name="Long-Short ShareGPT",
-        min_input_tokens=6500,
-        max_input_tokens=7500,
-        min_output_tokens=1000,
-        max_output_tokens=2000,
+        min_input_tokens=4500,
+        max_input_tokens=6500,
+        min_output_tokens=1300,
+        max_output_tokens=1900,
         sampling_method="uniform",
         dataset_name="ShareGPT"
     )
 
-    probs_dict = {t:prob for (t,prob) in zip([shortlong, longshort], [0.5, 0.5])}
+    probs_dict = {t:prob for (t,prob) in zip([shortlong, longshort], [0.6, 0.4])}
     for k,v in probs_dict.items():
         if v == 0:
             del probs_dict[k]
     skip_token_ids = True
 
     save_requests(
-        filename="/home/sychoy/vllm/trace_pool/type2_32k/request.json",
+        filename="/home/sychoy/vllm/trace_pool/type2_8K_pressure/request.json",
         request_type_dict=probs_dict,
         num_requests=10,
         max_parallel=4,

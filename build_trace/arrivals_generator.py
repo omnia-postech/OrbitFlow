@@ -384,12 +384,12 @@ def extract_params(pattern: ArrivalPattern) -> dict:
 
 if __name__ == "__main__":
     patterns = [
-        DiscreteUniformArrival(max_step=10000),
+        DiscreteUniformArrival(max_step=5000),
         # PoissonBurstyArrivalPattern(lambda_burst=5)
         DiscreteBimodalArrival(lambda1=0.005, lambda2=0.0001, p=0.7),
     ]
 
-    filepath = "/home/sychoy/vllm/trace_pool/type2_32k/arrivals.json"
+    filepath = "/home/sychoy/vllm/trace_pool/type2_8K_pressure/arrivals.json"
 
     # JSON 구조 생성
     json_data = [extract_params(p) for p in patterns]
