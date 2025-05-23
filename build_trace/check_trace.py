@@ -171,13 +171,13 @@ if __name__ == "__main__":
         print(metrics)
     
 
-    base_dir = "/home/sychoy/vllm/trace_pool/type2_8K_pressure/uniform/"
-    trace_paths = glob.glob(f"{base_dir}/trace_*.json")
+    # base_dir = "/home/sychoy/vllm/trace_pool/type2_8K_pressure/uniform/"
+    # trace_paths = glob.glob(f"{base_dir}/trace_*.json")
 
-    for path in sorted(trace_paths):  # 정렬은 선택 사항
-        metrics = memory_pressure(
-            trace_path=path,
-            plot_PPR=True
-        )
-        print(path)
-        print(metrics)
+    # for path in sorted(trace_paths):  # 정렬은 선택 사항
+    #     metrics = memory_pressure(
+    #         trace_path=path,
+    #         plot_PPR=True
+    #     )
+    #     print(path)
+    #     print(metrics)

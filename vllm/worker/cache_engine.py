@@ -922,7 +922,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         dist_dict, _ = self._select_prefetch_distance(snap, self.prefetch_distance, total_context_lens, is_decoding)
         logger.critical(f"[driver] distance: {dist_dict}")
         plan, cur_blocks = self._plan_cache_delta(snap, dist_dict, pause_and_resume)
-        if plan is None and  self.prefetch_mode == "solver":
+        if plan.feasible == False and  self.prefetch_mode == "solver":
             prefetch_mode = "distn_single"
             logger.critical(f"use distn single for this step and notify solver")
             dist_dict, _ = self._select_prefetch_distance(snap, self.prefetch_distance, total_context_lens, is_decoding, custom_prefetch_mode=prefetch_mode,cur_blocks = cur_blocks)
@@ -1402,8 +1402,8 @@ class FlattenedCacheEngine(CacheEngineBase):
 
         if _needs_solver(self, post_gpu_blk, len(snapshot.candidates)):
             logger.info("Plan exceeds budget → hand over to Solver")
-            # empty_plan = Plan({}, {}, [], 0, {})
-            return None, post_gpu_blk
+            empty_plan = Plan({}, {}, [], 0, {}, feasible=False)
+            return empty_plan, post_gpu_blk
         
         plan = Plan(
             dealloc_layers=dict(dealloc_layers),
@@ -2203,4 +2203,5 @@ class Plan:
 
     # NOTE(HONG): I guess we are not using pause_layers when resume since it will automatically fetch to GPU with new distance N. 
     pause_layers: Dict[int, List[int]] = field(default_factory=dict)
+    feasible: bool = True
 # --------------------------------------------------------------------------
