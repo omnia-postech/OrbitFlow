@@ -30,8 +30,8 @@ METHODS     = ["Flexgen", "DeepSpeed", "SelectN", "NoPrefetch", "Ours"]
 LABELS      = ["Flexgen", "DeepSpeed", "Placeholder(SelectN)", "No Prefetch", "Ours"]
 COLORS      = ["#84C8F4", "#C59FDB", "#7CD6A4", "#63D0C2", "#E05A4F"]
 MARKERS     = ['o', 's', '^', 'd', '*']
-Context_window = [8, 32, 64, 128]
-Context_window_labels = [f"{str(s)}k" for s in Context_window]  # x축 표기용 문자열
+BATCH_SIZES = [1, 2, 4, 8]
+BATCH_SIZE_LABELS = [f"BS {b}" for b in BATCH_SIZES]
 TICK_FONT   = 18
 LABEL_FONT  = 18
 LINE_KW     = dict(linewidth=3, markersize=10)
@@ -42,29 +42,29 @@ fig, ax = plt.subplots(figsize=(8, 6))
 
 for m, method in enumerate(METHODS):
     y_values = []
-    for context_size in Context_window:
-        path = Path(f"/home/heelim/vllm/outputs/benchmark/exp/{method}/{TRACE}/{context_size}/output.csv")
+    for batch_size in BATCH_SIZES:
+        path = Path(f"/home/heelim/vllm/outputs/benchmark/exp/{method}/{TRACE}/bs{batch_size}/output.csv")
         df = load_metrics(path)
         # slo_threshold 평균값 사용
         slo_mean = pd.to_numeric(df["slo_threshold"], errors="coerce").mean()
         y_values.append(slo_mean if not np.isnan(slo_mean) else 0.0)
 
     ax.plot(
-        range(len(Context_window_labels)),
+        range(len(BATCH_SIZE_LABELS)),
         y_values,
         color=COLORS[m], marker=MARKERS[m],
         label=LABELS[m],
         **LINE_KW
     )
 
-# x축: Context Window Size
-ax.set_xticks(range(len(Context_window_labels)))
-ax.set_xticklabels(Context_window_labels, fontsize=TICK_FONT)
+# x축: Batch Size
+ax.set_xticks(range(len(BATCH_SIZE_LABELS)))
+ax.set_xticklabels(BATCH_SIZE_LABELS, fontsize=TICK_FONT)
 ax.tick_params(axis='y', labelsize=TICK_FONT, length=0)
 ax.tick_params(axis='x', length=0)
 
 # 레이블 / 타이틀
-ax.set_xlabel("Context Window Size", fontsize=LABEL_FONT, labelpad=8)
+ax.set_xlabel("Batch Size", fontsize=LABEL_FONT, labelpad=8)
 ax.set_ylabel("SLO Threshold", fontsize=LABEL_FONT, labelpad=8)
 
 # 그리드/스파인
@@ -83,5 +83,5 @@ ax.legend(loc="upper center",
           )
 
 # 저장
-plt.savefig("figures/context_window_slo_threshold.jpg", format='jpg', bbox_inches="tight")
-# plt.savefig("figures/context_window_slo_threshold.pdf", format='pdf', bbox_inches="tight")
+plt.savefig("figures/batch_size_slo_threshold.jpg", format='jpg', bbox_inches="tight")
+# plt.savefig("figures/batch_size_slo_threshold.pdf", format='pdf', bbox_inches="tight")
