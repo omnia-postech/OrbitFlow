@@ -5,6 +5,9 @@ from pathlib import Path
 import ast
 
 # ───────────────────────────────────────────────
+# (기존 load_metrics, compute_throughput, load_metrics_for_slo_scales 함수는 그대로 사용)
+
+# ───────────────────────────────────────────────
 # 1. percentile→(Pxx/SLO) 리스트 추출 함수
 def extract_percentile_ratio_lists(df: pd.DataFrame, percentiles: list[int]) -> list[list[float]]:
     """각 퍼센타일에 대해 Pxx/SLO 임계치 비율 리스트 반환."""
@@ -50,62 +53,65 @@ def load_metrics(path: Path) -> pd.DataFrame:
         })
 
 # ───────────────────────────────────────────────
-# 3. 플롯 설정
-METHODS       = ["Flexgen", "DeepSpeed", "SelectN", "NoPrefetch", "Ours"]
-METHOD_LABELS = ["Flexgen","DeepSpeed","Placeholder(SelectN)","No Prefetch","Ours"]
-COLORS        = ["#84C8F4", "#C59FDB", "#7CD6A4", "#63D0C2", "#E05A4F"]
-MARKERS       = ["o", "s", "^", "d", "*"]
-
-TRACE_LIST  = [
-    "test_fit_static_0",
-    "test_shortshort_enough",
-    "test_shortlong_less",
-    "test_shortlong_enough"
-]
+# 스타일/데이터 정의
+TRACE       = "test_fit_static_0"
+METHODS     = ["Flexgen","DeepSpeed","SelectN","NoPrefetch","Ours"]
+LABELS      = ["Flexgen","DeepSpeed","Placeholder(SelectN)","No Prefetch","Ours"]
+COLORS      = ["#84C8F4","#C59FDB","#7CD6A4","#63D0C2","#E05A4F"]
+MARKERS     = ['o','s','^','d','*']
 PERCENTILES  = [90, 95, 99]
-x_positions  = range(len(PERCENTILES))
+Context_window  = [8, 32, 64, 128]
+Context_window_labels = [f"{str(s)}k" for s in Context_window]  # x축 표기용 문자열
+TICK_FONT   = 18
+LABEL_FONT  = 18
+LINE_KW     = dict(linewidth=3, markersize=10)
 
-fig, axes = plt.subplots(1, 4, figsize=(35, 6), sharey=True)
-plt.subplots_adjust(
-    left=0.05, right=0.99, top=0.93, bottom=0.07,
-    wspace=0.05, hspace=0.1
-)
+# ───────────────────────────────────────────────
+# 단일 플롯
+fig, ax = plt.subplots(figsize=(8, 6))
 
-for ax, trace in zip(axes, TRACE_LIST):
-    for method, label, color, marker in zip(METHODS, METHOD_LABELS, COLORS, MARKERS):
-        path = Path(f"/home/heelim/vllm/outputs/benchmark/exp/{method}/{trace}/output.csv")
-        df = load_metrics(path)
-        ratio_lists = extract_percentile_ratio_lists(df, PERCENTILES)
+for m,method in enumerate(METHODS):
+    path = Path(f"/home/heelim/vllm/outputs/benchmark/exp/{method}/{TRACE}/output.csv")
+    df = load_metrics(path)
+    ratio_lists = extract_percentile_ratio_lists(df, PERCENTILES)
+    ax.plot(
+        range(len(Context_window_labels)), 
+        ratio_lists,
+        color=COLORS[m], marker=MARKERS[m],
+        label=LABELS[m],
+        **LINE_KW
+    )
 
-        ax.plot(
-            x_positions,
-            ratio_lists,
-            label=label,
-            color=color,
-            marker=marker,
-            linewidth=3,
-            markersize=10
-        )
-    ax.set_title(trace, fontsize=35)
-    ax.set_xticks(x_positions)
-    ax.set_xticklabels([f"p{p}" for p in PERCENTILES], fontsize=35)
-    # ax.set_xlabel("Percentile", fontsize=35)
-    ax.grid(alpha=0.3)
+# x축: SLO scale (4→1)
+ax.set_xticks(range(len(Context_window_labels)))
+ax.set_xticklabels(Context_window_labels, fontsize=TICK_FONT)
+# ax.set_xlim(SLO_SCALES[0], SLO_SCALES[-1])
+ax.tick_params(axis='y', labelsize=TICK_FONT, length=0)
+ax.tick_params(axis='x', length=0)
 
-# y축 tick 간격 0.5로 설정, 글자 크기 30
-max_ylim = axes[0].get_ylim()[1]
-y_ticks = np.arange(0, max_ylim + 0.5, 0.5)
-axes[0].set_yticks(y_ticks)
-for ax in axes:
-    ax.tick_params(axis='y', labelsize=35)
+# 레이블 / 타이틀
+ax.set_xlabel("Context Window Size", fontsize=LABEL_FONT, labelpad=8)
+ax.set_ylabel(f"SLO Attainment", fontsize=LABEL_FONT, labelpad=8)
+# ax.set_title(f"{TRACE}  —  {METRIC} Throughput", fontsize=LABEL_FONT, pad=12)
 
-# 공통 y축 레이블 & 범례
-axes[0].set_ylabel("SLO Scale", fontsize=35)
-fig.legend(METHOD_LABELS, loc='upper center', 
-           bbox_to_anchor=(0.52, 1.25),
-           ncol=len(METHOD_LABELS),
-           fontsize=35, frameon=False)
+# 90% 기준선 (optional)
+# ax.axhline(0.9 * ax.get_ylim()[1], color="gray", linestyle="--", linewidth=1, alpha=0.6)
 
-# 폴더 생성 및 저장
+# 그리드/스파인
+ax.grid(True, linestyle="--", alpha=0.3)
+for spine in ax.spines.values():
+    spine.set_edgecolor("gray")
+    spine.set_linewidth(1.5)
+    spine.set_alpha(0.5)
 
-plt.savefig("figures/p_slo.jpg", format='jpg', bbox_inches="tight")
+# 범례
+ax.legend(loc="upper center", 
+          ncol=len(METHODS), 
+          fontsize=LABEL_FONT, 
+          frameon=False,
+          bbox_to_anchor=(0.5,1.2), 
+          )
+
+# 저장
+plt.savefig("figures/conntext_window.jpg", format='jpg', bbox_inches="tight")
+# plt.savefig("figures/tbt_total_compare.pdf", format='pdf', bbox_inches="tight")

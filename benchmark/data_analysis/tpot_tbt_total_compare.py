@@ -47,14 +47,31 @@ def load_metrics(path: Path) -> pd.DataFrame:
     return df
 
 def slo_tpot(df: pd.DataFrame) -> float:
-    tpot = df["end_to_end_time"].to_numpy()
-    thr  = pd.to_numeric(df["slo_threshold"], errors="coerce").iloc[0]
-    return (tpot <= thr).mean() * 100
+    required_cols = {"end_to_end_time", "num_output_tokens", "slo_threshold"}
+    if not required_cols.issubset(df.columns):
+        print(f"Missing columns: {required_cols - set(df.columns)}")
+        return 0.0
+
+    end_to_end_time = pd.to_numeric(df["end_to_end_time"], errors="coerce")
+    num_tokens = pd.to_numeric(df["num_output_tokens"], errors="coerce")
+    tpot = end_to_end_time / num_tokens
+
+    slo_threshold = df["slo_threshold"].apply(
+        lambda x: np.mean(x) if isinstance(x, (list, np.ndarray)) else x
+    )
+    slo_threshold = pd.to_numeric(slo_threshold, errors="coerce")
+
+    valid = ~tpot.isna() & ~slo_threshold.isna()
+    attained = (tpot[valid] <= slo_threshold[valid]).sum()
+    total = valid.sum()
+
+    return attained / total * 100 if total else 0.0
 
 def slo_tbt(df: pd.DataFrame) -> float:
     decoded = df["decode_length"].sum()
     viol    = df["slo_violations"].sum()
-    return (1 - viol/max(decoded,1)) * 100
+
+    return (decoded-viol) / decoded * 100
 
 # ───────────────────────────────────────────────
 # 3. Figure & GridSpec ---------------------------
