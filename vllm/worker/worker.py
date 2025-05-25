@@ -223,7 +223,7 @@ class Worker(LocalOrDistributedWorkerBase):
         else:
             num_gpu_blocks = int(available_kv_cache_memory // cache_block_size)
             # num_gpu_blocks = 10081
-            num_cpu_blocks = 30000 * 32 if self.cache_config.flattened_cache else 30000
+            num_cpu_blocks = 4000 * 32 if self.cache_config.flattened_cache else 10081
             # num_cpu_blocks = int(self.cache_config.swap_space_bytes //
             #                      cache_block_size)
         num_gpu_blocks = max(num_gpu_blocks, 0)

@@ -18,6 +18,10 @@ try:
 except ImportError:
     AutoTokenizer = None
 
+from collections import OrderedDict
+inline = lambda obj: json.dumps(obj, ensure_ascii=False,
+                                separators=(", ", ": "))
+
 # ────────────────────────────────────────────────────────────────────
 # 0. 공통 상수 & 헬퍼
 # ────────────────────────────────────────────────────────────────────
@@ -202,18 +206,38 @@ def save_request_json(path: str,
         reqs=[pick_rt().generate(vocab) for _ in range(num_req)]
 
     # 직렬화 형태 맞추기
-    out=dict(batch_size=batch_size,
-             vocab=vocab,
-             requests={f"request_{i}":dict(
-                         category=r.category,
-                         input_length=r.input_length,
-                         output_length=r.output_length,
-                         **({} if skip_token_ids else {"token_ids":r.token_ids})
-                       )
-                       for i,r in enumerate(reqs)})
+    out = OrderedDict([
+        ("batch_size", batch_size),
+        ("vocab",      inline(vocab)),
+        ("requests",   None),
+    ])
 
+    req_lines = []
+    for i, r in enumerate(reqs):
+        comma = "," if i < len(reqs) - 1 else ""
+        payload = dict(
+            category     = r.category,
+            input_length = r.input_length,
+            output_length= r.output_length,
+        )
+        if not skip_token_ids:
+            payload["token_ids"] = r.token_ids
+        req_lines.append(
+            f'    "request_{i}": {inline(payload)}{comma}'
+        )
+    out["requests"] = "{\n" + "\n".join(req_lines) + "\n  }"
+
+    # ── write -------------------------------------------------------
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(json.dumps(out, separators=(",",":")))
+    lines = ["{"]
+    for idx, (k, v) in enumerate(out.items()):
+        comma = "," if idx < len(out) - 1 else ""
+        if k in ("vocab", "requests"):
+            lines.append(f'  "{k}": {v}{comma}')
+        else:
+            lines.append(f'  "{k}": {v}{comma}')
+    lines.append("}\n")
+    Path(path).write_text("\n".join(lines), encoding="utf-8")
     print(f"[saved] {path}")
 
 # ────────────────────────────────────────────────────────────────────
@@ -295,19 +319,91 @@ class Trace:
     batch_size:int; vocab:Tuple[int,int]; max_model_len:int
     num_gpu_blocks_override:Optional[int]=None
 
-    def add_estimate_sched(self,tokens_per_block:int,
-                           gpu_blocks:int,max_parallel:int):
-        cap=gpu_blocks*tokens_per_block
-        running:List[Tuple[int|float,int]]=[]; heapq.heapify(running)
-        for r in sorted(self.requests.values(), key=lambda x:x.arrival_time):
-            while running and running[0][0]<=r.arrival_time:
-                _,m=heapq.heappop(running); cap+=m
-            mem=r.input_length; cur=r.arrival_time
-            while (len(running)>=max_parallel) or mem>cap:
-                fin,mm=heapq.heappop(running); cur=fin; cap+=mm
-            r.sched_time, r.wait_time = cur, cur-r.arrival_time
-            finish=cur+1+r.output_length
-            heapq.heappush(running,(finish,mem)); cap-=mem
+    def add_estimate_sched(
+        self,
+        max_model_len: int,
+        num_gpu_blocks: int,
+        block_size: int = 16,
+        max_parallel: int = 4,
+    ) -> None:
+        """
+        Light-weight scheduling simulator that *allows CPU off-loading* when a
+        request’s pre-fill tokens exceed current GPU capacity.
+
+        Assumptions
+        -----------
+        • Only the portion that fits in the remaining GPU capacity is loaded;
+        the rest is resident on CPU, so the request can always start.
+        • Processing duration = 1 + output_length (same as before).
+        • `gpu_tok` below means “tokens actually occupying GPU blocks”.
+        • Memory for those `gpu_tok` tokens is released when the request finishes.
+        • OVF calculations elsewhere still use full input_length so that the
+        “GPU short-fall” fraction is accurately reflected.
+        """
+        self.num_gpu_blocks_override = num_gpu_blocks
+        self.batch_size = max_parallel
+        self.max_model_len = max_model_len
+
+        items_sorted = sorted(
+            self.requests.items(), key=lambda x: x[1].arrival_time
+        )
+        tokens_capacity = num_gpu_blocks * block_size    # current free tokens
+        running: list[tuple[int, int, str]] = []         # (finish, gpu_tok, key)
+        heapq.heapify(running)
+        current_time = 0
+
+        # group by identical arrival times
+        groups: dict[int | float, list[tuple[str, TraceReq]]] = defaultdict(list)
+        for key, req in items_sorted:
+            groups[req.arrival_time].append((key, req))
+
+        for arrival_time in sorted(groups):
+            # A. free finished tasks up to this arrival_time
+            while running and running[0][0] <= arrival_time:
+                fin, in_use, _ = heapq.heappop(running)
+                tokens_capacity += in_use
+
+            # B. schedule every request arriving at this time
+            for req_key, req_obj in groups[arrival_time]:
+                req_in = req_obj.input_length          # total prefill tokens
+
+                # make sure we account for any finishes exactly at arrival_time
+                while running and running[0][0] <= req_obj.arrival_time:
+                    fin, in_use, _ = heapq.heappop(running)
+                    tokens_capacity += in_use
+
+                # Wait while either parallelism or memory blocks us
+                can_run_now = False
+                while not can_run_now:
+                    if len(running) >= max_parallel:
+                        fin, in_use, _ = heapq.heappop(running)
+                        current_time = fin
+                        tokens_capacity += in_use
+                        continue
+
+                    if req_in <= tokens_capacity:
+                        can_run_now = True
+                    else:
+                        # GPU cap insufficient but off-loading is allowed.
+                        # If nothing is running we start immediately
+                        # with partial GPU usage (rest on CPU).
+                        if not running:
+                            can_run_now = True
+                        else:
+                            fin, in_use, _ = heapq.heappop(running)
+                            current_time = fin
+                            tokens_capacity += in_use
+
+                start_time = max(req_obj.arrival_time, current_time)
+                req_obj.sched_time = start_time
+                req_obj.wait_time = start_time - req_obj.arrival_time
+
+                finish_time = start_time + 1 + req_obj.output_length
+
+                gpu_tok = min(req_in, tokens_capacity)   # actual GPU usage
+                tokens_capacity -= gpu_tok
+                heapq.heappush(running, (finish_time, gpu_tok, req_key))
+
 
     def save_to_json(self,path:Path,skip_token_ids=True):
         def as_dict(r:TraceReq):
@@ -315,15 +411,41 @@ class Trace:
             d.pop("slo", None)
             if skip_token_ids: d.pop("token_ids",None)
             return d
-        data=dict(
-            batch_size=self.batch_size,
-            max_model_len=self.max_model_len,
-            num_gpu_blocks_override = self.num_gpu_blocks_override,
-            arrival_pattern=self.arrival_pattern_name,
-            vocab=self.vocab,
-            requests={k:as_dict(v) for k,v in self.requests.items()},
-        )
-        path.write_text(json.dumps(data,separators=(",",":")))
+        # (2) ─ OrderedDict으로 키 순서 고정 -------------------------
+        data = OrderedDict([
+            ("batch_size",        self.batch_size),
+            ("max_model_len",     self.max_model_len),
+            ("num_gpu_blocks_override", self.num_gpu_blocks_override),
+            ("arrival_pattern",   self.arrival_pattern_name),
+            ("vocab",             inline(self.vocab)),
+            ("requests",          None),               # 뒤에서 교체
+        ])
+
+        # (3) ─ requests 서브블록: 한 줄에 하나 ----------------------
+        req_items = sorted(self.requests.items())      # id 오름차순
+        req_lines = []
+        for i, (_, rv) in enumerate(req_items):
+            comma = "," if i < len(req_items) - 1 else ""
+            req_lines.append(
+                f'    "request_{i}": {inline(as_dict(rv))}{comma}'
+            )
+        req_block = "{\n" + "\n".join(req_lines) + "\n  }"
+        data["requests"] = req_block
+
+        # (4) ─ 최종 직렬화 -----------------------------------------
+        lines = ["{"]
+        for idx, (k, v) in enumerate(data.items()):
+            comma = "," if idx < len(data) - 1 else ""
+            # 이미 문자열 형태로 만든 항목은 그대로 사용
+            if k in ("vocab", "requests"):
+                lines.append(f'  "{k}": {v}{comma}')
+            else:
+                val = f'"{v}"' if isinstance(v, str) else v
+                lines.append(f'  "{k}": {val}{comma}')
+        lines.append("}\n")
+
+        path.write_text("\n".join(lines), encoding="utf-8")
+
 # ───────────── trace 생성 util ─────────────
 def load_json(path:str): return json.loads(Path(path).read_text())
 
@@ -351,7 +473,7 @@ def compute_gpu_blocks(reqs:Dict[str,Any],max_len:int,blk:int,ranges:List[float]
 def generate_trace(req_data:Dict[str,Any],arr_obj:ArrivalPattern,
                    arr_times:List[int|float],max_len:int,static:bool)->Trace:
     B,v=req_data["batch_size"],tuple(req_data["vocab"])
-    for i in range(min(B,len(arr_times))): arr_times[i]=0
+    for i in range(min(1,len(arr_times))): arr_times[i]=0 # The first request arrives at time 0
     if static:
         for i in range(0,len(arr_times),B):
             arr_times[i:i+B]=[arr_times[i]]*min(B,len(arr_times)-i)
@@ -396,6 +518,13 @@ def build_sched_save(request_json: str,
         arr_times = ap.generate_arrival_times(len(base_reqs))
         arr_times.sort()
 
+        # ───────────── 여기서 재-스케일 ─────────────
+        T = getattr(ap, "ideal_T", None)
+        if T and arr_times and arr_times[-1] != 0:
+            s = T / arr_times[-1]             # 스케일 비율
+            arr_times = [int(round(at * s)) for at in arr_times]
+        # ────────────────────────────────────────
+
         # arrival 을 입힌 튜플 생성
         req_tuples = [(at, inp, out)
                       for at, (_, inp, out) in zip(arr_times, base_reqs)]
@@ -405,7 +534,7 @@ def build_sched_save(request_json: str,
 
         for lvl, cfg in level_spec.items():
             blk, unmet = find_blocks_for_ovf(
-                    req_tuples, arr_times,
+                    req_tuples,
                     target_ovf = cfg["target_ovf"],
                     tol        = cfg["tol"],
                     blk_size   = blk_size)
@@ -417,10 +546,10 @@ def build_sched_save(request_json: str,
             trace = generate_trace(req_data, ap, arr_times.copy(),
                                 max_len = 32_384, static = static)
             trace.num_gpu_blocks_override = blk
-            trace.add_estimate_sched(blk_size, blk, req_data["batch_size"])
+            trace.add_estimate_sched(32_384, blk, blk_size, req_data["batch_size"])
 
             # ★ 실제 OVF 재계산 (소수 2자리)
-            ovf_actual = _ovf_for_blocks(req_tuples, arr_times,
+            ovf_actual = _ovf_for_blocks(req_tuples,
                                         blk, blk_size)
             # ─── 폴더 / 파일 이름 축약 ────────────────────────
             lvl_tag  = LEVEL_ABBR[lvl]        # sk / lo / md / hi / sv
@@ -494,37 +623,40 @@ def build_arrival_patterns(
         T   = _timeline_len(outputs, sc)
 
         # 0) TokenScaledArrival
-        tksa = TokenScaledArrival(T, tag)
-        setattr(tksa, "scale_tag", tag)      # ★
-        patterns.append(tksa)
+        # tksa = TokenScaledArrival(T, tag)
+        # setattr(tksa, "scale_tag", tag)      # ★
+        # patterns.append(tksa)
 
         # 1) Uniform
-        uni  = DiscreteUniformArrival(max_step=T)
-        setattr(uni, "scale_tag", tag)       # ★
-        patterns.append(uni)
+        # uni  = DiscreteUniformArrival(max_step=T)
+        # setattr(uni, "scale_tag", tag)       # ★
+        # patterns.append(uni)
 
         # 2) Periodic
-        per  = DiscretePeriodicArrival(interval=max(1, int(round(T / n_req))))
-        setattr(per, "scale_tag", tag)       # ★
-        patterns.append(per)
+        # per  = DiscretePeriodicArrival(interval=max(1, int(round(T / n_req))))
+        # setattr(per, "scale_tag", tag)       # ★
+        # patterns.append(per)
 
         # 3) Poisson
-        poi  = DiscretePoissonArrival(lmbd=n_req / T, max_steps=T)
-        setattr(poi, "scale_tag", tag)       # ★
-        patterns.append(poi)
+        # k = 3.0        
+        # poi  = DiscretePoissonArrival(lmbd=k * n_req / T, max_steps=T)
+        # setattr(poi, "scale_tag", tag)       # ★
+        # patterns.append(poi)
 
         # 4) Bimodal
         bim  = DiscreteBimodalArrival(l1=n_req/T/0.7,
                                     l2=max(0.1, n_req/T*0.1),
                                     p=0.7, max_steps=T)
         setattr(bim, "scale_tag", tag)       # ★
+        setattr(bim, "ideal_T", T)
+
         patterns.append(bim)
 
         # 5) Bursty
-        bur  = PoissonBurstyArrivalPattern(lb=max(1, int(n_req/T)),
-                                        lg=max(1, int(T/5)))
-        setattr(bur, "scale_tag", tag)       # ★
-        patterns.append(bur)
+        # bur  = PoissonBurstyArrivalPattern(lb=max(1, int(n_req/T)),
+        #                                 lg=max(1, int(T/5)))
+        # setattr(bur, "scale_tag", tag)       # ★
+        # patterns.append(bur)
 
     return patterns
 
@@ -863,7 +995,7 @@ def memory_pressure_plot(
 # ------------------------------------------------------------
 # (A)  주어진 블록 수 → OVF 계산  (trace 생성 이전·가벼운 시뮬)
 # ------------------------------------------------------------
-def _ovf_for_blocks(reqs: Dict, arr_times: List[int],
+def _ovf_for_blocks(reqs: List[Tuple[int,int,int]],
                     blocks: int, blk_size: int = 16) -> float:
     peak = over_sum = steps = 0
     for (arr, inp, out) in reqs:
@@ -880,35 +1012,40 @@ def _ovf_for_blocks(reqs: Dict, arr_times: List[int],
     return over_sum / (blocks * (steps + 1))
 
 def find_blocks_for_ovf(
-    reqs: List[Tuple[int,int,int]],   # (arr, inp, out)
-    arr_times: List[int],
+    reqs: List[Tuple[int,int,int]],   # (arr, inp, out)    
     target_ovf: float,
     tol: float = 0.01,
     blk_size: int = 16,
     min_blk: int | None = None,
-    max_blk_cap: int = 2**14,        # 16384 블록(≈ 262k tok) 까지만 허용
-) -> int:
-    """
-    (개선판)  target_ovf 를 만족하는 최소 블록 수를 반환.
-    target 이 물리적으로 불가능하면, 최저 OVF 를 주는 최대 블록 수를 반환하고
-    `unmet=True` 를 함께 리턴한다.
-    """
+    max_blk_cap: int = 2**13,        # ← 8 192 blocks ≈ 127 k tok
+) -> int:    
     # ── 1) 초기 lo, hi ──────────────────────────────────────────
     peak_tok = max(inp + out for _, inp, out in reqs)
-    lo = max(min_blk or 1, math.ceil(peak_tok / blk_size))
-    hi = max(lo, 4096)                        # 4k 블록을 최초 hi 로
+    lo = max(min_blk or 1, 1)
+    # hi = max(lo, 4096)                        # 4k 블록을 최초 hi 로
 
-    def ovf(b): return _ovf_for_blocks(reqs, arr_times, b, blk_size)
+    def ovf(b): return _ovf_for_blocks(reqs, b, blk_size)
 
-    # ── 2) hi 가 충분히 큰지 점검; 부족하면 2× 확장 ─────────────
-    while ovf(hi) > target_ovf and hi < max_blk_cap:
-        hi *= 2                                # 2 배씩 키우기
-    hi = min(hi, max_blk_cap)                  # 안전 캡
+    cur_lo_ovf = ovf(lo)
 
-    # ── 3) 이분 탐색 ────────────────────────────────────────────
-    if ovf(lo) <= target_ovf:                  # 이미 lo 로도 OK
+    # ── (1) 목표와 이미 근접한 경우 -----------------------------
+    if abs(cur_lo_ovf - target_ovf) <= tol:
         return lo, False
-        
+
+    # ── (2) 트래픽이 너무 가벼워 목표보다 OVF가 작음 -------------
+    if cur_lo_ovf < target_ovf:
+        return lo, True  # cannot push OVF up without violating peak token size
+
+    # ── (3) upper bound 찾기 -------------------------------------
+    hi = max(lo, 4096)
+    while ovf(hi) > target_ovf and hi < max_blk_cap:
+        hi *= 2
+    hi = min(hi, max_blk_cap)
+
+    if ovf(hi) > target_ovf:  # still high even at cap
+        return hi, True
+
+    # ── (4) 이분 탐색 -------------------------------------------
     while lo < hi:
         mid = (lo + hi) // 2
         cur = ovf(mid)
@@ -918,8 +1055,7 @@ def find_blocks_for_ovf(
             lo = mid + 1
         else:
             hi = mid
-    # 여기까지 오면 target 을 못 맞춤
-    return hi, True
+    return lo, False
 
 LEVEL_ABBR = {
     "vlow"     : "vl",   # very-low
@@ -1005,5 +1141,5 @@ if __name__ == "__main__":
             blk_size       = BLOCK_SIZE_TOK,
             static         = False,
             skip_token_ids = True,
-            scales       = [0.5, 0.4, 0.3], # [0.1, 0.25, 0.5]
+            scales       = [0.5], # [0.1, 0.25, 0.5]
         )

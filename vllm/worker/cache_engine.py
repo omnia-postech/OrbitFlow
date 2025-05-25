@@ -1229,11 +1229,11 @@ class FlattenedCacheEngine(CacheEngineBase):
         else:
             raise ValueError(f"unknown policy {prefetch_mode}")
         dist = self._normalise_prefetch_distance(spec=dist, candidates=snapshot.candidates)
-        ## disable distance 0 for dynamic policies, solver side handled by solver
-        # if prefetch_mode in ["distn", "flexgen"]:
-        #     for s, d in dist.items():
-        #         if d == 0:
-        #             dist[s] = 1
+        # NOTE(HONG): distance 0 is not allowed, so we start from 1; if you want to use distance 0 -> comment out below part
+        if prefetch_mode in ["distn", "flexgen", "selectn"]:
+            for s, d in dist.items():
+                if d == 0:
+                    dist[s] = 1
         logger.info(f"[driver] prefetch distance: {dist}")
         return dist, {"policy": prefetch_mode}
     

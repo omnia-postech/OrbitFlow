@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path("all_traces_v2")        # *.metrics.json 최상위 폴더
 
 REPRESENTATIVE_PER_BUCKET = 1    # 버킷당 대표 trace 수
-PPR_MAX = 2.0                  # ← 2 를 넘는 trace 는 분석에서 제외
+PPR_MAX = 3.0                 # ← 2 를 넘는 trace 는 분석에서 제외
 
 # 0-1 압력 약어 → 레이블
 LVL_MAP = {"vl":"low", "lo":"low", "ml":"mid", "md":"mid", "mh":"high", "hi":"high"}
@@ -71,9 +71,9 @@ for mf in ROOT.rglob("*.metrics.json"):
         pressure = LVL_MAP[tag.group(1)]
 
         # ① OVF 기준 위반 → 세 파일 삭제 후 skip
-        if should_delete(pressure, ovf):
-            delete_family(mf.with_suffix(""))   # stem 전달
-            continue
+        # if should_delete(pressure, ovf):
+        #     delete_family(mf.with_suffix(""))   # stem 전달
+        #     continue
 
         # ② 통과한 trace 기록
         rows.append(dict(

@@ -8,15 +8,15 @@ export CUDA_VISIBLE_DEVICES=0
 export VLLM_CONFIGURE_LOGGING=1
 
 # LOGGING_LEVEL=DEBUG
-LOGGING_LEVEL=INFO
+LOGGING_LEVEL=CRITICAL
 
 ROOT="/home/heelim/vllm"
 
 FIGURE_ONLY=$1                      # 0 → 실행 + 그림, 1 → 그림만
-EXP_LIST=(paper_main_exp)
-METHOD_LIST=(Ours Flexgen NoPrefetch SelectN)
-TRACE_CFG_DIR="${ROOT}/benchmark/selected_traces/"
-TRACE_LIST=(both_dyn_low both_dyn_mid both_dyn_high)
+EXP_LIST=(paper_main_exp_test)
+METHOD_LIST=(Ours Flexgen)
+TRACE_CFG_DIR="${ROOT}/benchmark/SS83_SL00_LS08_LL08/"
+TRACE_LIST=(bim50_hi_ov78)
 
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"
