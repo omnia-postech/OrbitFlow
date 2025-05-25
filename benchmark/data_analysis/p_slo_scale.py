@@ -51,10 +51,10 @@ def load_metrics(path: Path) -> pd.DataFrame:
     
 style = {
     "spine": {
-        "color": "gray",
-        "alpha": 0.9,
+        "color": "black",
+        "alpha": 0.7,
         "linestyle": "-",
-        "linewidth": 2
+        "linewidth": 1.5
     },
 }
 
@@ -107,7 +107,7 @@ for ax, trace, trace_label in zip(axes, TRACE_LIST, trace_labels):
 
 # y축 tick 간격 0.5로 설정, 글자 크기 30
 max_ylim = axes[0].get_ylim()[1]
-y_ticks = np.arange(0, max_ylim + 0.5, 0.5)
+y_ticks = np.arange(0, max_ylim+0.5, 0.5)
 axes[0].set_yticks(y_ticks)
 for ax in axes:
     ax.tick_params(axis='x', labelsize=30)
@@ -120,14 +120,17 @@ for ax in axes:
         spine.set_edgecolor(style["spine"]["color"])
         spine.set_alpha(style["spine"]["alpha"])
         spine.set_linewidth(style["spine"]["linewidth"])
+    
+    ax.set_ylim(-0.15, max_ylim + 0.15)
 
 # 공통 y축 레이블 & 범례
 axes[0].set_ylabel("SLO Scale", fontsize=30, labelpad=15)
 fig.legend(METHOD_LABELS, loc='upper center', 
-           bbox_to_anchor=(0.52, 1.25),
+           bbox_to_anchor=(0.5, 1.2),
            ncol=len(METHOD_LABELS),
            fontsize=30, frameon=False)
 
 # 폴더 생성 및 저장
 
 plt.savefig("figures/p_slo.jpg", format='jpg', bbox_inches="tight")
+# plt.savefig("figures/p_slo.pdf", format='pdf', bbox_inches="tight")

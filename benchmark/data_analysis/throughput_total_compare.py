@@ -38,7 +38,7 @@ markers = [
 ]
 
 
-font_size = 18
+font_size = 19
 style = {
     "line": {
         "linewidth": 3, 
@@ -64,10 +64,10 @@ style = {
         # "ncol": len(method_list)
     },
     "spine": {
-        "color": "gray",
-        "alpha": 0.5,
+        "color": "black",
+        "alpha": 0.7,
         "linestyle": "-",
-        "linewidth": 2
+        "linewidth": 1.5
     },
     "grid": {
         "color": "gray",
@@ -132,7 +132,7 @@ fig, axes = plt.subplots(
     squeeze=False, 
 )
 # y축 정렬 및 간격 조정
-plt.subplots_adjust(left=0.07, right=0.99, top=0.90, bottom=0.08, wspace=0.3, hspace=0.4)
+plt.subplots_adjust(left=0.07, right=0.99, top=0.90, bottom=0.08, wspace=0.25, hspace=0.3)
 
 for i, metric in enumerate(metric_list):
     for j, (trace, trace_label) in enumerate(zip(trace_list, trace_labels)):
@@ -170,6 +170,8 @@ for i, metric in enumerate(metric_list):
 
         # 오른쪽 y축 설정
         ax_right = ax.twinx()
+        ax_right.tick_params(axis='y', which='both', length=0)
+        ax_right.tick_params(axis='y', labelsize=style["tick"]["fontsize"])
         # ax_right.set_ylim(0, 100)
         # ax_right.set_yticks([0, 50, 100])
 

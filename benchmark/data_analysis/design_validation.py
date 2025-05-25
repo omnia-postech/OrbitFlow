@@ -15,32 +15,25 @@ method_list = ["NoPause", "NoDeposit", "NoSolver",
 method_labels = ["No Pause", "No Deposit", "No Solver", 
                  "Uniform Distance", "Batch Dimension Only", "Best Baseline"]
 
-slo_scales = [1, 2, 3, 4]  # 내림차순]
+slo_scales = [4, 3, 2, 1]  # 내림차순]
+slo_labels    = [str(s) for s in slo_scales]   # x축 표기용 문자열
 
 colors = [
-    # Static (파란색 계열 - 부드럽고 시인성 높음)
-    "#84C8F4",  # NextLayer - 부드러운 파란색
-    "#C59FDB",  # Flexgen - 연한 보라색
-    "#7CD6A4",  # NoPrefetch - 연한 청록색
-    "#63D0C2",  # Static2 - 중간 밝기의 민트
-
-    # # Dynamic (따뜻한 계열, Ours는 강조)
-    "#FAC07D",  # SelectN - 파스텔 오렌지
-    "#F29E9E",  # DistNSingle - 연한 코랄
-
-    "#E05A4F"   # Ours - 강조용 진한 살구+레드 (단독 대비 확보)
+    "#84C8F4",  # Soft Sky Blue (연하늘색)
+    "#C59FDB",  # Pastel Lavender (연보라색)
+    "#7CD6A4",  # Mint Green (민트색)
+    "#63D0C2",  # Aqua Teal (청록색)
+    "#FAC07D",  # 파스텔 오렌지
+    "#E05A4F",  # Coral Red (산호빛 빨강)
 ]
-
 markers = [
     'o',  # Flexgen
-    'o',  # DeepSpeed
-    'o',  # SelectN
-    'o',  # NoPrefetch
-    'o',  # NoPrefetch
-    'o',  # NoPrefetch
-    '*'   # Ours
+    's',  # DeepSpeed
+    '^',  # SelectN
+    'D',  # NoPrefetch
+    '*',
+    'P'   # Ours
 ]
-
 
 font_size = 22
 style = {
@@ -68,10 +61,10 @@ style = {
         # "ncol": len(method_list)
     },
     "spine": {
-        "color": "gray",
-        "alpha": 0.5,
+        "color": "black",
+        "alpha": 0.7,
         "linestyle": "-",
-        "linewidth": 2
+        "linewidth": 1.5
     },
     "grid": {
         "color": "gray",
@@ -147,28 +140,26 @@ def load_metrics_for_slo_scales(method: str, slo_scales: List[str], is_tpot: boo
             results.sort()
     return results
 
-fig, axes = plt.subplots(1, 2, figsize=(30, 8))
+fig, axes = plt.subplots(1, 2, figsize=(18, 6))
 plt.subplots_adjust(
     left=0.05, right=0.99, top=0.93, bottom=0.07,
-    wspace=0.15, hspace=0.1
+    wspace=0.3, hspace=0.1
 )
 
 for ax, (is_tpot, ylabel) in zip(
         axes,
         [(False,  "TBT SLO Attainment (%)"),
-         (True, "TBT SLO Attainment (%)")]):
-    i = 1
+         (True, "TPOT SLO Attainment (%)")]):
+    i = 0
     for method, label, color, marker in zip(method_list, method_labels, colors, markers):
         y_vals = load_metrics_for_slo_scales(method, slo_scales, is_tpot, i)
-        i += 1
         ax.plot(
             slo_scales, y_vals,
-            label=label,
-            color=color,
-            marker=marker,
-            linewidth=3,
-            markersize=10
+            **style["line"],
+            marker=markers[i], color=colors[i], linestyle='-',
+            label=method_labels[i], 
         )
+        i += 1
 
     # ax.set_title(title, fontsize=30, pad=12)
     ax.set_xlabel("SLO Scale", fontsize=30, labelpad=10)
@@ -181,7 +172,7 @@ for ax, (is_tpot, ylabel) in zip(
 
     ax.tick_params(axis='x', which='both', length=0, labelsize=30, pad=10)
     ax.tick_params(axis='y', which='both', length=0, labelsize=30, pad=5)
-    ax.set_ylim(0, 100)
+    ax.set_ylim(-5, 105)
 
     ax.set_yticks([0, 50, 100])
     ax.set_yticklabels(['0', '50', '100'])
@@ -196,8 +187,8 @@ for ax, (is_tpot, ylabel) in zip(
 # 범례: 큰 그래프 상단 중앙
 fig.legend(
     method_labels, loc="upper center",
-    bbox_to_anchor=(0.5, 1.1), 
-    ncol=len(method_labels),
+    bbox_to_anchor=(0.5, 1.25), 
+    ncol=len(method_labels)/2,
     fontsize=30, frameon=False
 )
 

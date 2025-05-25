@@ -28,11 +28,11 @@ colors = [
     "#E05A4F",  # Coral Red (산호빛 빨강)
 ]
 markers = [
-    "o",  # 원
-    "s",  # 사각
-    "^",  # 삼각 (위)
-    "D",  # 다이아몬드
-    "P",  # 플러스형 별표
+    'o',  # Flexgen
+    's',  # DeepSpeed
+    '^',  # SelectN
+    'D',  # NoPrefetch
+    'P'   # Ours
 ]
 
 font_size = 35
@@ -43,7 +43,7 @@ style = {
     "legend": {"fontsize":font_size},
     "spine": {
         "color": "black",
-        "alpha": 0.8,
+        "alpha": 0.7,
         "linestyle": "-",
         "linewidth": 2
     },
@@ -164,7 +164,7 @@ for r, metric in enumerate(metric_list):        # row
             ax.set_xticklabels([str(s) for s in reversed(slo_scales)], 
                                fontsize=style["tick"]["fontsize"])  # 라벨만 뒤집기
             # ax.set_xlim(slo_scales[-1], slo_scales[0])  # 오른쪽=1.0, 왼쪽=1.5
-            ax.set_ylim(-5, 100)
+            ax.set_ylim(-5, 105)
             ax.axhline(90, color="gray", ls="--", lw=style["line"]["linewidth"])
             ax.tick_params(axis='both', labelsize=style["tick"]["fontsize"], length=0)
 
