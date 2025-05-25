@@ -9,13 +9,11 @@ trace_list = [
     "test_fit_static_0", 
     "test_shortshort_enough", 
     "test_shortlong_less", 
-    "test_shortlong_enough",
 ]
 trace_labels = [
     "(a) Trace 1",
     "(b) Trace 2",
     "(c) Trace 3",
-    "(d) Trace 4",
 ]
 method_list = ["Flexgen", "DeepSpeed", "SelectN", "NoPrefetch", "Ours"]
 method_labels = ["Flexgen", "DeepSpeed", "Placeholder(SelectN)", "No Prefetch", "Ours"]
@@ -25,25 +23,18 @@ slo_scales = [4, 3, 2, 1]
 slo_labels    = [str(s) for s in slo_scales]   # x축 표기용 문자열
 
 colors = [
-    # Static (파란색 계열 - 부드럽고 시인성 높음)
-    "#84C8F4",  # NextLayer - 부드러운 파란색
-    "#C59FDB",  # Flexgen - 연한 보라색
-    "#7CD6A4",  # NoPrefetch - 연한 청록색
-    "#63D0C2",  # Static2 - 중간 밝기의 민트
-
-    # # Dynamic (따뜻한 계열, Ours는 강조)
-    # "#FAC07D",  # SelectN - 파스텔 오렌지
-    # "#F29E9E",  # DistNSingle - 연한 코랄
-
-    "#E05A4F"   # Ours - 강조용 진한 살구+레드 (단독 대비 확보)
+    "#84C8F4",  # Soft Sky Blue (연하늘색)
+    "#C59FDB",  # Pastel Lavender (연보라색)
+    "#7CD6A4",  # Mint Green (민트색)
+    "#63D0C2",  # Aqua Teal (청록색)
+    "#E05A4F",  # Coral Red (산호빛 빨강)
 ]
-
 markers = [
     'o',  # Flexgen
-    'o',  # DeepSpeed
-    'o',  # SelectN
-    'o',  # NoPrefetch
-    '*'   # Ours
+    's',  # DeepSpeed
+    '^',  # SelectN
+    'D',  # NoPrefetch
+    'P'   # Ours
 ]
 
 
@@ -137,9 +128,11 @@ def load_metrics_for_slo_scales(method: str, trace: str, metric: str, slo_scales
 fig, axes = plt.subplots(
     nrows=len(metric_list), 
     ncols=len(trace_list),
-    figsize=(20, 3.5*len(metric_list)),
+    figsize=(15, 3.5*len(metric_list)),
     squeeze=False, 
 )
+# y축 정렬 및 간격 조정
+plt.subplots_adjust(left=0.07, right=0.99, top=0.90, bottom=0.08, wspace=0.3, hspace=0.4)
 
 for i, metric in enumerate(metric_list):
     for j, (trace, trace_label) in enumerate(zip(trace_list, trace_labels)):
@@ -225,7 +218,7 @@ handles, labels = axes[0][0].get_legend_handles_labels()
 fig.legend(
     handles, labels, 
     loc="upper center",
-    bbox_to_anchor=(0.5,1.02), 
+    # bbox_to_anchor=(0.5,1.02), 
     ncol=len(method_list),
     fontsize=style["legend"]["fontsize"],
     frameon=False
@@ -236,8 +229,7 @@ fig.text(0.02, 0.5, "Memory Pressure", va='center', rotation='vertical', fontsiz
         #  weight='bold'
          )
 
-# y축 정렬 및 간격 조정
-plt.subplots_adjust(left=0.07, right=0.99, top=0.90, bottom=0.08, wspace=0.2, hspace=0.4)
+
 
 plt.savefig("figures/throughput_total_compare.jpg", format='jpg', bbox_inches="tight")
 # plt.savefig("figures/tbt_total_compare.pdf", format='pdf', bbox_inches="tight")
