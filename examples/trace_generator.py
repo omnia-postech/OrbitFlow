@@ -1039,7 +1039,7 @@ class Trace:
         vocab (Tuple[int, int]): The range of token IDs used.
     """
     requests: Dict[str, "Request"]
-    arrival_pattern_name: str
+    # arrival_pattern_name: str
     batch_size: int
     request_type_probs: any  # could be a dict or list of tuples, depending on your design
     vocab: Tuple[int, int]
@@ -1063,7 +1063,7 @@ class Trace:
             info = [(rt.category_name, p) for rt, p in self.request_type_probs]
 
         return (f"Trace(\n"
-                f"  arrival_pattern={self.arrival_pattern_name},\n"
+                # f"  arrival_pattern={self.arrival_pattern_name},\n"
                 f"  batch_size={self.batch_size},\n"
                 f"  max_model_len={self.max_model_len},\n"
                 f"  num_gpu_blocks_override={self.num_gpu_blocks_override},\n"
@@ -1089,12 +1089,12 @@ class Trace:
 
         # Rebuild request_type_probs from something like [["Short Q&A", 0.7], ["Summarization", 0.3]]
         # We'll just keep them as a list of (category_name, probability)
-        request_type_probs_data = data["request_type_probs"]
+        request_type_probs_data = data.get("request_type_probs", None)
 
         # Convert the arrival_pattern dictionary back into a single string
         # e.g. {"type": "DiscretePoissonArrival", "params": {"lambda_per_step":0.01,"max_steps":4000}}
         # -> "DiscretePoissonArrival(lambda_per_step=0.01, max_steps=4000)"
-        arrival_pattern_str = _arrival_pattern_from_dict(data["arrival_pattern"])
+        # arrival_pattern_str = _arrival_pattern_from_dict(data["arrival_pattern"])
 
         requests_dict = {}
         vocab_min, vocab_max = data["vocab"]
@@ -1123,8 +1123,7 @@ class Trace:
             requests_dict[req_id] = request_obj
 
         return cls(
-            requests=requests_dict,
-            arrival_pattern_name=arrival_pattern_str,
+            requests=requests_dict,            
             batch_size=data["batch_size"],
             max_model_len=data["max_model_len"],
             request_type_probs=request_type_probs_data,  # we keep it as-is
@@ -1245,7 +1244,7 @@ class Trace:
             ]
 
         data = {
-            "arrival_pattern": _arrival_pattern_to_dict(self.arrival_pattern_name),
+            # "arrival_pattern": _arrival_pattern_to_dict(self.arrival_pattern_name),
             "batch_size": self.batch_size,
             "max_model_len": self.max_model_len,
             "num_gpu_blocks_override": self.num_gpu_blocks_override,
@@ -1351,8 +1350,7 @@ class TraceType:
 
     def __init__(
         self,
-        request_type_probs: Dict[RequestType, float],
-        arrival_pattern: ArrivalPattern,
+        request_type_probs: Dict[RequestType, float],        
         vocab: Tuple[int] = (200,30000)
     ):
         """
@@ -1364,7 +1362,7 @@ class TraceType:
             vocab (Tuple[int], optional): Range of token IDs for random token generation.
         """
         self.request_type_probs = request_type_probs
-        self.arrival_pattern = arrival_pattern
+        # self.arrival_pattern = arrival_pattern
         self.vocab = vocab
 
         total = sum(self.request_type_probs.values())
@@ -1475,7 +1473,7 @@ class TraceType:
         # arrival_pattern_name in the Trace, so we keep using str(self.arrival_pattern).
         trace = Trace(
             requests=requests_dict,  # pass the dict instead of a list
-            arrival_pattern_name=str(self.arrival_pattern),
+            # arrival_pattern_name=str(self.arrival_pattern),
             batch_size=batch_size,
             request_type_probs=self.request_type_probs,
             vocab=self.vocab

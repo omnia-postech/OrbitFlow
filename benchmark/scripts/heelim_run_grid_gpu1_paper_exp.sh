@@ -4,7 +4,7 @@
 ###############################################################################
 # CONSTANTS (edit these lists only)                                           #
 ###############################################################################
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 export VLLM_CONFIGURE_LOGGING=1
 
 # LOGGING_LEVEL=DEBUG
@@ -13,10 +13,10 @@ LOGGING_LEVEL=INFO
 ROOT="/home/heelim/vllm"
 
 FIGURE_ONLY=$1                      # 0 → 실행 + 그림, 1 → 그림만
-EXP_LIST=(paper_main)
-METHOD_LIST=(OursMinusPause)
-TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/PPR_based/"
-TRACE_LIST=(PPR250_TPI051)
+EXP_LIST=(paper_main_exp)
+METHOD_LIST=(Ours Flexgen NoPrefetch SelectN)
+TRACE_CFG_DIR="${ROOT}/benchmark/selected_traces/"
+TRACE_LIST=(both_static_low both_static_high)
 
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"

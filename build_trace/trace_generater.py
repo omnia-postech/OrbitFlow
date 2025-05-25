@@ -1005,5 +1005,5 @@ if __name__ == "__main__":
             blk_size       = BLOCK_SIZE_TOK,
             static         = False,
             skip_token_ids = True,
-            scales       = [0.05], # [0.1, 0.25, 0.5]
+            scales       = [0.5, 0.4, 0.3], # [0.1, 0.25, 0.5]
         )

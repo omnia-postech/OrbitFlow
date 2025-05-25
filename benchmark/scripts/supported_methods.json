@@ -3,22 +3,19 @@
       "--prefetch-mode",        "flexgen",
       "--prefetch-distance",    "1",
       "--flattened-cache",      "true",
-      "--merge-prefetch-buffer", "true",
-      "--slo-ratio",         "2.5"
+      "--merge-prefetch-buffer", "true"
     ],
     "NoPrefetch": [
         "--prefetch-mode",        "none",
         "--prefetch-distance",    "1",
         "--flattened-cache",      "true",
-        "--merge-prefetch-buffer", "true",
-        "--slo-ratio",         "2.5"
+        "--merge-prefetch-buffer", "true"
     ],
     "NextLayer": [
     "--prefetch-mode",        "static",
     "--prefetch-distance",    "0",
     "--flattened-cache",      "true",
-    "--merge-prefetch-buffer", "true",
-    "--slo-ratio",         "2.5"
+    "--merge-prefetch-buffer", "true"
     ],
     "Static1": [
         "--prefetch-mode",        "static",
@@ -48,15 +45,13 @@
         "--prefetch-mode",        "selectn",
         "--prefetch-distance",    "1",
         "--flattened-cache",      "true",
-        "--merge-prefetch-buffer", "true",
-        "--slo-ratio",         "2.5"
+        "--merge-prefetch-buffer", "true"
     ], 
     "DistNSingle": [
         "--prefetch-mode",        "distn_single",
         "--prefetch-distance",    "1",
         "--flattened-cache",      "true",
-        "--merge-prefetch-buffer", "true",
-        "--slo-ratio",         "2.5"
+        "--merge-prefetch-buffer", "true"
         ],
     "Ours": [
         "--prefetch-mode",        "solver",
@@ -65,8 +60,7 @@
         "--merge-prefetch-buffer", "true",
         "--pause-and-resume",
         "--enable-deposit",
-        "--removable-cache",
-        "--slo-ratio",         "2.5"
+        "--removable-cache"
     ],
     "OursMinusRC": [
         "--prefetch-mode",        "solver",
@@ -74,8 +68,7 @@
         "--flattened-cache",      "true",
         "--merge-prefetch-buffer", "true",
         "--pause-and-resume",
-        "--enable-deposit",
-        "--slo-ratio",         "2.5"
+        "--enable-deposit"
     ],
     "OursMinusDeposit": [
         "--prefetch-mode",        "solver",
@@ -91,8 +84,7 @@
         "--flattened-cache",      "true",
         "--merge-prefetch-buffer", "true",
         "--enable-deposit",
-        "--removable-cache",
-        "--slo-ratio",         "2.5"
+        "--removable-cache"
     ],
     "Ours_fallback": [
         "--prefetch-mode",        "solver",
@@ -100,8 +92,7 @@
         "--flattened-cache",      "true",
         "--merge-prefetch-buffer", "true",
         "--pause-and-resume",
-        "--enable-deposit",
-        "--slo-ratio",         "2.5"
+        "--enable-deposit"
     ],
     "Ours_TP": [
         "--prefetch-mode",        "solver",
@@ -110,8 +101,7 @@
         "--merge-prefetch-buffer", "true",
         "--tensor-parallel-size", "2",
         "--pause-and-resume",
-        "--enable-deposit",
-        "--slo-ratio",         "2.5"
+        "--enable-deposit"
     ]
   }
   
