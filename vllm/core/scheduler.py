@@ -953,7 +953,6 @@ class Scheduler:
                             
                             logger.critical(f"[Solver-fallback] pause '{vid}' (longest length)")
                             logger.critical(msg)
-
                             decode_ids = {sg.seq_group.get_seqs()[0].seq_id for sg in ret.decode_seq_groups}
                             self.paused.append(victim_sg.seq_group)
                             self.paused_solver_ids.add(vid)

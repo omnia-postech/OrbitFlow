@@ -565,6 +565,85 @@ class Solver_updated:
 
         print(f"batch_time (token_time) : {results.batch_time:.4f}s")
         return results   
+
+    def compute_T_batch(
+        self,                                        # <-- “self” so you can call it as a Solver method
+        requests_list: List[Request],
+        offload_decision: Dict[int, int],            # {req_id : distance (= d),  -1 ⇒ no offload}
+        *,
+        layer_num: int = 32,
+        block_bandwidth: float = 103_178.0 / 1_000,  #   blocks · s⁻¹
+        gpu_block_capacity: int = 49_152 // 80,      # *unused* but kept for API parity
+        window_ub: int = 1_000                      # *unused*
+    ) -> float:
+        """
+        Return the batch latency T_batch (seconds) for a *given* off-load plan.
+
+        offload_decision[r]  ==  d   means pre-fetch distance d+1  (layers 0,d+1,2(d+1)… on CPU)
+        offload_decision[r]  == -1   means no offload for request r (all KV on GPU).
+        """
+        # -----------------------------------------------------------------
+        # 0. Sanity checks
+        # -----------------------------------------------------------------
+        req_ids = {r.id for r in requests_list}
+        if req_ids != set(offload_decision):
+            miss = req_ids - offload_decision.keys()
+            extra = offload_decision.keys() - req_ids
+            raise ValueError(f"offload_decision must cover every request "
+                            f"(missing={miss}, extra={extra})")
+
+        # -----------------------------------------------------------------
+        # 1. Compute-time per layer (same profiler logic as in `solve`)
+        # -----------------------------------------------------------------
+        total_tokens = 16 * sum(r.context_len_in_blocks for r in requests_list)
+        compute_per_layer = (
+            self.profiled_estimator
+                .estimate_by_profiled_results(total_tokens,
+                                            which="NoPrefetch",
+                                            mode="upper_quad")
+            / layer_num
+        )
+
+        # -----------------------------------------------------------------
+        # 2. PCIe/NVLink bandwidth  (blocks / s)  — same derivation
+        # -----------------------------------------------------------------
+        per_block_time = (
+            self.profiled_estimator
+                .estimate_by_profiled_results(total_tokens,
+                                            which="Communication",
+                                            mode="linear")
+            / (layer_num * 16)
+        )
+        eff_bandwidth = 1.0 / per_block_time if block_bandwidth is None else block_bandwidth
+
+        # -----------------------------------------------------------------
+        # 3. Layer-wise communication time  t_comm[j]
+        # -----------------------------------------------------------------
+        def stride(req_id: int) -> int:
+            d = offload_decision[req_id]
+            return 1 if d < 0 else d + 1            # 1 ⇒ fully resident
+
+        t_comm = [0.0] * layer_num                 # index 0 ↔ layer 1
+        for j in range(1, layer_num + 1):          # 1 … L
+            blocks_this_layer = 0
+            for r in requests_list:
+                if j % stride(r.id) == 0:          # layer lives on CPU
+                    blocks_this_layer += r.context_len_in_blocks
+            t_comm[j - 1] = blocks_this_layer / eff_bandwidth
+
+        # -----------------------------------------------------------------
+        # 4. Stall
+        # -----------------------------------------------------------------
+        stall = [0.0] * layer_num
+        stall[0] = t_comm[0]
+        for j in range(1, layer_num):
+            stall[j] = max(0.0, t_comm[j] - compute_per_layer)
+
+        # -----------------------------------------------------------------
+        # 5. Batch latency
+        # -----------------------------------------------------------------
+        T_batch = layer_num * compute_per_layer + sum(stall)
+        return T_batch 
 class LatencySolver:
     def __init__(self):
         self.profiled_estimator = ProfileBasedEstimator(profiled_path)

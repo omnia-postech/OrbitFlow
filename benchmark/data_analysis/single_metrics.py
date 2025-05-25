@@ -425,16 +425,19 @@ if __name__ == "__main__":
         (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/Ours/PPR158_TPI005/outputs.csv"), "Ours"),
         (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/OursMinusDeposit/PPR158_TPI005/outputs.csv"), "OursMinusDeposit"),
         (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/OursMinusRC/PPR158_TPI005/outputs.csv"), "OursMinusRC"),
+        (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/OursMinusPause/PPR158_TPI005/outputs.csv"), "OursMinusPause"),
     ], tag="Trace1", descr="Trace1")
 
     _run_all([
         (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/Ours/PPR250_TPI051/outputs.csv"), "Ours"),
         (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/OursMinusDeposit/PPR250_TPI051/outputs.csv"), "OursMinusDeposit"),
         (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/OursMinusRC/PPR250_TPI051/outputs.csv"), "OursMinusRC"),
+        (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/OursMinusPause/PPR250_TPI051/outputs.csv"), "OursMinusPause"),
     ], tag="Trace2", descr="Trace2")
 
     _run_all([
         (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/Ours/PPR394_TPI099/outputs.csv"), "Ours"),
         (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/OursMinusDeposit/PPR394_TPI099/outputs.csv"), "OursMinusDeposit"),
         (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/OursMinusRC/PPR394_TPI099/outputs.csv"), "OursMinusRC"),
+        (Path("/home/xinyuema/vllm/outputs/benchmark/Test0521_SLO2_5_FIXED/OursMinusPause/PPR394_TPI099/outputs.csv"), "OursMinusPause"),
     ], tag="Trace3", descr="Trace3")
