@@ -1,0 +1,14 @@
+{
+  "PPR": 1.963095771701778,
+  "TPI": 0.5129738012107207,
+  "OV_block_step": 65553217,
+  "OV_frac": 0.2460198207635215,
+  "GE2_frac": 0.0,
+  "peak_blocks": 13139,
+  "peak_step": 23688,
+  "gpu_blocks": 6693,
+  "total_steps": 39811,
+  "type1_count": 48,
+  "type2_count": 21,
+  "plot_path": "traces/SS00_SL00_LS100_LL00/tsa05/tsa05_md_ov25.png"
+}

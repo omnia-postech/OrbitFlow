@@ -1,0 +1,14 @@
+{
+  "PPR": 1.2446987328678563,
+  "TPI": 0.4306615205098286,
+  "OV_block_step": 14437856,
+  "OV_frac": 0.041890387007901424,
+  "GE2_frac": 0.0,
+  "peak_blocks": 19253,
+  "peak_step": 8533,
+  "gpu_blocks": 15468,
+  "total_steps": 22282,
+  "type1_count": 66,
+  "type2_count": 15,
+  "plot_path": "traces/request_types/SS07_SL67_LS17_LL07/bim05/bim05_vl_ov4.png"
+}

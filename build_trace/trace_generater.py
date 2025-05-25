@@ -8,6 +8,9 @@ from pathlib import Path
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional, Any, Callable
+import numpy as np
+import math
+import matplotlib.pyplot as plt
 
 import numpy as np
 try:
@@ -224,13 +227,13 @@ class DiscreteUniformArrival(ArrivalPattern):
     def __init__(self,max_step:int): self.max_step=max_step
     def generate_arrival_times(self,n:int)->List[int]:
         return [random.randint(0,self.max_step) for _ in range(n)]
-    def __str__(self): return f"DiscreteUniformArrival(max_step={self.max_step})"
+    def __str__(self): return f"UniformArrival(max_step={self.max_step})"
 
 class DiscretePeriodicArrival(ArrivalPattern):
     def __init__(self,interval:int): self.interval=interval
     def generate_arrival_times(self,n:int)->List[int]:
         return [i*self.interval for i in range(n)]
-    def __str__(self): return f"DiscretePeriodicArrival(interval={self.interval})"
+    def __str__(self): return f"PeriodicArrival(interval={self.interval})"
 
 class DiscretePoissonArrival(ArrivalPattern):
     def __init__(self,lmbd:float,max_steps:int=100_000):
@@ -244,7 +247,7 @@ class DiscretePoissonArrival(ArrivalPattern):
             t+=1
         return arr
     def __str__(self):
-        return f"DiscretePoissonArrival(lambda={self.lmbd},max={self.mx})"
+        return f"PoissonArrival(lambda={self.lmbd},max={self.mx})"
 
 class DiscreteBimodalArrival(ArrivalPattern):
     def __init__(self,l1:float,l2:float,p:float,max_steps:int=100_000):
@@ -259,7 +262,7 @@ class DiscreteBimodalArrival(ArrivalPattern):
             t+=1
         return arr
     def __str__(self):
-        return (f"DiscreteBimodalArrival(l1={self.l1},l2={self.l2},"
+        return (f"BimodalArrival(l1={self.l1},l2={self.l2},"
                 f"p={self.p},max={self.mx})")
 
 class PoissonBurstyArrivalPattern(ArrivalPattern):
@@ -276,13 +279,6 @@ class PoissonBurstyArrivalPattern(ArrivalPattern):
         return sorted(arr)
     def __str__(self):
         return f"PoissonBurstyArrivalPattern(lb={self.lb},lg={self.lg})"
-
-
-
-PATTERN_MAP={c.__name__:c for c in [
-    DiscreteUniformArrival, DiscretePeriodicArrival,
-    DiscretePoissonArrival, DiscreteBimodalArrival,
-    PoissonBurstyArrivalPattern]}
 
 # Trace 구조체 (arrival 포함) — 기존 코드 그대로
 @dataclass
@@ -316,12 +312,13 @@ class Trace:
     def save_to_json(self,path:Path,skip_token_ids=True):
         def as_dict(r:TraceReq):
             d=r.__dict__.copy()
+            d.pop("slo", None)
             if skip_token_ids: d.pop("token_ids",None)
             return d
         data=dict(
             batch_size=self.batch_size,
             max_model_len=self.max_model_len,
-            num_gpu_blocks=self.num_gpu_blocks_override,
+            num_gpu_blocks_override = self.num_gpu_blocks_override,
             arrival_pattern=self.arrival_pattern_name,
             vocab=self.vocab,
             requests={k:as_dict(v) for k,v in self.requests.items()},
@@ -370,60 +367,643 @@ def generate_trace(req_data:Dict[str,Any],arr_obj:ArrivalPattern,
                  arrival_pattern_name=str(arr_obj), batch_size=B,
                  vocab=v, max_model_len=max_len)
 
-# 상위 함수
-def build_sched_save(request_json:str, arrival_patterns:List[ArrivalPattern],
-                     max_tokens:int, block_size:int, gpu_ranges:List[float],
-                     static=False, skip_token_ids=True):
-    req_data=load_json(request_json)
-    gpu_blocks=compute_gpu_blocks(req_data["requests"],max_tokens,
-                                  block_size,gpu_ranges)
-    req_path=Path(request_json)
-    for arr_obj in arrival_patterns:
-        arr=arr_obj.generate_arrival_times(len(req_data["requests"])); arr.sort()
-        out_dir=req_path.parent/arr_obj.__class__.__name__.lower(); out_dir.mkdir(exist_ok=True)
-        for blk in gpu_blocks:
-            trace=generate_trace(req_data,arr_obj,arr.copy(),max_tokens,static)
-            trace.num_gpu_blocks_override=blk
-            trace.add_estimate_sched(block_size,blk,req_data["batch_size"])
-            out=out_dir/f"trace_{blk}.json"; trace.save_to_json(out,skip_token_ids)
-            print(f"[saved] {out}")
+# ───────────────────────────────────────────────────────────
+# (★) build_sched_save:  trace 저장 → 메모리-압력 계산 추가
+# ───────────────────────────────────────────────────────────
+def build_sched_save(request_json: str,                     
+                     level_spec: dict,
+                     blk_size: int = 16,
+                     static: bool = False,
+                     skip_token_ids: bool = True,                     
+                     scales: list[float] = (0.6, 0.8, 1.0),                     
+                     ):
+
+    req_data = load_json(request_json)
+    mix_tag = Path(request_json).stem.replace("req_", "")
+
+    arrival_patterns = build_arrival_patterns(
+        request_json,
+        scales=scales,
+    )
+
+    # ❶ request 튜플 (arrival은 나중에 덮어씀)
+    base_reqs = [(0, r["input_length"], r["output_length"])
+                 for r in req_data["requests"].values()]
+
+    for ap in arrival_patterns:
+        mix_tag  = Path(request_json).stem.replace("req_","")   # ex) SS83_SL00_LS08_LL08
+        tag_ap = _slug_ap(ap)
+        arr_times = ap.generate_arrival_times(len(base_reqs))
+        arr_times.sort()
+
+        # arrival 을 입힌 튜플 생성
+        req_tuples = [(at, inp, out)
+                      for at, (_, inp, out) in zip(arr_times, base_reqs)]
+        
+        base_dir = Path(request_json).parent / mix_tag / tag_ap
+        base_dir.mkdir(parents=True, exist_ok=True)
+
+        for lvl, cfg in level_spec.items():
+            blk, unmet = find_blocks_for_ovf(
+                    req_tuples, arr_times,
+                    target_ovf = cfg["target_ovf"],
+                    tol        = cfg["tol"],
+                    blk_size   = blk_size)
+            
+            if unmet and lvl in ("slack", "low"):
+                print(f"[Warn] {lvl} cannot be met (OVF); using max blocks {blk}")
+
+            # 블록 수로 trace 생성
+            trace = generate_trace(req_data, ap, arr_times.copy(),
+                                max_len = 32_384, static = static)
+            trace.num_gpu_blocks_override = blk
+            trace.add_estimate_sched(blk_size, blk, req_data["batch_size"])
+
+            # ★ 실제 OVF 재계산 (소수 2자리)
+            ovf_actual = _ovf_for_blocks(req_tuples, arr_times,
+                                        blk, blk_size)
+            # ─── 폴더 / 파일 이름 축약 ────────────────────────
+            lvl_tag  = LEVEL_ABBR[lvl]        # sk / lo / md / hi / sv
+            ovf_tag  = _ovf_str(ovf_actual)   # ov5 / ov25 / ov1p3 …
+            stem     = f"{tag_ap}_{lvl_tag}_{ovf_tag}"   # 예: poi2_sv_ov13p1
+            
+            out_json = base_dir / f"{stem}.json"
+            trace.save_to_json(out_json, skip_token_ids)
+            print(f"[saved] {out_json}  (blk={blk}, OVF={ovf_actual:.2f})")
+
+            # 메모리-프레셔 지표 & PNG
+            metrics = memory_pressure_plot(
+                trace_path = str(out_json),
+                plot       = True,
+                shade      = (True, True),
+                crosses    = (True, True),
+            )
+            (base_dir / f"{stem}.metrics.json").write_text(json.dumps(metrics, indent=2))
+            # PNG는 memory_pressure_plot 내부에서 같은 stem으로 자동 저장
+
+# ────────────────────────────────────────────────────────
+# ❸ Arrival-Pattern 그리드  (100 개 Request 전제)
+# ────────────────────────────────────────────────────────
+# 기대 도착 ≈ λ × max_steps = 100  →  max_steps ≈ 100 / λ
+# def _best_max_steps(lam, margin=0.2, minimum=120):
+#     base = math.ceil(100 / lam)            # 100 개 맞추는 최소 길이
+#     return max(minimum, int(base * (1 + margin)))  # 20 % 여유
+
+# ──────────────────────────────────────────────────────────
+#  output-token 합 × scale  ⇒ 타임라인 길이를 정해 주는 Arrival
+# ──────────────────────────────────────────────────────────
+class TokenScaledArrival(ArrivalPattern):
+    def __init__(self, T: int, scale_tag: str):
+        self.T = max(1, int(T))            # 전체 디코드 스텝
+        self.tag = scale_tag               # 슬러그용
+    def generate_arrival_times(self, n: int) -> List[int]:
+        times = np.linspace(0, self.T, n, endpoint=False, dtype=int)
+        np.random.shuffle(times)
+        return times.tolist()
+    def __str__(self):
+        return f"TokenScaledArrival(scale={self.tag})"
+
+
+def _timeline_len(outputs: list[int],
+                  scale: float = 0.8,
+                  minimum: int = 120) -> int:
+    """
+    타임라인 길이 T = max(minimum,  scale × Σ output_tokens)
+      • scale : 0.0–1.0  (예: 0.8 → 80 %)
+    """
+    return max(minimum, int(sum(outputs) * scale))
+
+def build_arrival_patterns(
+    request_json: str,
+    scales: list[float] = (0.6, 0.8, 1.0),
+) -> list[ArrivalPattern]:
+    """
+    request_json : traces/req_*.json 파일
+    scales       : [0.6,0.8,1.0] 식으로 여러 비율 지정
+    ------------------------------------------------------
+    반환값       : 각 scale × {Uniform, Periodic, Poisson, ...}
+                  5종 ArrivalPattern 이 모두 포함된 리스트
+    """
+    data = load_json(request_json)
+    outputs = [r["output_length"] for r in data["requests"].values()]
+    n_req   = len(outputs)
+
+    patterns = []
+    for sc in scales:
+        tag = f"{int(sc*100):02d}"        # 0.6 → "60", 1.2 → "120"
+        T   = _timeline_len(outputs, sc)
+
+        # 0) TokenScaledArrival
+        tksa = TokenScaledArrival(T, tag)
+        setattr(tksa, "scale_tag", tag)      # ★
+        patterns.append(tksa)
+
+        # 1) Uniform
+        uni  = DiscreteUniformArrival(max_step=T)
+        setattr(uni, "scale_tag", tag)       # ★
+        patterns.append(uni)
+
+        # 2) Periodic
+        per  = DiscretePeriodicArrival(interval=max(1, int(round(T / n_req))))
+        setattr(per, "scale_tag", tag)       # ★
+        patterns.append(per)
+
+        # 3) Poisson
+        poi  = DiscretePoissonArrival(lmbd=n_req / T, max_steps=T)
+        setattr(poi, "scale_tag", tag)       # ★
+        patterns.append(poi)
+
+        # 4) Bimodal
+        bim  = DiscreteBimodalArrival(l1=n_req/T/0.7,
+                                    l2=max(0.1, n_req/T*0.1),
+                                    p=0.7, max_steps=T)
+        setattr(bim, "scale_tag", tag)       # ★
+        patterns.append(bim)
+
+        # 5) Bursty
+        bur  = PoissonBurstyArrivalPattern(lb=max(1, int(n_req/T)),
+                                        lg=max(1, int(T/5)))
+        setattr(bur, "scale_tag", tag)       # ★
+        patterns.append(bur)
+
+    return patterns
+
+def build_request_types_S_L(short_bins=(256,512,1024,2048),
+                            long_bins =(4096,8192,16384,32384),
+                            pct=0.2, max_total=32384):
+    span = lambda c: (max(16,int((c*(1-pct))//16*16)),
+                      max(16,int((c*(1+pct))//16*16)))
+    S, L = short_bins, long_bins
+    combos = []
+    for in_bin, out_bin, tag in [
+        *( (i,o,"SS") for i in S for o in S ),
+        *( (i,o,"SL") for i in S for o in L ),
+        *( (i,o,"LS") for i in L for o in S ),
+        *( (i,o,"LL") for i in L for o in L ),
+    ]:
+        if in_bin + out_bin > max_total: continue
+        li, hi = span(in_bin)
+        lo, ho = span(out_bin)
+        name = f"{tag}_I{li}-{hi}_O{lo}-{ho}"
+        combos.append(RequestType(name, li, hi, lo, ho,
+                                  sampling_method="uniform",
+                                  dataset_name="ShareGPT"))
+    return combos            # 36개 (기본)
+
+# ────────────────────────────────
+#  (1) 모든 격자 혼합 생성
+# ────────────────────────────────
+def grid_mixtures(step: float = 0.25):
+    """step 간격 격자에서 Σ=1 조건을 만족하는 4-tuple 리스트 반환."""
+    vals = np.arange(0, 1 + 1e-9, step)
+    mixes = [(a, b, c, 1 - a - b - c)
+             for a in vals for b in vals for c in vals
+             if 0 <= 1 - a - b - c <= 1]
+    return [tuple(round(x, 4) for x in m) for m in mixes]   # 깔끔한 반올림
+
+
+# ────────────────────────────────
+#  (2) 휴리스틱 9-개 (기존)
+# ────────────────────────────────
+def _heuristic_9(mixes):
+    extremes = [m for m in mixes if m.count(1) == 1]                 # 4
+    pair_mix = [m for m in mixes if sorted(m)[-2] == 0.5][:4]        # 4
+    uniform  = (0.25, 0.25, 0.25, 0.25)                              # 1
+    return extremes + pair_mix + [uniform]                           # 9개
+
+
+# ────────────────────────────────
+#  (3) K-Means 대표 k-개
+# ────────────────────────────────
+def _kmeans_select(mixes, k: int, random_state=0):
+    try:
+        from sklearn.cluster import KMeans
+    except ImportError:
+        raise ImportError("scikit-learn이 필요합니다: pip install scikit-learn")
+
+    if len(mixes) <= k:
+        return mixes
+
+    km = KMeans(n_clusters=k, n_init="auto", random_state=random_state)
+    km.fit(np.asarray(mixes))
+    return [tuple(map(float, c)) for c in km.cluster_centers_]
+
+
+# ────────────────────────────────
+#  (4) Latin Hypercube Sampling  k-개
+#       (단순 구현: 축마다 k 등분 후 Dirichlet 사영)
+# ────────────────────────────────
+def _lhs_simplex(k: int, random_state=0):
+    rng = np.random.default_rng(random_state)
+    # LHS in 3-D cube [0,1]^3
+    P = (rng.random((k, 3)) + rng.permutation(k)[:, None]) / k  # 층화
+    mixes = []
+    for a, b, c in P:
+        d = 1 - a - b - c
+        if d < 0:                          # simplex 밖 ⇒ Dirichlet로 대체
+            mix = rng.dirichlet([1, 1, 1, 1])
+        else:
+            mix = np.array([a, b, c, d])
+            mix /= mix.sum()
+        mixes.append(tuple(round(float(x), 4) for x in mix))
+    return mixes
+
+def select_mixtures(
+    mixes: list,
+    k: int = 9,
+    mode: str = "heuristic",      # "heuristic" | "kmeans" | "lhs"
+    random_state: int = 0,
+):
+    mode = mode.lower()
+    if mode == "heuristic":
+        return _heuristic_9(mixes) if k <= 9 else _heuristic_9(mixes) + mixes[:k-9]
+    if mode == "kmeans":
+        return _kmeans_select(mixes, k, random_state)
+    if mode == "lhs":
+        return _lhs_simplex(k, random_state)
+    raise ValueError(f"unknown mode {mode}")
+
+def mix_tag(m):                         # m = (pSS,pSL,pLS,pLL)
+    return "SS{:02d}_SL{:02d}_LS{:02d}_LL{:02d}".format(
+        int(m[0]*100), int(m[1]*100),
+        int(m[2]*100), int(m[3]*100),
+    )
+
+# ───────────────────────────────────────────────────────────
+# helper : ArrivalPattern → slug 문자열
+#   e.g.  "DiscretePoissonArrival(lambda_per_step=2)"
+#      →  "discretepoisson_l2"
+# ───────────────────────────────────────────────────────────
+import re
+
+def _slug_ap(ap: ArrivalPattern) -> str:
+    """
+    ArrivalPattern → 짧은 slug 문자열
+      • scale_tag 속성이 있으면  ➜  <패턴코드><scale>
+        - TokenScaledArrival  → tsa60
+        - Uniform             → uni60   … 등
+      • 없으면 기존 규칙 유지
+    """
+    # ── 1) scale_tag 우선 ………………………………………………………………………
+    if hasattr(ap, "scale_tag"):
+        tag = ap.scale_tag                # "60", "80", …
+
+        if isinstance(ap, TokenScaledArrival):
+            return f"tsa{tag}"
+        if isinstance(ap, DiscreteUniformArrival):
+            return f"uni{tag}"
+        if isinstance(ap, DiscretePeriodicArrival):
+            return f"per{tag}"
+        if isinstance(ap, DiscretePoissonArrival):
+            return f"poi{tag}"
+        if isinstance(ap, DiscreteBimodalArrival):
+            return f"bim{tag}"
+        if isinstance(ap, PoissonBurstyArrivalPattern):
+            return f"bur{tag}"
+
+    # ── 2) 기존 패턴 (scale_tag 없는 경우) …………………
+    if isinstance(ap, DiscreteUniformArrival):         # e.g. uni200
+        return f"uni{ap.max_step}"
+    if isinstance(ap, DiscretePeriodicArrival):        # e.g. per25
+        return f"per{ap.interval}"
+    if isinstance(ap, DiscretePoissonArrival):         # e.g. poi1
+        return f"poi{str(ap.lmbd).rstrip('0').rstrip('.')}"
+    if isinstance(ap, DiscreteBimodalArrival):
+        l1 = str(ap.l1).rstrip('0').rstrip('.')
+        l2 = str(ap.l2).rstrip('0').rstrip('.')
+        p  = str(ap.p ).rstrip('0').rstrip('.')
+        return f"bim{l1}-{l2}_p{p}"
+    if isinstance(ap, PoissonBurstyArrivalPattern):    # e.g. bur5-20
+        return f"bur{ap.lb}-{ap.lg}"
+
+    # ── 3) fallback – 클래스 이니셜만 ……………………
+    cls = ap.__class__.__name__
+    return ''.join(w[0] for w in re.findall(r'[A-Z][^A-Z]*', cls)).lower()
+
+
+# ────────────────────────────────────────────────
+#  Memory-pressure 분석 유틸
+#    • PPR, TPI, OV … 계산
+#    • plot_PPR=True 이면 PNG 저장
+# ────────────────────────────────────────────────
+import numpy as np, math, json
+def _tok_to_blk(toks: int, blk: int = 16) -> int:
+    if isinstance(toks, np.ndarray):
+        return np.ceil(toks / blk).astype(int)
+    else:                           # 파이썬 스칼라
+        return math.ceil(toks / blk)
+
+def memory_pressure_plot(
+    trace_path: str,
+    *,
+    plot: bool        = True,            # 그림 자체를 그릴지 여부
+    curve: bool       = True,            # 주 곡선
+    shade: Tuple[bool, bool] = (True, True),  # (lower, upper)
+    guides: bool      = True,            # 가이드선
+    crosses: Tuple[bool, bool] = (True, True),# (TJ, BJ)
+) -> Dict[str, float]:
+    """
+    vLLM trace → 메모리-압력 지표 & (선택) 시각화 PNG
+    -------------------------------------------------------------------
+    Parameters
+    ----------
+    trace_path : str
+        *.json trace 파일 경로
+    plot : bool
+        PNG 자체를 만들지 여부.
+    curve / shade / guides / crosses : 세부 레이어 토글
+        shade     = (아래 0–1, 위 1–overflow)
+        crosses   = (Type-1, Type-2)
+    -------------------------------------------------------------------
+    Returns
+    -------
+    Dict[str, float]
+        PPR, TPI, OVF 등 + 선택적 'plot_path'
+    """
+    # 0) 로드 ----------------------------------------------------------------
+    with open(trace_path, encoding="utf-8") as f:
+        j = json.load(f)
+
+    gpu_blocks = j.get("num_gpu_blocks_override") or j.get("num_gpu_blocks")
+    if gpu_blocks is None:
+        raise KeyError("trace JSON에 'num_gpu_blocks_override' 키가 없습니다.")
+
+    # 1) 요청 파싱 ------------------------------------------------------------
+    reqs: List[Tuple[int, int, int, int]] = []   # (arr, end, inpBlk, out)
+    last_step = 0
+    for r in j["requests"].values():
+        arr = int(r["arrival_time"])
+        out = int(r["output_length"])
+        inp_blk = _tok_to_blk(int(r["input_length"]))
+        last_step = max(last_step, arr + out)
+        reqs.append((arr, arr + out, inp_blk, out))
+
+    if not reqs:
+        raise ValueError("Trace has no requests")
+
+    # 2) 타임라인 스윕 (NumPy) -------------------------------------------------
+    steps = np.arange(last_step + 1)
+    live_blocks = np.zeros_like(steps, dtype=np.int32)
+
+    for arr, end, inp_blk, out in reqs:
+        span = slice(arr, end + 1)
+        dec  = np.minimum(steps[span] - arr, out)
+        live_blocks[span] += inp_blk + _tok_to_blk(dec)
+
+    y = live_blocks / gpu_blocks                   # pressure ratio
+
+    peak_blocks  = int(live_blocks.max())
+    peak_step    = int(live_blocks.argmax())
+    over_mask    = live_blocks > gpu_blocks
+    ge2_mask     = live_blocks >= 2 * gpu_blocks
+
+    shortfall_sum = int((live_blocks - gpu_blocks).clip(min=0).sum())
+    over_steps    = int(over_mask.sum())
+    ge2_steps     = int(ge2_mask.sum())
+    total_steps   = len(steps)
+
+    # 3) 메트릭 ---------------------------------------------------------------
+    out = dict(
+        PPR      = peak_blocks / gpu_blocks,
+        TPI      = over_steps / total_steps,
+        OV_block_step = shortfall_sum,
+        OV_frac  = shortfall_sum / (gpu_blocks * total_steps),
+        GE2_frac = ge2_steps / total_steps,
+        peak_blocks = peak_blocks,
+        peak_step   = peak_step,
+        gpu_blocks  = gpu_blocks,
+        total_steps = total_steps,
+    )
+
+    # 4) crossings (TJ/BJ) ----------------------------------------------------
+    tj_cnt = bj_cnt = 0
+    if any(crosses):
+        thr = [1.0] + [32 / (32 - ol) for ol in
+                       (16, 10, 8, 6, 5, 4, 3, 2, 1, 0)]
+        thr = np.asarray(thr)
+
+        prev = y[:-1, None]
+        curr = y[1:,  None]
+        hit  = ((prev - thr) * (curr - thr) < 0) | ((prev == thr) ^ (curr == thr))
+
+        hit_cnt = hit.sum(axis=1)
+        tj_cnt  = int((hit_cnt == 1).sum())
+        bj_cnt  = int((hit_cnt >  1).sum())
+
+    out.update(type1_count=tj_cnt, type2_count=bj_cnt)
+
+    # 5) 그림 ---------------------------------------------------------------
+    if plot:
+        fig, ax = plt.subplots(figsize=(8, 3))
+
+        # A. shading -----------------------------------------------------
+        sh_low, sh_up = shade
+        if sh_low or sh_up:
+            over_seg, in_seg, seg_start = [], False, None
+            for i, flag in enumerate(over_mask):
+                if flag and not in_seg:
+                    seg_start, in_seg = i, True
+                elif not flag and in_seg:
+                    over_seg.append((seg_start, i)); in_seg = False
+            if in_seg: over_seg.append((seg_start, total_steps))
+
+            for s, e in over_seg:
+                xs = steps[s:e]
+                ys = y[s:e]
+                if sh_low:
+                    ax.fill_between(xs, 0.0, 1.0, color="C0", alpha=.25)
+                if sh_up:
+                    ax.fill_between(xs, 1.0, ys, color="C1", alpha=.25)
+
+        # B. main curve ---------------------------------------------------
+        if curve:
+            ax.plot(steps, y, lw=.8, label="pressure")
+            ax.axhline(1.0, ls="--", lw=.8, label="capacity")
+
+        # C. guides -------------------------------------------------------
+        if guides:
+            for g in [1.0] + [32 / (32 - ol) for ol in (16,10,8,6,5,4,3,2,1,0)]:
+                ax.axhline(g, ls="--", lw=.5, color="grey", alpha=.5)
+
+        # D. crossings ----------------------------------------------------
+        cr1, cr2 = crosses
+        if (cr1 or cr2) and (tj_cnt or bj_cnt):
+            thr = [1.0] + [32 / (32 - ol) for ol in (16,10,8,6,5,4,3,2,1,0)]
+            type1_x = [];  type1_y = []
+            type2_x = [];  type2_y = []
+            for i in range(1, total_steps):
+                prev, cur = y[i-1], y[i]
+                hit = [t for t in thr
+                       if (prev-t)*(cur-t) < 0 or (prev == t) ^ (cur == t)]
+                if len(hit) == 1:
+                    type1_x.append(i); type1_y.append(hit[0])
+                elif len(hit) > 1:
+                    type2_x.append(i); type2_y.append(max(hit))
+            if cr1 and type1_x:
+                ax.scatter(type1_x, type1_y, s=20, marker="o", label="TJ")
+            if cr2 and type2_x:
+                ax.scatter(type2_x, type2_y, s=30, marker="s", label="BJ")
+
+        # E. final touches -----------------------------------------------
+        ax.set_xlabel("decode step")
+        ax.set_ylabel("live / gpu")
+        ax.set_title(
+            f"PPR={out['PPR']:.2f}  OTF={out['TPI']:.2f}  "
+            f"OVF={out['OV_frac']:.2f}, TJ={tj_cnt}, BJ={bj_cnt}"
+        )
+        ax.legend(frameon=False)
+        plt.tight_layout()
+
+        png = Path(trace_path).with_suffix(".png")
+        fig.savefig(png, dpi=150)
+        plt.close(fig)
+        out["plot_path"] = str(png)
+
+    return out
+# ------------------------------------------------------------
+# (A)  주어진 블록 수 → OVF 계산  (trace 생성 이전·가벼운 시뮬)
+# ------------------------------------------------------------
+def _ovf_for_blocks(reqs: Dict, arr_times: List[int],
+                    blocks: int, blk_size: int = 16) -> float:
+    peak = over_sum = steps = 0
+    for (arr, inp, out) in reqs:
+        end = arr + out
+        steps = max(steps, end)
+
+    for t in range(steps + 1):
+        live = 0
+        for (arr, inp, out) in reqs:
+            if arr <= t <= arr+out:
+                live += math.ceil((inp + min(t-arr, out)) / blk_size)
+        if live > blocks:
+            over_sum += live - blocks
+    return over_sum / (blocks * (steps + 1))
+
+def find_blocks_for_ovf(
+    reqs: List[Tuple[int,int,int]],   # (arr, inp, out)
+    arr_times: List[int],
+    target_ovf: float,
+    tol: float = 0.01,
+    blk_size: int = 16,
+    min_blk: int | None = None,
+    max_blk_cap: int = 2**14,        # 16384 블록(≈ 262k tok) 까지만 허용
+) -> int:
+    """
+    (개선판)  target_ovf 를 만족하는 최소 블록 수를 반환.
+    target 이 물리적으로 불가능하면, 최저 OVF 를 주는 최대 블록 수를 반환하고
+    `unmet=True` 를 함께 리턴한다.
+    """
+    # ── 1) 초기 lo, hi ──────────────────────────────────────────
+    peak_tok = max(inp + out for _, inp, out in reqs)
+    lo = max(min_blk or 1, math.ceil(peak_tok / blk_size))
+    hi = max(lo, 4096)                        # 4k 블록을 최초 hi 로
+
+    def ovf(b): return _ovf_for_blocks(reqs, arr_times, b, blk_size)
+
+    # ── 2) hi 가 충분히 큰지 점검; 부족하면 2× 확장 ─────────────
+    while ovf(hi) > target_ovf and hi < max_blk_cap:
+        hi *= 2                                # 2 배씩 키우기
+    hi = min(hi, max_blk_cap)                  # 안전 캡
+
+    # ── 3) 이분 탐색 ────────────────────────────────────────────
+    if ovf(lo) <= target_ovf:                  # 이미 lo 로도 OK
+        return lo, False
+        
+    while lo < hi:
+        mid = (lo + hi) // 2
+        cur = ovf(mid)
+        if abs(cur - target_ovf) <= tol:
+            return mid, False
+        if cur > target_ovf:
+            lo = mid + 1
+        else:
+            hi = mid
+    # 여기까지 오면 target 을 못 맞춤
+    return hi, True
+
+LEVEL_ABBR = {
+    "vlow"     : "vl",   # very-low
+    "low"      : "lo",
+    "mid_low"  : "ml",
+    "mid"      : "md",
+    "mid_high" : "mh",
+    "high"     : "hi",
+}
+
+def _ovf_str(val: float) -> str:
+    """
+    0.25  → ov25
+    1.53  → ov1p5
+    13.07 → ov13p1   (두 번째 자리 0 이면 삭제)
+    """
+    if val < 1:
+        return f"ov{int(round(val*100))}"
+    s = f"{val:.1f}".rstrip("0").rstrip(".")     # 1.50 → 1.5 , 13.0 → 13
+    return "ov" + s.replace(".", "p")
+
 
 # ────────────────────────────────────────────────────────────────────
 # 3. 예시 실행
 # ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # ➊ request.json 생성
-    short_short = RequestType("Short-Short ShareGPT",
-                             600,1000, 600,1000,
-                             sampling_method="uniform", dataset_name="ShareGPT")
-    short_long = RequestType("Short-Long ShareGPT",
-                             300,900, 6500,7500,
-                             sampling_method="uniform", dataset_name="ShareGPT")
-    long_short = RequestType("Long-Short ShareGPT",
-                             4500,6500, 1300,1900,
-                             sampling_method="uniform", dataset_name="ShareGPT")
-    long_long = RequestType("Long-Long ShareGPT",
-                             2000,8000, 2000,10000,
-                             sampling_method="uniform", dataset_name="ShareGPT")    
+    # NOTE(HONG): request generation with various length combinations
+    # RT_list = build_request_types_S_L()                    # 36개
     
+    # # ① 모든 격자 혼합 생성 (step=0.25 ⇒ 35개)
+    # all_mix = grid_mixtures(step=0.25)
 
-    probs={short_long:0.6, long_short:0.4}
-    req_json_path="request.json"
-    save_request_json(req_json_path, probs,
-                      num_req=10, batch_size=4,
-                      skip_token_ids=True, static=False)
+    # # ② 대표 샘플 선택
+    # mixes_h9  = select_mixtures(all_mix, k=9,  mode="heuristic")
+    # mixes_k12 = select_mixtures(all_mix, k=12, mode="kmeans",  random_state=42)
+    # mixes_l20 = select_mixtures(all_mix, k=20, mode="lhs",     random_state=42)
 
-    # ➋ trace 생성
-    arrival_patterns=[
-        DiscreteUniformArrival(max_step=5_000),
-        DiscreteBimodalArrival(lambda1=0.005, lambda2=0.0001, p=0.7, max_steps=5_000),
-    ]
-    build_sched_save(
-        request_json=req_json_path,
-        arrival_patterns=arrival_patterns,
-        max_tokens=8_000,
-        block_size=BLOCK_SIZE_TOK,
-        gpu_ranges=[-0.6,-0.3,0,0.3,0.6,1.0],
-        static=True,
-        skip_token_ids=True,
-    )
+    # print("heuristic 9 :", mixes_h9[:3], "...")
+    # print("kmeans 12   :", mixes_k12[:3], "...")
+    # print("lhs 20      :", mixes_l20[:3], "...")
+
+    # # Combine all mixes into a single list
+    # mixes = mixes_h9 + mixes_k12 + mixes_l20
+    
+    # # Print total number of mixes
+    # print(f"Total number of mixes: {len(mixes)}")
+    
+    # for mix in mixes:                           # mixes_h9 + mixes_k12 + mixes_l20 ...
+    #     probs = {rt: 0 for rt in RT_list}
+    #     block = len(RT_list) // 4               # 9
+    #     for j, p in enumerate(mix):             # j=0:SS, 1:SL, 2:LS, 3:LL
+    #         for rt in RT_list[j*block:(j+1)*block]:
+    #             probs[rt] = p / block
+
+    #     # ─────────────── 변경된 저장 경로 ───────────────
+    #     tag = mix_tag(mix)                      # 한눈에 보이는 태그
+    #     save_request_json(
+    #         path=f"traces/req_{tag}.json",      # traces 폴더에 저장
+    #         request_types=probs,
+    #         num_req=100,
+    #         batch_size=4,
+    #         skip_token_ids=True,
+    #     )
+
+    # ────────────────────────────────────────────────────────
+    #  모든 request.json × Arrival-Pattern 조합으로 trace 생성
+    #    (앞서 “traces/req_*.json” 으로 저장한 요청 파일들을 대상으로)
+    # ────────────────────────────────────────────────────────    
+
+    level_spec = {
+        "vlow"     : dict(target_ovf = 0.05, tol = 0.010),  # 매우 여유
+        "low"      : dict(target_ovf = 0.12, tol = 0.015),
+        "mid_low"  : dict(target_ovf = 0.22, tol = 0.020),
+        "mid"      : dict(target_ovf = 0.35, tol = 0.030),
+        "mid_high" : dict(target_ovf = 0.55, tol = 0.040),
+        "high"     : dict(target_ovf = 0.80, tol = 0.050),  # 상한 유지
+    }    
+
+    for req_json in Path("traces/request_types").glob("req_*.json"):
+        build_sched_save(
+            request_json   = str(req_json),            
+            level_spec     = level_spec,
+            blk_size       = BLOCK_SIZE_TOK,
+            static         = False,
+            skip_token_ids = True,
+            scales       = [0.05], # [0.1, 0.25, 0.5]
+        )

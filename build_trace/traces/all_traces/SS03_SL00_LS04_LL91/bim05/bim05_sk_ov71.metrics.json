@@ -1,0 +1,14 @@
+{
+  "PPR": 3.23114013671875,
+  "TPI": 0.5530346820809249,
+  "OV_block_step": 241028069,
+  "OV_frac": 0.7086313030852978,
+  "GE2_frac": 0.36796724470134873,
+  "peak_blocks": 52939,
+  "peak_step": 2883,
+  "gpu_blocks": 16384,
+  "total_steps": 20760,
+  "type1_count": 32,
+  "type2_count": 9,
+  "plot_path": "traces/SS03_SL00_LS04_LL91/bim05/bim05_sk_ov71.png"
+}

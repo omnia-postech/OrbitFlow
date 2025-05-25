@@ -1,0 +1,14 @@
+{
+  "PPR": 2.0388236732697482,
+  "TPI": 0.7304948629368747,
+  "OV_block_step": 94675008,
+  "OV_frac": 0.25969743752013463,
+  "GE2_frac": 0.012382789716900714,
+  "peak_blocks": 33347,
+  "peak_step": 3959,
+  "gpu_blocks": 16356,
+  "total_steps": 22289,
+  "type1_count": 59,
+  "type2_count": 13,
+  "plot_path": "traces/SS12_SL37_LS06_LL43/bim05/bim05_md_ov26.png"
+}

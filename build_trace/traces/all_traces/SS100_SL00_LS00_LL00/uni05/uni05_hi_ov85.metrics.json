@@ -1,0 +1,14 @@
+{
+  "PPR": 3.119751166407465,
+  "TPI": 0.7635389516362583,
+  "OV_block_step": 3789561,
+  "OV_frac": 0.8533974784250088,
+  "GE2_frac": 0.5625543006081668,
+  "peak_blocks": 2006,
+  "peak_step": 4535,
+  "gpu_blocks": 643,
+  "total_steps": 6906,
+  "type1_count": 53,
+  "type2_count": 5,
+  "plot_path": "traces/SS100_SL00_LS00_LL00/uni05/uni05_hi_ov85.png"
+}

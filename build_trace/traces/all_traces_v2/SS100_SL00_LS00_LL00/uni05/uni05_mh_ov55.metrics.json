@@ -1,0 +1,14 @@
+{
+  "PPR": 2.6254545454545455,
+  "TPI": 0.6921044907543293,
+  "OV_block_step": 3105037,
+  "OV_frac": 0.5523453495921943,
+  "GE2_frac": 0.2384796008218374,
+  "peak_blocks": 2166,
+  "peak_step": 2245,
+  "gpu_blocks": 825,
+  "total_steps": 6814,
+  "type1_count": 45,
+  "type2_count": 8,
+  "plot_path": "traces/request_types/SS100_SL00_LS00_LL00/uni05/uni05_mh_ov55.png"
+}

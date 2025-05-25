@@ -1,0 +1,14 @@
+{
+  "PPR": 1.4274117647058824,
+  "TPI": 0.348891447465533,
+  "OV_block_step": 15928207,
+  "OV_frac": 0.05532154535713851,
+  "GE2_frac": 0.0,
+  "peak_blocks": 12133,
+  "peak_step": 16047,
+  "gpu_blocks": 8500,
+  "total_steps": 33873,
+  "type1_count": 54,
+  "type2_count": 36,
+  "plot_path": "traces/SS25_SL25_LS25_LL25/per05/per05_sk_ov5.png"
+}

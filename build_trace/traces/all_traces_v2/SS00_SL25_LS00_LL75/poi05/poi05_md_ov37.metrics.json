@@ -1,0 +1,14 @@
+{
+  "PPR": 2.680015016894006,
+  "TPI": 0.4686754051677206,
+  "OV_block_step": 139468204,
+  "OV_frac": 0.365449983360767,
+  "GE2_frac": 0.1554294568449265,
+  "peak_blocks": 21416,
+  "peak_step": 21214,
+  "gpu_blocks": 7991,
+  "total_steps": 47758,
+  "type1_count": 37,
+  "type2_count": 37,
+  "plot_path": "traces/request_types/SS00_SL25_LS00_LL75/poi05/poi05_md_ov37.png"
+}

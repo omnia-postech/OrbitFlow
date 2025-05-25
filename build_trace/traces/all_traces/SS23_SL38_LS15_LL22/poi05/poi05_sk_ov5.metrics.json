@@ -1,0 +1,14 @@
+{
+  "PPR": 1.462696783025325,
+  "TPI": 0.2641262298577477,
+  "OV_block_step": 14382081,
+  "OV_frac": 0.04997612855814427,
+  "GE2_frac": 0.0,
+  "peak_blocks": 12822,
+  "peak_step": 14184,
+  "gpu_blocks": 8766,
+  "total_steps": 32829,
+  "type1_count": 53,
+  "type2_count": 19,
+  "plot_path": "traces/SS23_SL38_LS15_LL22/poi05/poi05_sk_ov5.png"
+}

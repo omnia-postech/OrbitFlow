@@ -1,0 +1,14 @@
+{
+  "PPR": 2.1600901916572717,
+  "TPI": 0.05675532228578168,
+  "OV_block_step": 5460202,
+  "OV_frac": 0.01210082039418981,
+  "GE2_frac": 0.000809891686815671,
+  "peak_blocks": 3832,
+  "peak_step": 98592,
+  "gpu_blocks": 1774,
+  "total_steps": 254355,
+  "type1_count": 35,
+  "type2_count": 33,
+  "plot_path": "traces/request_types/SS37_SL21_LS05_LL35/bur05/bur05_vl_ov2.png"
+}

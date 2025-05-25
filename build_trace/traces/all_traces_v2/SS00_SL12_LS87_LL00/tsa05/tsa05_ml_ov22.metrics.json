@@ -1,0 +1,14 @@
+{
+  "PPR": 1.958714772931251,
+  "TPI": 0.35818431054894384,
+  "OV_block_step": 39234634,
+  "OV_frac": 0.2194110392424904,
+  "GE2_frac": 0.0,
+  "peak_blocks": 10912,
+  "peak_step": 14269,
+  "gpu_blocks": 5571,
+  "total_steps": 32098,
+  "type1_count": 22,
+  "type2_count": 15,
+  "plot_path": "traces/request_types/SS00_SL12_LS87_LL00/tsa05/tsa05_ml_ov22.png"
+}

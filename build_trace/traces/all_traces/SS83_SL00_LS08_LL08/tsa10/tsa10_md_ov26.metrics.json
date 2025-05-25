@@ -1,0 +1,14 @@
+{
+  "PPR": 2.8085920884729902,
+  "TPI": 0.45293856200211974,
+  "OV_block_step": 17660825,
+  "OV_frac": 0.25683093660136547,
+  "GE2_frac": 0.08861841430476255,
+  "peak_blocks": 6603,
+  "peak_step": 9642,
+  "gpu_blocks": 2351,
+  "total_steps": 29249,
+  "type1_count": 35,
+  "type2_count": 22,
+  "plot_path": "traces/SS83_SL00_LS08_LL08/tsa10/tsa10_md_ov26.png"
+}
