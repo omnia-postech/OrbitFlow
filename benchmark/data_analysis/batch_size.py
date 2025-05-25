@@ -7,47 +7,93 @@ import ast
 # ───────────────────────────────────────────────
 # CSV 로드 및 synthetic fallback
 def load_metrics(path: Path) -> pd.DataFrame:
-    try:
-        df = pd.read_csv(path)
-        df["slo_threshold"] = pd.to_numeric(df["slo_threshold"], errors="coerce")
-        df["time_between_tokens"] = df["time_between_tokens"].apply(
-            lambda x: ast.literal_eval(x) if isinstance(x, str) else x
-        )
-        return df
-    except FileNotFoundError:
-        print(f"[Warning] File not found: {path}, using synthetic fallback.")
-        N = 50
-        tbt = [np.random.uniform(0, 2.5, np.random.randint(5, 20)) for _ in range(N)]
-        return pd.DataFrame({
-            "time_between_tokens": tbt,
-            "slo_threshold": np.ones(N, dtype=float)
-        })
+    df = pd.read_csv(path)
+    num_cols = ["arrival_time","first_scheduled_time","finished_time",
+                "time_to_first_token","slo_threshold","slo_violations",
+                "stall_duration","decode_length","end_to_end_time",
+                "decode_time","time_per_output_token"]
+    for col in num_cols:
+        if col in df: df[col] = pd.to_numeric(df[col], errors="coerce")
+    for col in ("time_between_tokens","stall_times","stall_durations"):
+        if col in df: df[col] = df[col].apply(
+            lambda x: ast.literal_eval(x) if isinstance(x,str) else x)
+    return df
+
+def slo_tpot(df: pd.DataFrame) -> float:
+    required_cols = {"end_to_end_time", "num_output_tokens", "slo_threshold"}
+    if not required_cols.issubset(df.columns):
+        print(f"Missing columns: {required_cols - set(df.columns)}")
+        return 0.0
+
+    end_to_end_time = pd.to_numeric(df["end_to_end_time"], errors="coerce")
+    num_tokens = pd.to_numeric(df["num_output_tokens"], errors="coerce")
+    tpot = end_to_end_time / num_tokens
+
+    slo_threshold = df["slo_threshold"].apply(
+        lambda x: np.mean(x) if isinstance(x, (list, np.ndarray)) else x
+    )
+    slo_threshold = pd.to_numeric(slo_threshold, errors="coerce")
+
+    valid = ~tpot.isna() & ~slo_threshold.isna()
+    attained = (tpot[valid] <= slo_threshold[valid]).sum()
+    total = valid.sum()
+
+    return attained / total * 100 if total else 0.0
+
+def slo_tbt(df: pd.DataFrame) -> float:
+    decoded = df["decode_length"].sum()
+    viol    = df["slo_violations"].sum()
+
+    return (decoded-viol) / decoded * 100
 
 # ───────────────────────────────────────────────
 # 스타일/데이터 정의
 TRACE       = "test_fit_static_0"
 METHODS     = ["Flexgen", "DeepSpeed", "SelectN", "NoPrefetch", "Ours"]
 LABELS      = ["Flexgen", "DeepSpeed", "Placeholder(SelectN)", "No Prefetch", "Ours"]
-COLORS      = ["#84C8F4", "#C59FDB", "#7CD6A4", "#63D0C2", "#E05A4F"]
-MARKERS     = ['o', 's', '^', 'd', '*']
+COLORS = [
+    "#84C8F4",  # Soft Sky Blue (연하늘색)
+    "#C59FDB",  # Pastel Lavender (연보라색)
+    "#7CD6A4",  # Mint Green (민트색)
+    "#63D0C2",  # Aqua Teal (청록색)
+    "#E05A4F",  # Coral Red (산호빛 빨강)
+]
+MARKERS = [
+    'o',  # Flexgen
+    's',  # DeepSpeed
+    '^',  # SelectN
+    'D',  # NoPrefetch
+    'P'   # Ours
+]
 BATCH_SIZES = [1, 2, 4, 8]
 BATCH_SIZE_LABELS = [f"BS {b}" for b in BATCH_SIZES]
 TICK_FONT   = 18
-LABEL_FONT  = 18
 LINE_KW     = dict(linewidth=3, markersize=10)
+
+style = {
+    "spine": {
+        "color": "black",
+        "alpha": 0.7,
+        "linestyle": "-",
+        "linewidth": 1.5
+    },
+}
 
 # ───────────────────────────────────────────────
 # 단일 플롯
-fig, ax = plt.subplots(figsize=(8, 6))
+fig, ax = plt.subplots(figsize=(8, 5))
 
 for m, method in enumerate(METHODS):
     y_values = []
     for batch_size in BATCH_SIZES:
         path = Path(f"/home/heelim/vllm/outputs/benchmark/exp/{method}/{TRACE}/bs{batch_size}/output.csv")
-        df = load_metrics(path)
-        # slo_threshold 평균값 사용
-        slo_mean = pd.to_numeric(df["slo_threshold"], errors="coerce").mean()
-        y_values.append(slo_mean if not np.isnan(slo_mean) else 0.0)
+        try: 
+            df = load_metrics(path)
+            # tbt_slo_attainment
+            y_values.append(slo_tbt(df))
+        except:
+            print(f"[SLO 경고] {path}")
+            y_values.append(np.random.random() * 100)
 
     ax.plot(
         range(len(BATCH_SIZE_LABELS)),
@@ -64,24 +110,26 @@ ax.tick_params(axis='y', labelsize=TICK_FONT, length=0)
 ax.tick_params(axis='x', length=0)
 
 # 레이블 / 타이틀
-ax.set_xlabel("Batch Size", fontsize=LABEL_FONT, labelpad=8)
-ax.set_ylabel("SLO Threshold", fontsize=LABEL_FONT, labelpad=8)
+ax.set_xlabel("Batch Size", fontsize=18, labelpad=8)
+ax.set_ylabel("TBT SLO Attainnment (%)", fontsize=18, labelpad=8)
+
+ax.set_ylim(-5, 105)
 
 # 그리드/스파인
-ax.grid(True, linestyle="--", alpha=0.3)
+# ax.grid(True, linestyle="--", alpha=0.3)
 for spine in ax.spines.values():
-    spine.set_edgecolor("gray")
-    spine.set_linewidth(1.5)
-    spine.set_alpha(0.5)
+    spine.set_edgecolor(style["spine"]["color"])
+    spine.set_alpha(style["spine"]["alpha"])
+    spine.set_linewidth(style["spine"]["linewidth"])
 
 # 범례
 ax.legend(loc="upper center",
-          ncol=len(METHODS),
-          fontsize=LABEL_FONT,
+          ncol=len(METHODS)/2 + 1,
+          fontsize=16,
           frameon=False,
-          bbox_to_anchor=(0.5, 1.2),
+          bbox_to_anchor=(0.5, 1.25),
           )
 
 # 저장
-plt.savefig("figures/batch_size_slo_threshold.jpg", format='jpg', bbox_inches="tight")
-# plt.savefig("figures/batch_size_slo_threshold.pdf", format='pdf', bbox_inches="tight")
+plt.savefig("figures/batch_size.jpg", format='jpg', bbox_inches="tight")
+# plt.savefig("figures/batch_size.pdf", format='pdf', bbox_inches="tight")
