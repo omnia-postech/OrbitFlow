@@ -1,0 +1,14 @@
+{
+  "PPR": 2.8205537806176784,
+  "TPI": 0.6595044893647669,
+  "OV_block_step": 84853040,
+  "OV_frac": 0.5423568253566976,
+  "GE2_frac": 0.2536851202765641,
+  "peak_blocks": 10594,
+  "peak_step": 25727,
+  "gpu_blocks": 3756,
+  "total_steps": 41654,
+  "type1_count": 54,
+  "type2_count": 14,
+  "plot_path": "traces/request_types/SS51_SL34_LS08_LL05/per05/per05_mh_ov54.png"
+}

@@ -1,0 +1,14 @@
+{
+  "PPR": 4.012817352723688,
+  "TPI": 0.6783208870785246,
+  "OV_block_step": 120192469,
+  "OV_frac": 0.838027480712586,
+  "GE2_frac": 0.3850701516180131,
+  "peak_blocks": 16280,
+  "peak_step": 19938,
+  "gpu_blocks": 4057,
+  "total_steps": 35352,
+  "type1_count": 30,
+  "type2_count": 5,
+  "plot_path": "traces/request_types/SS22_SL19_LS47_LL09/poi05/poi05_hi_ov84.png"
+}

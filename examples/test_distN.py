@@ -198,7 +198,7 @@ def enqueue_batch(engine, batch, request_metadata):
         )
         engine.add_request(req_id, prompt_obj, sampling_params)
 
-def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=False, estimator=None):
+def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=False, estimator=None, slo_ratio=2.5):
     """
     Step-based inference driver that consumes a Trace object (dictionary-based).
     Each request's arrival_time is interpreted as the 'arrive_at_step'.
@@ -305,7 +305,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
             engine.add_request(req_id, prompt_obj, sampling_params)
 
     SLO_THRESHOLD = 0.5 # TBT SLO (seconds per token)/
-    sim = DelaySimulator(v_tps=1/SLO_THRESHOLD, slo_ratio=2.5, deposit_enabled=enable_deposit)
+    sim = DelaySimulator(v_tps=1/SLO_THRESHOLD, slo_ratio=slo_ratio, deposit_enabled=enable_deposit)
 
     if csv_path is None:
         csv_path = "metrics.csv"
@@ -696,7 +696,7 @@ def main(configs):
     
     csv_path = configs.output_log.replace(".log", ".csv")
 
-    run_inference_step_mode(engine, trace, csv_path=csv_path,enable_deposit=configs.enable_deposit, estimator=estimator)
+    run_inference_step_mode(engine, trace, csv_path=csv_path,enable_deposit=configs.enable_deposit, estimator=estimator, slo_ratio=configs.slo_ratio)
 
 if __name__ == "__main__":
     from vllm.utils import FlexibleArgumentParser
@@ -749,6 +749,10 @@ if __name__ == "__main__":
                         type=str,
                         default="/home/xinyuema/vllm/benchmark/scripts/profiled_results.json",
                         help="profiling results. If not provided, use the default ones.")
+    parser.add_argument("--slo-ratio",
+                        type=float,
+                        default=2.5,
+                        help="delay simulator slo ratio (default: 2.5)")
     args = parser.parse_args()    
     print(args)
     # --- Setup Logging ---

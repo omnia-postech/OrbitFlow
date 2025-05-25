@@ -1,1168 +1,1009 @@
-import json
-import random
-import math
-import heapq
-import re
-import numpy as np
-
-from abc import ABC, abstractmethod
-from typing import List, Dict, Tuple, Optional, Callable, Any
+# =======================================================================
+# unified_trace_toolkit.py
+#   • request.json   생성  (Request-generator)
+#   • trace          생성  (Arrival-generator + Trace builder)
+# =======================================================================
+import json, random, math, heapq, os, warnings
 from pathlib import Path
-from dataclasses import dataclass, field
 from collections import defaultdict
+from dataclasses import dataclass
+from typing import List, Dict, Tuple, Optional, Any, Callable
+import numpy as np
+import math
+import matplotlib.pyplot as plt
 
+import numpy as np
+try:
+    from transformers import AutoTokenizer          # (token-bank 선택 시 사용)
+except ImportError:
+    AutoTokenizer = None
+
+# ────────────────────────────────────────────────────────────────────
+# 0. 공통 상수 & 헬퍼
+# ────────────────────────────────────────────────────────────────────
 PROFILED_A = 1.0017431830666432e-06
 PROFILED_B = 0.049519613282613506
 
-class ArrivalPattern(ABC):
-    """
-    Abstract base class for arrival patterns. Each subclass is responsible for
-    implementing a method to generate arrival times for a specified number of requests.
-    """
+BLOCK_SIZE_TOK = 16        # vLLM KV-block 기본 크기
 
-    @abstractmethod
-    def generate_arrival_times(self, num_requests: int) -> List[float|int]:
-        """
-        Must return a list of arrival times (floats or ints) for `num_requests` requests.
-        """
-        raise NotImplementedError
+def _sample_poisson(lmbd: float) -> int:
+    """Knuth Poisson 샘플러."""
+    L, p, k = math.exp(-lmbd), 1.0, 0
+    while p > L:
+        k += 1
+        p *= random.random()
+    return k - 1
 
-# -------------------------------------------------------
-# Continuous Uniform
-# -------------------------------------------------------
+def clamp(v, lo, hi): return max(lo, min(v, hi))
 
-class ContinuousUniformArrival(ArrivalPattern):
-    """
-    Requests arrive uniformly in continuous time, within [0, total_time].
-    """
-
-    def __init__(self, total_time: float):
-        """
-        total_time: The time window in which all requests will arrive [0, total_time].
-        """
-        self.total_time = total_time
-
-    def generate_arrival_times(self, num_requests: int) -> List[float]:
-        """
-        Generate num_requests times uniformly in [0, total_time].
-        """
-        return [random.uniform(0, self.total_time) for _ in range(num_requests)]
-
-    def __str__(self):
-        return f"ContinuousUniformArrival(total_time={self.total_time})"
-
-
-# -------------------------------------------------------
-# Discrete Uniform
-# -------------------------------------------------------
-
-class DiscreteUniformArrival(ArrivalPattern):
-    """
-    Requests arrive at discrete time steps, each chosen uniformly in [0, max_step].
-    So arrival times are integers in [0, max_step].
-    """
-
-    def __init__(self, max_step: int):
-        """
-        max_step: The largest integer time step at which a request can arrive.
-        """
-        self.max_step = max_step
-
-    def generate_arrival_times(self, num_requests: int) -> List[int]:
-        """
-        Generate num_requests integer times in [0, max_step].
-        """
-        return [random.randint(0, self.max_step) for _ in range(num_requests)]
-
-    def __str__(self):
-        return f"DiscreteUniformArrival(max_step={self.max_step})"
-
-
-# -------------------------------------------------------
-# Continuous Periodic
-# -------------------------------------------------------
-
-class ContinuousPeriodicArrival(ArrivalPattern):
-    """
-    Continuous periodic: each arrival is exactly interval apart.
-    E.g., if interval=2.0, arrivals at times 0, 2, 4, 6, ...
-    """
-
-    def __init__(self, interval: float):
-        self.interval = interval
-
-    def generate_arrival_times(self, num_requests: int) -> List[float]:
-        return [i * self.interval for i in range(num_requests)]
-
-    def __str__(self):
-        return f"ContinuousPeriodicArrival(interval={self.interval})"
-
-
-# -------------------------------------------------------
-# Discrete Periodic
-# -------------------------------------------------------
-
-class DiscretePeriodicArrival(ArrivalPattern):
-    """
-    Discrete periodic: arrivals at integer multiples of an interval, but
-    we store them as integers. For example, if interval=2, the times are
-    [0,2,4,6], etc., all stored as int.
-    """
-
-    def __init__(self, interval: int):
-        """
-        interval: The fixed integer step between consecutive arrivals.
-        """
-        self.interval = interval
-
-    def generate_arrival_times(self, num_requests: int) -> List[int]:
-        return [i * self.interval for i in range(num_requests)]
-
-    def __str__(self):
-        return f"DiscretePeriodicArrival(interval={self.interval})"
-
-
-# -------------------------------------------------------
-# Continuous Bimodal
-# -------------------------------------------------------
-
-class ContinuousBimodalArrival(ArrivalPattern):
-    """
-    A bimodal continuous-time arrival process: each inter-arrival time is drawn
-    from Exp(rate1) with probability p, or Exp(rate2) with probability (1-p).
-    """
-
-    def __init__(self, rate1: float, rate2: float, p: float):
-        self.rate1 = rate1
-        self.rate2 = rate2
-        self.p = p
-
-    def generate_arrival_times(self, num_requests: int) -> List[float]:
-        arrivals = []
-        current_time = 0.0
-        for _ in range(num_requests):
-            if random.random() < self.p:
-                interarrival = random.expovariate(self.rate1)
-            else:
-                interarrival = random.expovariate(self.rate2)
-            current_time += interarrival
-            arrivals.append(current_time)
-        return arrivals
-
-    def __str__(self):
-        return (f"ContinuousBimodalArrival("
-                f"rate1={self.rate1}, rate2={self.rate2}, p={self.p})")
-
-
-# -------------------------------------------------------
-# Discrete Bimodal
-# -------------------------------------------------------
-
-class DiscreteBimodalArrival(ArrivalPattern):
-    """
-    A discrete-time bimodal process: at each integer step t:
-     - with probability p, we draw K ~ Poisson(lambda1)
-     - with probability (1-p), we draw K ~ Poisson(lambda2)
-    Then we place K arrivals at time t.
-    """
-
-    def __init__(self, lambda1: float, lambda2: float, p: float, max_steps: int = 100000):
-        """
-        lambda1, lambda2: The two Poisson rates
-        p: fraction of steps that use lambda1 vs. lambda2
-        max_steps: safety limit for the # of steps
-        """
-        self.lambda1 = lambda1
-        self.lambda2 = lambda2
-        self.p = p
-        self.max_steps = max_steps
-
-    def generate_arrival_times(self, num_requests: int) -> List[int]:
-        arrivals = []
-        total_requests = 0
-        t = 0
-        while total_requests < num_requests and t < self.max_steps:
-            # decide which distribution to use this step
-            if random.random() < self.p:
-                k = self._sample_poisson(self.lambda1)
-            else:
-                k = self._sample_poisson(self.lambda2)
-
-            for _ in range(k):
-                arrivals.append(t)
-                total_requests += 1
-                if total_requests >= num_requests:
-                    break
-            t += 1
-        return arrivals
-
-    @staticmethod
-    def _sample_poisson(lmbd: float) -> int:
-        """Knuth's algorithm for Poisson(lmbd)."""
-        L = math.exp(-lmbd)
-        p = 1.0
-        k = 0
-        while p > L:
-            k += 1
-            p *= random.random()
-        return k - 1
-
-    def __str__(self):
-        return (f"DiscreteBimodalArrival("
-                f"lambda1={self.lambda1}, lambda2={self.lambda2}, "
-                f"p={self.p}, max_steps={self.max_steps})")
-
-
-# -------------------------------------------------------
-# Poisson Bursty
-# -------------------------------------------------------
-class PoissonBurstyArrivalPattern(ArrivalPattern):
-    """
-    Generate requests in bursts:
-    - Each burst has size ~ Poisson(lambda_burst)
-    - Each burst is separated by gap ~ Poisson(lambda_gap)
-    """
-
-    def __init__(self, lambda_burst: float, lambda_gap: float = 0):
-        self.lambda_burst = lambda_burst
-        self.lambda_gap = lambda_gap
-
-    @staticmethod
-    def _sample_poisson(lmbd: float) -> int:
-        """Knuth's algorithm for Poisson sampling."""
-        L = math.exp(-lmbd)
-        p = 1.0
-        k = 0
-        while p > L:
-            k += 1
-            p *= random.random()
-        return k - 1
-
-    def generate_arrival_times(self, num_requests: int) -> List[int]:
-        arrivals = []
-        current_time = 0
-        total_requests = 0
-        t = 0
-
-        while total_requests < num_requests:
-            burst_size = min(
-                self._sample_poisson(self.lambda_burst),
-                num_requests - total_requests
-            )
-
-            for i in range(burst_size):
-                offset = random.randint(int(self.lambda_burst * 0.5), self.lambda_burst)
-                arrivals.append(current_time + offset)
-
-            total_requests += burst_size
-            # 다음 burst까지의 간격
-            gap = int(random.uniform(self.lambda_gap * 0.8, self.lambda_gap))
-
-            current_time += gap
-            t += 1
-
-        return sorted(arrivals)
-
-    def __str__(self):
-        return (f"PoissonBurstyArrivalPattern("
-                f"lambda_burst={self.lambda_burst}, lambda_gap={self.lambda_gap}")
-
-
-# -------------------------------------------------------
-# Continuous Poisson
-# -------------------------------------------------------
-
-class ContinuousPoissonArrival(ArrivalPattern):
-    """
-    Represents a continuous-time Poisson arrival process, sampling inter-arrival
-    times from an exponential distribution with parameter 'rate'.
-    """
-
-    def __init__(self, rate: float):
-        self.rate = rate
-
-    def generate_arrival_times(self, num_requests: int) -> List[float]:
-        arrivals = []
-        current_time = 0.0
-        for _ in range(num_requests):
-            interarrival = random.expovariate(self.rate)
-            current_time += interarrival
-            arrivals.append(current_time)
-        return arrivals
-
-    def __str__(self):
-        return f"ContinuousPoissonArrival(rate={self.rate})"
-
-
-# -------------------------------------------------------
-# Discrete Poisson
-# -------------------------------------------------------
-
-class DiscretePoissonArrival(ArrivalPattern):
-    """
-    A discrete-time Poisson model where time is considered in discrete steps
-    (0, 1, 2, ...). At each integer step t:
-      - We draw how many arrivals occur using Poisson(lambda_per_step).
-      - All arrivals happening at step t have arrival_time = t.
-    """
-
-    def __init__(self, lambda_per_step: float, max_steps: int = 100000):
-        self.lambda_per_step = lambda_per_step
-        self.max_steps = max_steps
-
-    def generate_arrival_times(self, num_requests: int) -> List[int]:
-        arrivals = []
-        total_requests = 0
-        t = 0
-        while total_requests < num_requests and t < self.max_steps:
-            k = self._sample_poisson(self.lambda_per_step)
-            for _ in range(k):
-                arrivals.append(t)
-                total_requests += 1
-                if total_requests >= num_requests:
-                    break
-            t += 1
-        return arrivals
-
-    @staticmethod
-    def _sample_poisson(lmbd: float) -> int:
-        L = math.exp(-lmbd)
-        p = 1.0
-        k = 0
-        while p > L:
-            k += 1
-            p *= random.random()
-        return k - 1
-
-    def __str__(self):
-        return (f"DiscretePoissonArrival("
-                f"lambda_per_step={self.lambda_per_step}, "
-                f"max_steps={self.max_steps})")
-
+# ────────────────────────────────────────────────────────────────────
+# 1. ❶ request.json 생성기
+# ────────────────────────────────────────────────────────────────────
+# 1-1) Request 객체 (arrival 없음)
 @dataclass
-class Request:
-    """
-    Represents a single request instance in the generated trace.
-    
-    Attributes:
-        category (RequestType): The category or 'type' of this request.
-        input_length (int): Number of tokens in the request input.
-        output_length (int): Number of tokens in the request output.
-        arrival_time (float|int, optional): The time when this request arrives.
-        token_ids (List[int]): A list of token IDs representing the request.
-        sched_time (float|int, optional): The time when this request starts being processed.
-        wait_time (float|int, optional): How long this request waited from arrival until processing began.
-    """
+class RawRequest:
     category: str
     input_length: int
     output_length: int
-    arrival_time: Optional[float|int]
     token_ids: List[int]
-    sched_time: Optional[float|int] = None
-    wait_time: Optional[float|int] = None
-    slo: Optional[float|int] = None
-    def __repr__(self):
-        """
-        Custom string representation, including scheduling details if they're available.
-        """
-        if sched_time := getattr(self, 'sched_time', None):
-            if self.slo is not None:
-                return (f"Request(category={self.category}, prompt={self.input_length}, "
-                    f"max_tokens={self.output_length}, slo={self.slo}, arrive_time={self.arrival_time}, "
-                    f"sched_time={sched_time}, wait_time={self.wait_time})")
-            else:
-                return (f"Request(category={self.category}, prompt={self.input_length}, "
-                    f"max_tokens={self.output_length}, arrive_time={self.arrival_time}, "
-                    f"sched_time={sched_time}, wait_time={self.wait_time})")
+    slo: Optional[float] = None
+
+
+# 1-2) RequestType  ─ 입력/출력 길이 샘플러
+class RequestType:
+    """
+    Args:
+        category_name (str): A descriptive name for this request type.
+        min_input_tokens (int): Minimum input token length.
+        max_input_tokens (int): Maximum input token length.
+        min_output_tokens (int): Minimum output token length.
+        max_output_tokens (int): Maximum output token length.
+        sampling_method (str): How to sample input/output lengths. One of:
+            - "uniform": simple randint within [min, max]
+            - "lognormal_approx": approximate lognormal fit based on [min, max]
+            - "ratio": for tasks where output is a fraction of input
+            - "default": same as uniform or your existing approach
+        **kwargs: Optional parameters to control the sampling. For example:
+            - mu_in, sigma_in, mu_out, sigma_out for lognormal
+            - ratio_min, ratio_max for ratio-based, etc.
+    """
+    SUPPORTED = {"uniform", "lognormal_approx", "ratio", "default"}
+
+    def __init__(self, category_name: str,
+                 min_input_tokens: int, max_input_tokens: int,
+                 min_output_tokens: int, max_output_tokens: int,
+                 sampling_method: str = "default",
+                 dataset_name: Optional[str] = None,
+                 **kwargs):
+        self.cat = category_name
+        self.min_in, self.max_in = min_input_tokens, max_input_tokens
+        self.min_out, self.max_out = min_output_tokens, max_output_tokens
+        self.method = sampling_method
+        self.kw = kwargs
+        self.bank = None                     # ShareGPT 토큰 뱅크 (옵션)
+
+        if dataset_name == "ShareGPT":
+            self._load_or_build_token_bank(dataset_name)
+
+        if self.method not in self.SUPPORTED:
+            raise ValueError(f"Unknown sampling_method={self.method}")
+
+        self.sampler = self._build_sampler()
+
+    # ───────────── 내부: 샘플러 & 토큰뱅크 ─────────────
+    def _build_sampler(self) -> Callable[[], Tuple[int, int]]:
+        if self.method in {"uniform", "default"}:
+            return lambda: (random.randint(self.min_in, self.max_in),
+                            random.randint(self.min_out, self.max_out))
+
+        if self.method == "ratio":
+            rmin = self.kw.get("ratio_min", .1)
+            rmax = self.kw.get("ratio_max", .3)
+            return lambda: self._ratio_sampler(rmin, rmax)
+
+        if self.method == "lognormal_approx":
+            mu_in, sig_in  = self._approx_logn(self.min_in, self.max_in)
+            mu_out, sig_out= self._approx_logn(self.min_out, self.max_out)
+            return lambda: self._lognorm_sampler(mu_in, sig_in, mu_out, sig_out)
+
+    @staticmethod
+    def _approx_logn(lo, hi, pct=.95):
+        med = math.sqrt(lo * hi); mu = math.log(med)
+        z = {0.90:1.282,0.95:1.645,0.975:1.96,0.99:2.33}[pct]
+        sigma = max((math.log(hi) - mu)/z, 0.5)
+        return mu, sigma
+
+    def _lognorm_sampler(self, mu1, s1, mu2, s2):
+        while True:
+            i = int(random.lognormvariate(mu1, s1))
+            if self.min_in <= i <= self.max_in: break
+        while True:
+            o = int(random.lognormvariate(mu2, s2))
+            if self.min_out <= o <= self.max_out: break
+        return i, o
+
+    def _ratio_sampler(self, rmin, rmax):
+        i = random.randint(self.min_in, self.max_in)
+        o = clamp(int(i * random.uniform(rmin, rmax)), self.min_out, self.max_out)
+        return i, o
+
+    # ───────────── 토큰뱅크 (ShareGPT) ─────────────
+    def _load_or_build_token_bank(self, name: str):
+        path = f"/home/sychoy/vllm/samples/{name}.json"
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                self.bank = [json.loads(line) for line in f]
         else:
-            return (f"Request(category={self.category}, prompt={self.input_length}, "
-                    f"max_tokens={self.output_length}, t={self.arrival_time})")
+            print(f"[Info] building token-bank {path}")
+            self.bank = self._build_sharegpt_bank(path)
 
-def compress_idle_steps(requests):
-        """
-        For discrete-time arrival traces, this function compresses any idle periods between
-        consecutive groups of requests so that each new batch starts shortly after the previous
-        batch finishes. This helps avoid large time gaps when no requests are incoming.
-        """
-        requests.sort(key=lambda r: r.arrival_time)
-        compressed = []
-        batch_map = defaultdict(list)
+    def _build_sharegpt_bank(self, out_path) -> List[dict]:
+        if AutoTokenizer is None:
+            raise RuntimeError("transformers 패키지가 필요합니다.")
+        tok = AutoTokenizer.from_pretrained(
+            "meta-llama/Meta-Llama-3.1-8B-Instruct", use_fast=True)
+        src = "/home/sychoy/vllm/downloads/ShareGPT_V3_unfiltered_cleaned_split.json"
+        with open(src, encoding="utf-8") as f: raw = json.load(f)
+        raw = [d for d in raw if len(d["conversations"]) >= 2]
+        pairs = [(d["conversations"][0]["value"],
+                  d["conversations"][1]["value"]) for d in raw]
 
-        for req in requests:
-            batch_map[req.arrival_time].append(req)
+        parsed = []
+        for p,c in pairs:
+            if p and c:
+                ids = tok.encode(p, truncation=True, max_length=2048)
+                parsed.append(dict(input_length=len(p),
+                                   output_length=len(c),
+                                   input_token_ids=ids))
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path,"w",encoding="utf-8") as f:
+            for item in parsed: f.write(json.dumps(item)+"\n")
+        return parsed
 
-        unique_arrivals = sorted(batch_map.keys())
-        last_finish = 0.0
+    # ───────────── Request 생성 ─────────────
+    def generate(self, vocab=(200,30_000), trace_lim=None) -> RawRequest:
+        while True:
+            inp, out = self.sampler()
+            if trace_lim and inp+out > trace_lim: continue
+            break
 
-        for arr_time in unique_arrivals:
-            batch = batch_map[arr_time]
+        token_ids = ([random.randint(*vocab) for _ in range(inp)]
+                     if self.bank is None else
+                     random.choice(self.bank)["input_token_ids"])
 
-            max_out = max(r.output_length for r in batch)
-            batch_run_time = 1 + max_out
+        slo = (inp+out)*PROFILED_A + PROFILED_B
+        return RawRequest(self.cat, inp, out, token_ids, slo)
 
-            if arr_time > last_finish:
-                new_arr_time = last_finish + 1
-                shift = arr_time - new_arr_time
-                for r in batch:
-                    r.arrival_time -= shift
-                arr_time = new_arr_time
+# 1-3) request.json 저장
+def save_request_json(path: str,
+                      request_types: Dict[RequestType,float],
+                      num_req: int,
+                      batch_size: int,
+                      vocab=(200,30_000),
+                      skip_token_ids=True,
+                      static=False):
+    # 확률 누적
+    cum, srt = 0., sorted(request_types.items(), key=lambda x: x[1], reverse=True)
+    cum_probs: List[Tuple[RequestType,float]]=[]
+    for rt,p in srt: cum+=p; cum_probs.append((rt,cum))
 
-            finish_time = arr_time + batch_run_time
-            last_finish = finish_time
-            compressed.extend(batch)
+    def pick_rt() -> RequestType:
+        r=random.random()
+        for rt,c in cum_probs:
+            if r<=c: return rt
 
-        compressed.sort(key=lambda r: r.arrival_time)
-        return compressed
+    reqs: List[RawRequest]=[]
+    if static:                                             # 같은 req 반복
+        uniq = math.ceil(num_req / batch_size)
+        templates=[pick_rt().generate(vocab) for _ in range(uniq)]
+        for t in templates: reqs.extend([t]*batch_size)
+        reqs=reqs[:num_req]
+    else:
+        reqs=[pick_rt().generate(vocab) for _ in range(num_req)]
 
-def _arrival_pattern_from_dict(d: dict) -> str:
-    """
-    Convert a stored arrival_pattern dict back into a single string, e.g.:
-      {
-        "type": "DiscretePoissonArrival",
-        "params": { "lambda_per_step": 0.01, "max_steps": 4000 }
-      }
-    -> "DiscretePoissonArrival(lambda_per_step=0.01, max_steps=4000)"
+    # 직렬화 형태 맞추기
+    out=dict(batch_size=batch_size,
+             vocab=vocab,
+             requests={f"request_{i}":dict(
+                         category=r.category,
+                         input_length=r.input_length,
+                         output_length=r.output_length,
+                         **({} if skip_token_ids else {"token_ids":r.token_ids})
+                       )
+                       for i,r in enumerate(reqs)})
 
-    If no params found, just return d["type"].
-    """
-    pattern_type = d.get("type", "UnknownPattern")
-    params = d.get("params", None)
-    if not params:
-        # no params -> just return the type
-        return pattern_type
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps(out, separators=(",",":")))
+    print(f"[saved] {path}")
 
-    # build "key=val" in some stable order
-    param_strs = []
-    for k, v in params.items():
-        if isinstance(v, (int, float)):
-            param_strs.append(f"{k}={v}")
-        else:
-            param_strs.append(f"{k}={repr(v)}")
+# ────────────────────────────────────────────────────────────────────
+# 2. ❷ Arrival-pattern / Trace 생성기  (기존 코드 그대로)
+# ────────────────────────────────────────────────────────────────────
+class ArrivalPattern:                           # … 이하 동일 …
+    def generate_arrival_times(self, n:int) -> List[int|float]:
+        raise NotImplementedError
 
-    inside = ", ".join(param_strs)
-    return f"{pattern_type}({inside})"
+class DiscreteUniformArrival(ArrivalPattern):
+    def __init__(self,max_step:int): self.max_step=max_step
+    def generate_arrival_times(self,n:int)->List[int]:
+        return [random.randint(0,self.max_step) for _ in range(n)]
+    def __str__(self): return f"UniformArrival(max_step={self.max_step})"
 
-def _arrival_pattern_to_dict(pattern_name: str) -> dict:
-    """
-    Parse a string of the form:
-      SomeArrivalClassName(key1=val1, key2=val2, ...)
-    into {"type": "SomeArrivalClassName", "params": {...}}.
+class DiscretePeriodicArrival(ArrivalPattern):
+    def __init__(self,interval:int): self.interval=interval
+    def generate_arrival_times(self,n:int)->List[int]:
+        return [i*self.interval for i in range(n)]
+    def __str__(self): return f"PeriodicArrival(interval={self.interval})"
 
-    If it fails to parse, returns {"type": pattern_name}.
-    """
-    # Regex to capture:
-    # 1) The class name (one or more word chars)  -> group(1)
-    # 2) The inside of parentheses (everything until the final ) ) -> group(2)
-    #
-    # e.g. "ContinuousPoissonArrival(rate=1.0)"
-    #   -> group(1) = "ContinuousPoissonArrival"
-    #   -> group(2) = "rate=1.0"
-    #
-    # If it doesn't match, we can't parse generically.
-    match = re.match(r'^(\w+)\s*\(([^)]*)\)$', pattern_name.strip())
-    if not match:
-        return {"type": pattern_name}  # fallback
+class DiscretePoissonArrival(ArrivalPattern):
+    def __init__(self,lmbd:float,max_steps:int=100_000):
+        self.lmbd,self.mx=lmbd,max_steps
+    def generate_arrival_times(self,n:int)->List[int]:
+        arr,t,tot=[],0,0
+        while tot<n and t<self.mx:
+            for _ in range(_sample_poisson(self.lmbd)):
+                arr.append(t); tot+=1
+                if tot==n: break
+            t+=1
+        return arr
+    def __str__(self):
+        return f"PoissonArrival(lambda={self.lmbd},max={self.mx})"
 
-    cls_name = match.group(1)
-    inside = match.group(2).strip()
+class DiscreteBimodalArrival(ArrivalPattern):
+    def __init__(self,l1:float,l2:float,p:float,max_steps:int=100_000):
+        self.l1,self.l2,self.p,self.mx=l1,l2,p,max_steps
+    def generate_arrival_times(self,n:int)->List[int]:
+        arr,t,tot=[],0,0
+        while tot<n and t<self.mx:
+            lam=self.l1 if random.random()<self.p else self.l2
+            for _ in range(_sample_poisson(lam)):
+                arr.append(t); tot+=1
+                if tot==n: break
+            t+=1
+        return arr
+    def __str__(self):
+        return (f"BimodalArrival(l1={self.l1},l2={self.l2},"
+                f"p={self.p},max={self.mx})")
 
-    # If there are no params inside, e.g. "MyArrival()", just return type:
-    if not inside:
-        return {"type": cls_name, "params": {}}
+class PoissonBurstyArrivalPattern(ArrivalPattern):
+    def __init__(self,lb:float,lg:float=0): self.lb,self.lg=lb,lg
+    def generate_arrival_times(self,n:int)->List[int]:
+        arr,cur,tot=[],0,0
+        while tot<n:
+            burst=min(_sample_poisson(self.lb),n-tot)
+            for _ in range(burst):
+                offset=random.randint(int(self.lb*.5),self.lb)
+                arr.append(cur+offset)
+            tot+=burst
+            cur+=int(random.uniform(self.lg*.8,self.lg))
+        return sorted(arr)
+    def __str__(self):
+        return f"PoissonBurstyArrivalPattern(lb={self.lb},lg={self.lg})"
 
-    params_dict = _parse_key_value_pairs(inside)
-    if params_dict is None:
-        # Could not parse the inside
-        return {"type": pattern_name}
-
-    return {"type": cls_name, "params": params_dict}
-
-def _parse_key_value_pairs(param_str: str) -> dict:
-    """
-    Naive parsing of a comma-separated list of key=value pairs, like:
-      "rate1=0.5, rate2=1.5, p=0.3"
-    or
-      "lambda_per_step=0.01, max_steps=4000"
-
-    Returns a dict of {key: converted_value} or None if parse fails badly.
-    """
-    params = {}
-    # split by commas at the top level (naive approach, won't handle nested commas)
-    chunks = param_str.split(",")
-    for chunk in chunks:
-        chunk = chunk.strip()
-        if "=" not in chunk:
-            # can't parse
-            return None
-        k, v = chunk.split("=", 1)
-        k = k.strip()
-        v = v.strip()
-        # Try to convert v -> float or int if possible
-        v_converted = _convert_str_value(v)
-        params[k] = v_converted
-    return params
-
-def _convert_str_value(s: str):
-    """
-    Attempt to convert a string to int or float, otherwise leave as string.
-    """
-    # If it has a decimal or 'e', try float
-    if "." in s or "e" in s.lower():
-        try:
-            return float(s)
-        except ValueError:
-            pass
-    # If it's purely digits (possibly with a leading '-'), parse as int
-    if s.isdigit() or (s.startswith("-") and s[1:].isdigit()):
-        return int(s)
-
-    # Otherwise, return original string
-    return s
+# Trace 구조체 (arrival 포함) — 기존 코드 그대로
+@dataclass
+class TraceReq:
+    category:str; input_length:int; output_length:int
+    arrival_time:int|float; token_ids:List[int]
+    sched_time:Optional[int|float]=None
+    wait_time:Optional[int|float]=None; slo:Optional[int|float]=None
 
 @dataclass
 class Trace:
-    """
-    Represents a collection (or 'trace') of generated requests, now stored as a dictionary:
-      { "request_0": Request, "request_1": Request, ... }
+    requests:Dict[int,TraceReq]
+    arrival_pattern_name:str
+    batch_size:int; vocab:Tuple[int,int]; max_model_len:int
+    num_gpu_blocks_override:Optional[int]=None
 
-    Attributes:
-        requests (Dict[str, Request]): The requests dictionary.
-        arrival_pattern_name (str): A descriptive name of the arrival pattern used.
-        batch_size (int): The initial batch size used in generation.
-        request_type_probs: The distribution of RequestTypes used.
-        vocab (Tuple[int, int]): The range of token IDs used.
-    """
-    requests: Dict[str, "Request"]
-    arrival_pattern_name: str
-    batch_size: int
-    request_type_probs: any  # could be a dict or list of tuples, depending on your design
-    vocab: Tuple[int, int]
-    num_gpu_blocks_override: Optional[int] = field(default=None, init=True) 
-    max_model_len: Optional[int] = field(default=None, init=True) 
-    gpu_memory_utilization: Optional[float] = field(default=None, init=True)
-    
-    def __iter__(self):
-        """
-        Allows iteration over the Trace object in ascending order of arrival_time.
-        """
-        # Sort dictionary values by each request's arrival_time
-        sorted_requests = sorted(self.requests.values(), key=lambda r: r.arrival_time)
-        return iter(sorted_requests)
+    def add_estimate_sched(self,tokens_per_block:int,
+                           gpu_blocks:int,max_parallel:int):
+        cap=gpu_blocks*tokens_per_block
+        running:List[Tuple[int|float,int]]=[]; heapq.heapify(running)
+        for r in sorted(self.requests.values(), key=lambda x:x.arrival_time):
+            while running and running[0][0]<=r.arrival_time:
+                _,m=heapq.heappop(running); cap+=m
+            mem=r.input_length; cur=r.arrival_time
+            while (len(running)>=max_parallel) or mem>cap:
+                fin,mm=heapq.heappop(running); cur=fin; cap+=mm
+            r.sched_time, r.wait_time = cur, cur-r.arrival_time
+            finish=cur+1+r.output_length
+            heapq.heappush(running,(finish,mem)); cap-=mem
 
-    def __repr__(self):
-        # For the display of request_type_probs, handle it if it's a dict or list
-        if isinstance(self.request_type_probs, dict):
-            info = [(rt.category_name, p) for rt, p in self.request_type_probs.items()]
-        else:
-            info = [(rt.category_name, p) for rt, p in self.request_type_probs]
-
-        return (f"Trace(\n"
-                f"  arrival_pattern={self.arrival_pattern_name},\n"
-                f"  batch_size={self.batch_size},\n"
-                f"  max_model_len={self.max_model_len},\n"
-                f"  num_gpu_blocks_override={self.num_gpu_blocks_override},\n"
-                f"  request_type_probs={info},\n"
-                f"  vocab={self.vocab},\n"
-                f"  requests=[{len(self.requests)} dictionary entries]\n"
-                f")")
-    
-    @classmethod
-    def load_from_json(cls, filename: str) -> "Trace":
-        """
-        Reads a JSON file (in the compact format from save_to_json) and reconstructs a Trace object.
-        If token_ids are missing or their lengths do not match input_length, they are regenerated.
-
-        Args:
-            filename (str): Path to the JSON file to load.
-
-        Returns:
-            Trace: The reconstructed Trace object.
-        """
-        with open(filename, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-
-        # Rebuild request_type_probs from something like [["Short Q&A", 0.7], ["Summarization", 0.3]]
-        # We'll just keep them as a list of (category_name, probability)
-        request_type_probs_data = data["request_type_probs"]
-
-        # Convert the arrival_pattern dictionary back into a single string
-        # e.g. {"type": "DiscretePoissonArrival", "params": {"lambda_per_step":0.01,"max_steps":4000}}
-        # -> "DiscretePoissonArrival(lambda_per_step=0.01, max_steps=4000)"
-        arrival_pattern_str = _arrival_pattern_from_dict(data["arrival_pattern"])
-
-        requests_dict = {}
-        vocab_min, vocab_max = data["vocab"]
-        num_gpu_blocks_override = data.get("num_gpu_blocks_override", None) 
-        gpu_memory_utilization = data.get("gpu_memory_utilization", None)
-
-        for req_id, rdict in data["requests"].items():
-            # If 'token_ids' missing or length mismatch, regenerate
-            actual_token_ids = rdict.get("token_ids", None)
-            input_len = rdict["input_length"]
-            if (actual_token_ids is None) or (len(actual_token_ids) != input_len):
-                rdict["token_ids"] = [
-                    random.randint(vocab_min, vocab_max)
-                    for _ in range(input_len)
-                ]
-
-            request_obj = Request(
-                category=rdict["category"],
-                input_length=rdict["input_length"],
-                output_length=rdict["output_length"],
-                arrival_time=rdict["arrival_time"],
-                token_ids=rdict["token_ids"],
-                sched_time=rdict.get("sched_time"),
-                wait_time=rdict.get("wait_time"),
-            )
-            requests_dict[req_id] = request_obj
-
-        return cls(
-            requests=requests_dict,
-            arrival_pattern_name=arrival_pattern_str,
-            batch_size=data["batch_size"],
-            max_model_len=data["max_model_len"],
-            request_type_probs=request_type_probs_data,  # we keep it as-is
-            vocab=tuple(data["vocab"]),
-            num_gpu_blocks_override=num_gpu_blocks_override,
-            gpu_memory_utilization=gpu_memory_utilization
+    def save_to_json(self,path:Path,skip_token_ids=True):
+        def as_dict(r:TraceReq):
+            d=r.__dict__.copy()
+            d.pop("slo", None)
+            if skip_token_ids: d.pop("token_ids",None)
+            return d
+        data=dict(
+            batch_size=self.batch_size,
+            max_model_len=self.max_model_len,
+            num_gpu_blocks_override = self.num_gpu_blocks_override,
+            arrival_pattern=self.arrival_pattern_name,
+            vocab=self.vocab,
+            requests={k:as_dict(v) for k,v in self.requests.items()},
         )
-    
-    def add_estimate_sched(self,
-                           max_model_len: int,
-                           num_gpu_blocks: int,
-                           block_size: int = 16,
-                           max_parallel: int = 1) -> None:
-        """
-        A scheduling simulation, adapted for a requests dict. The logic is the same,
-        but we'll convert the dictionary to a list (sorted by arrival_time),
-        do the scheduling, then store the updated requests back in the dict.
+        path.write_text(json.dumps(data,separators=(",",":")))
+# ───────────── trace 생성 util ─────────────
+def load_json(path:str): return json.loads(Path(path).read_text())
 
-        Scheduling rules:
-          - Sort requests by arrival_time, but schedule them individually.
-          - Processing duration = (1 + output_length).
-          - GPU memory usage is based on input_length, claimed at the start and freed upon completion.
-          - If memory or parallel constraints are exceeded, we must wait.
-          - Each request's sched_time and wait_time are updated.
-        """
-        self.num_gpu_blocks_override = num_gpu_blocks
-        self.batch_size = max_parallel
-        self.max_model_len = max_model_len
-        # 1) Convert to a list of (req_key, Request), sorted by arrival_time
-        items_sorted = sorted(self.requests.items(), key=lambda x: x[1].arrival_time)
-        # e.g. items_sorted = [("request_0", reqObj), ("request_1", reqObj), ...]
+def compress_idle(reqs:List[TraceReq])->List[TraceReq]:
+    reqs.sort(key=lambda r:r.arrival_time)
+    grouped=defaultdict(list); [grouped[r.arrival_time].append(r) for r in reqs]
+    last,out=0,[]
+    for t in sorted(grouped):
+        batch,max_out=grouped[t],max(r.output_length for r in grouped[t])
+        if t>last:
+            shift=t-(last+1)
+            for r in batch: r.arrival_time-=shift
+            t=last+1
+        last=t+1+max_out; out.extend(batch)
+    return sorted(out,key=lambda r:r.arrival_time)
 
-        tokens_capacity = num_gpu_blocks * block_size
-        running = []
-        heapq.heapify(running)
+def compute_gpu_blocks(reqs:Dict[str,Any],max_len:int,blk:int,ranges:List[float]):
+    min_b=max(r["input_length"] for r in reqs.values())//blk
+    avg_b=(sum(r["input_length"]+r["output_length"] for r in reqs.values())/
+           len(reqs))//blk
+    max_b=max_len//blk
+    vals={round(min(max(int(avg_b+r*(max_b-min_b)),min_b),max_b)) for r in ranges}
+    return sorted(vals)
 
-        current_time = 0
-
-        # We'll group requests by arrival_time
-        groups = defaultdict(list)
-        for key, req in items_sorted:
-            groups[req.arrival_time].append((key, req))
-
-        arrival_times = sorted(groups.keys())
-
-        for arrival_time in arrival_times:
-            batch = groups[arrival_time]
-
-            # (a) Free any requests that finished by this arrival_time
-            while running and running[0][0] <= arrival_time:
-                finish_time, in_usage, finished_key = heapq.heappop(running)
-                tokens_capacity += in_usage
-
-            # (b) For each request in this batch, schedule
-            for req_key, req_obj in batch:
-                req_in = req_obj.input_length
-
-                # If it can't fit an empty GPU, fail
-                if req_in > tokens_capacity and not running:
-                    raise RuntimeError(
-                        f"Request {req_obj} has input_length={req_in}, "
-                        f"exceeds total capacity={tokens_capacity} with no tasks running."
-                    )
-
-                # free tasks finishing exactly by arrival_time
-                while running and running[0][0] <= req_obj.arrival_time:
-                    finish_time, in_usage, finished_key = heapq.heappop(running)
-                    tokens_capacity += in_usage
-
-                # Wait if needed
-                can_run_now = False
-                while not can_run_now:
-                    if len(running) >= max_parallel:
-                        finish_time, in_usage, finished_key = heapq.heappop(running)
-                        current_time = finish_time
-                        tokens_capacity += in_usage
-                    else:
-                        if req_in <= tokens_capacity:
-                            can_run_now = True
-                        else:
-                            if not running:
-                                raise RuntimeError(
-                                    f"Request {req_obj} can't fit in capacity={tokens_capacity} "
-                                    f"and no tasks to wait for."
-                                )
-                            finish_time, in_usage, finished_key = heapq.heappop(running)
-                            current_time = finish_time
-                            tokens_capacity += in_usage
-
-                start_time = max(req_obj.arrival_time, current_time)
-                req_obj.sched_time = start_time
-                req_obj.wait_time = req_obj.sched_time - req_obj.arrival_time
-
-                finish_time = start_time + (1 + req_obj.output_length)
-                tokens_capacity -= req_in
-                heapq.heappush(running, (finish_time, req_in, req_key))
-
-        # end of scheduling
-        # The `requests` dict is updated in-place since we changed each req_obj
-
-
-    def save_to_json(self, filename: str, skip_token_ids: bool = False) -> None:
-        """
-        Serialize this Trace object into a JSON file in a compact form:
-        - "arrival_pattern" is a one-liner dict with "type" and (optionally) "params".
-        - "batch_size", "request_type_probs", "vocab" are also written in a compact style.
-        - "requests" is a dictionary. Each key is "request_i", each value is either:
-            - single-line if token_ids are skipped or absent
-            - two-line if token_ids exist
-        """
-        # 1) Convert request_type_probs into a list of (category_name, prob) for JSON
-        # if isinstance(self.request_type_probs, dict):
-        #     request_type_probs_data = [
-        #         (rt.category, prob) for (rt, prob) in self.request_type_probs.items()
-        #     ]
-        # else:
-        #     request_type_probs_data = [
-        #         (rt.category, prob) for (rt, prob) in self.request_type_probs
-        #     ]
-
-        request_type_probs_data = [
-            (cat, prob) for cat, prob in self.request_type_probs
-        ]
-
-        data = {
-            "arrival_pattern": _arrival_pattern_to_dict(self.arrival_pattern_name),
-            "batch_size": self.batch_size,
-            "max_model_len": self.max_model_len,
-            "num_gpu_blocks_override": self.num_gpu_blocks_override,
-            "request_type_probs": request_type_probs_data,
-            "vocab": self.vocab
-        }
-
-        # 2) Prepare each request in a dictionary
-        #    We'll do a manual approach to keep it compact, especially for token_ids.
-        requests_items = list(self.requests.items())  # [(req_id, RequestObj), ...]
-        # We'll need them in a stable order (e.g. sorted by req_id or arrival_time).
-        # If you prefer arrival-time order, do:
-        # requests_items.sort(key=lambda x: x[1].arrival_time)
-        # For now, let's assume they're already in ascending "request_i" keys.
-
-        # 3) Write top-level JSON keys manually
-        with open(filename, 'w', encoding='utf-8') as f:
-            f.write("{\n")
-
-            # a) arrival_pattern
-            # "arrival_pattern" is a dict like {"type": "...", "params": {...}}
-            pattern_json = json.dumps(
-                data["arrival_pattern"], separators=(',', ':'),
-                ensure_ascii=False
-            )
-            f.write(f'  "arrival_pattern":{pattern_json},\n')
-
-            # b) batch_size
-            f.write(f'  "batch_size":{data["batch_size"]},\n')
-
-            f.write(f'  "max_model_len":{data["max_model_len"]},\n')
-
-            f.write(f'  "num_gpu_blocks_override":{data["num_gpu_blocks_override"]},\n')
-
-            # c) request_type_probs (one-liner)
-            rtp_json = json.dumps(data["request_type_probs"], separators=(',', ':'))
-            f.write(f'  "request_type_probs":{rtp_json},\n')
-
-            # d) vocab
-            vocab_json = json.dumps(data["vocab"], separators=(',', ':'))
-            f.write(f'  "vocab":{vocab_json},\n')
-
-            # e) "requests" dictionary
-            f.write('  "requests":{\n')
-
-            # We'll iterate over each request key/value
-            for i, (req_id, req_obj) in enumerate(requests_items):
-                is_last = (i == len(requests_items) - 1)
-
-                # Build a dictionary for the request minus token_ids
-                req_dict = {
-                    "category": req_obj.category,
-                    "input_length": req_obj.input_length,
-                    "output_length": req_obj.output_length,
-                    "arrival_time": req_obj.arrival_time,
-                    "sched_time": req_obj.sched_time,
-                    "wait_time": req_obj.wait_time
-                }
-                token_ids = None
-                if not skip_token_ids:
-                    token_ids = req_obj.token_ids
-
-                main_line = json.dumps(req_dict, separators=(',', ':'), ensure_ascii=False)
-
-                # We'll write something like:
-                # "request_0":{...},
-                # or if token_ids exist => two-line format
-                f.write(f'    "{req_id}":')
-                if token_ids is None:
-                    # Single-line
-                    f.write(main_line)
-                    if not is_last:
-                        f.write(',')
-                    f.write('\n')
-                else:
-                    # Two-line format:
-                    # e.g. "request_0":{"category":"ChatBot Q&A","input_length":10,...
-                    #                    "token_ids":[...]}
-                    main_no_brace = main_line[:-1]  # remove closing '}'
-                    token_ids_str = json.dumps(token_ids, separators=(',', ':'), ensure_ascii=False)
-
-                    f.write(main_no_brace)
-                    f.write(',')  # comma after the last field in main
-                    f.write(f'"token_ids":{token_ids_str}}}')
-                    if not is_last:
-                        f.write(',')
-                    f.write('\n')
-
-            # close the requests dict
-            f.write('  }\n')
-            # close the entire JSON
-            f.write("}\n")
-
-
-def load_json(path):
-    with open(path, 'r') as f:
-        return json.load(f)
-    
-def create_instances_from_json(json_data):
-    pattern_map = {
-        "DiscreteBimodalArrival": DiscreteBimodalArrival,
-        "DiscretePoissonArrival": DiscretePoissonArrival,
-        "DiscretePeriodicArrival": DiscretePeriodicArrival,
-        "DiscreteUniformArrival": DiscreteUniformArrival,
-        "PoissonBurstyArrivalPattern": PoissonBurstyArrivalPattern
-    }
-
-    output_map = {
-        "DiscreteBimodalArrival": "bimodal",
-        "DiscretePoissonArrival": 'poisson',
-        "DiscretePeriodicArrival": "periodic",
-        "DiscreteUniformArrival": "uniform",
-        "PoissonBurstyArrivalPattern": "bursty"
-    }
-        
-    instance_list = []
-    output_list = []
-    for item in json_data:
-        cls_name = item.pop("class")
-        cls = pattern_map[cls_name]
-        instance = cls(**item)
-        instance_list.append(instance)
-        output_list.append(output_map[cls_name])
-
-    return instance_list, output_list
-
-def generate_trace(
-    request_data, 
-    arrival_pattern_obj,
-    arrival_times,
-    max_model_len,
-    static: bool = False,
-):
-    json_requests = request_data["requests"]
-    batch_size = request_data["batch_size"]
-    vocab = request_data["vocab"]
-    request_type_probs = request_data["request_type_probs"]
-    
-    num_requests = len(json_requests)
-
-    for i in range(min(batch_size, num_requests)):
-        arrival_times[i] = 0
-    
+def generate_trace(req_data:Dict[str,Any],arr_obj:ArrivalPattern,
+                   arr_times:List[int|float],max_len:int,static:bool)->Trace:
+    B,v=req_data["batch_size"],tuple(req_data["vocab"])
+    for i in range(min(B,len(arr_times))): arr_times[i]=0
     if static:
-        for i in range(0, num_requests, batch_size):
-            group_value = arrival_times[i]
-            for j in range(i, min(i + batch_size, num_requests)):
-                arrival_times[j] = group_value
+        for i in range(0,len(arr_times),B):
+            arr_times[i:i+B]=[arr_times[i]]*min(B,len(arr_times)-i)
 
-    print(f"arrival_times: {arrival_times}")
-    sorted_keys = sorted(json_requests.keys(), key=lambda x: int(x.split('_')[1]))
-    requests = []
+    reqs={}
+    for idx,(key,at) in enumerate(zip(sorted(req_data["requests"],
+                            key=lambda k:int(k.split("_")[1])),arr_times)):
+        r=req_data["requests"][key]; tot=r["input_length"]+r["output_length"]
+        slo=tot*PROFILED_A+PROFILED_B
+        reqs[idx]=TraceReq(r["category"],r["input_length"],r["output_length"],
+                           at,r.get("token_ids",[]),slo=slo)
+    return Trace(requests={i:r for i,r in enumerate(compress_idle(list(reqs.values())))},
+                 arrival_pattern_name=str(arr_obj), batch_size=B,
+                 vocab=v, max_model_len=max_len)
 
-    for i, key in enumerate(sorted_keys):
-        req = json_requests[key]
-        arrival_time = arrival_times[i]
-        sched_time = (i // batch_size) * 1.0  # 예시 스케줄링: 배치당 1.0 step
-        wait_time = max(0.0, sched_time - arrival_time)
-        total_length = req["input_length"] + req["output_length"]
-        slo = total_length * PROFILED_A + PROFILED_B 
+# ───────────────────────────────────────────────────────────
+# (★) build_sched_save:  trace 저장 → 메모리-압력 계산 추가
+# ───────────────────────────────────────────────────────────
+def build_sched_save(request_json: str,                     
+                     level_spec: dict,
+                     blk_size: int = 16,
+                     static: bool = False,
+                     skip_token_ids: bool = True,                     
+                     scales: list[float] = (0.6, 0.8, 1.0),                     
+                     ):
 
-        requests.append(Request(
-            category=req["category"],
-            input_length=req["input_length"],
-            output_length=req["output_length"],
-            arrival_time=arrival_time,
-            token_ids=req.get("token_ids", []),
-            sched_time=sched_time,
-            wait_time=wait_time,
-            slo=slo
-        ))
+    req_data = load_json(request_json)
+    mix_tag = Path(request_json).stem.replace("req_", "")
 
-    requests = compress_idle_steps(requests)
-    requests.sort(key=lambda r: r.arrival_time)
-
-    requests_dict = {}
-    for i, req in enumerate(requests):
-        requests_dict[f"request_{i}"] = req
-
-    trace = Trace(
-        requests=requests_dict,  # pass the dict instead of a list
-        arrival_pattern_name=str(arrival_pattern_obj),
-        max_model_len=max_model_len,
-        batch_size=batch_size,
-        request_type_probs=request_type_probs,
-        vocab=vocab
-    )
-    return trace
-
-def compute_gpu_blocks(request_data, max_model_len, block_size, gpu_block_ranges):
-    requests = request_data["requests"]
-    
-    # 1. min_val: max of input_length
-    input_lengths = [req["input_length"] for req in requests.values()]
-    min_val = max(input_lengths) // block_size
-
-    # 2. avg_val: average of input_length + output_length
-    total_lens = [req["input_length"] + req["output_length"] for req in requests.values()]
-    avg_val = sum(total_lens) / len(total_lens)
-    avg_val = avg_val // block_size
-
-    # 3. max_val: max_model_len // block_size
-    max_val = max_model_len // block_size
-
-    # 4. Compute gpu_blocks using the formula
-    gpu_blocks = []
-    for r in gpu_block_ranges:
-        val = avg_val + r * (max_val - min_val)
-        val = round(min(max(val, min_val), max_val))  # Clip to [min_val, max_val]
-        gpu_blocks.append(val)
-
-    gpu_blocks = sorted(set(gpu_blocks))
-
-    return gpu_blocks, min_val, max_val
-
-def build_sched_save(
-    request_json_path: str, 
-    arrival_json_path: str,
-    max_tokens: int,
-    gpu_block_ranges: List[float],
-    block_size: int,
-    static: bool = False,
-    plot_distributions: bool = True,            # ← new flag
-    skip_token_ids: bool = True,
-    postfix_trace: str  = "_trace",
-    postfix_model: str  = "_model"
-):
-    import json, random, matplotlib.pyplot as plt
-    from itertools import accumulate
-    from pathlib import Path
-    """
-    1) Make a TraceType
-    2) Generate a trace
-    3) Call add_estimate_sched(...) with the global GPU parameters
-    4) Save trace to JSON  (skip_token_ids=True keeps files small)
-    5) [optional] Plot & save distributions of the generated trace
-       vs. the underlying generative model.
-    """
-    request_data = load_json(request_json_path)
-    arrival_config = load_json(arrival_json_path)
-    arrival_patterns, output_list = create_instances_from_json(arrival_config)
-
-    batch_size = request_data["batch_size"]
-    request_type_probs = request_data["request_type_probs"]
-
-    request_path = Path(request_json_path)
-
-    gpu_blocks, min_gpu_blocks, max_gpu_blocks = compute_gpu_blocks(
-        request_data, max_tokens, block_size, gpu_block_ranges
+    arrival_patterns = build_arrival_patterns(
+        request_json,
+        scales=scales,
     )
 
-    for arrival_pattern, output in zip(arrival_patterns, output_list):
-        print(arrival_pattern)
-        arrival_times = arrival_pattern.generate_arrival_times(len(request_data["requests"]))
-        arrival_times.sort()
+    # ❶ request 튜플 (arrival은 나중에 덮어씀)
+    base_reqs = [(0, r["input_length"], r["output_length"])
+                 for r in req_data["requests"].values()]
+
+    for ap in arrival_patterns:
+        mix_tag  = Path(request_json).stem.replace("req_","")   # ex) SS83_SL00_LS08_LL08
+        tag_ap = _slug_ap(ap)
+        arr_times = ap.generate_arrival_times(len(base_reqs))
+        arr_times.sort()
+
+        # arrival 을 입힌 튜플 생성
+        req_tuples = [(at, inp, out)
+                      for at, (_, inp, out) in zip(arr_times, base_reqs)]
         
-        for num_gpu_blocks, range in zip(gpu_blocks,gpu_block_ranges):
-            if num_gpu_blocks < min_gpu_blocks or num_gpu_blocks > max_gpu_blocks:
-                print(f"num_gpu_blocks {num_gpu_blocks} is out of range [{min_gpu_blocks}, {max_gpu_blocks}]")
-                continue
-            print()
-            print(f"range: {range} num_gpu_blocks: {num_gpu_blocks}")
-            try:
-                output_dir = request_path.parent / output
-                output_dir.mkdir(exist_ok=True)  # 디렉토리 없으면 생성
-                output_json_path = output_dir / f"trace_{num_gpu_blocks}.json"
+        base_dir = Path(request_json).parent / mix_tag / tag_ap
+        base_dir.mkdir(parents=True, exist_ok=True)
+
+        for lvl, cfg in level_spec.items():
+            blk, unmet = find_blocks_for_ovf(
+                    req_tuples, arr_times,
+                    target_ovf = cfg["target_ovf"],
+                    tol        = cfg["tol"],
+                    blk_size   = blk_size)
             
+            if unmet and lvl in ("slack", "low"):
+                print(f"[Warn] {lvl} cannot be met (OVF); using max blocks {blk}")
 
-                trace_obj = generate_trace(
-                    request_data, arrival_pattern, arrival_times, max_tokens, static
-                )
+            # 블록 수로 trace 생성
+            trace = generate_trace(req_data, ap, arr_times.copy(),
+                                max_len = 32_384, static = static)
+            trace.num_gpu_blocks_override = blk
+            trace.add_estimate_sched(blk_size, blk, req_data["batch_size"])
 
-                # GPU-capacity scheduling simulation
-                trace_obj.add_estimate_sched(
-                    max_model_len = max_model_len,
-                    num_gpu_blocks=num_gpu_blocks, block_size=block_size,
-                    max_parallel=batch_size
-                )
+            # ★ 실제 OVF 재계산 (소수 2자리)
+            ovf_actual = _ovf_for_blocks(req_tuples, arr_times,
+                                        blk, blk_size)
+            # ─── 폴더 / 파일 이름 축약 ────────────────────────
+            lvl_tag  = LEVEL_ABBR[lvl]        # sk / lo / md / hi / sv
+            ovf_tag  = _ovf_str(ovf_actual)   # ov5 / ov25 / ov1p3 …
+            stem     = f"{tag_ap}_{lvl_tag}_{ovf_tag}"   # 예: poi2_sv_ov13p1
+            
+            out_json = base_dir / f"{stem}.json"
+            trace.save_to_json(out_json, skip_token_ids)
+            print(f"[saved] {out_json}  (blk={blk}, OVF={ovf_actual:.2f})")
 
-                # # ---------- 4. persist JSON ----------
-                trace_obj.save_to_json(
-                    filename=output_json_path,
-                    skip_token_ids=skip_token_ids
-                )
-            except Exception as e:
-                print(f"Error generating trace: {e}")
-                continue
+            # 메모리-프레셔 지표 & PNG
+            metrics = memory_pressure_plot(
+                trace_path = str(out_json),
+                plot       = True,
+                shade      = (True, True),
+                crosses    = (True, True),
+            )
+            (base_dir / f"{stem}.metrics.json").write_text(json.dumps(metrics, indent=2))
+            # PNG는 memory_pressure_plot 내부에서 같은 stem으로 자동 저장
 
-            # # -------- NEW: write a summary .txt with total token counts -----------------
-            # tot_in  = sum(r.input_length  for r in trace_obj.requests.values())
-            # tot_out = sum(r.output_length for r in trace_obj.requests.values())
+# ────────────────────────────────────────────────────────
+# ❸ Arrival-Pattern 그리드  (100 개 Request 전제)
+# ────────────────────────────────────────────────────────
+# 기대 도착 ≈ λ × max_steps = 100  →  max_steps ≈ 100 / λ
+# def _best_max_steps(lam, margin=0.2, minimum=120):
+#     base = math.ceil(100 / lam)            # 100 개 맞추는 최소 길이
+#     return max(minimum, int(base * (1 + margin)))  # 20 % 여유
 
-            # txt_path = Path(output_json_path).with_suffix("")  # strip “.json”
-            # with open(f"{txt_path}_token_totals.txt", "w") as fh:
-            #     fh.write(f"total_input_tokens  {tot_in}\n")
-            #     fh.write(f"total_output_tokens {tot_out}\n")
-
-            # # ---------- 5. optional plotting ----------
-            # if not plot_distributions:
-            #     return                                            # nothing else to do
-            # # ---------------- empirical data ----------------
-            # reqs          = list(trace_obj.requests.values())
-            # input_lens    = np.array([r.input_length  for r in reqs])
-            # output_lens   = np.array([r.output_length for r in reqs])
-            # arrivals      = np.sort([r.arrival_time for r in reqs])
-            # inter_arr_emp = np.diff(arrivals)          # empty if len<2
-
-            # # ---------------- analytic model ----------------
-            # # 1) helper → uniform-mixture PMF
-            # def mixture_uniform_pmf(bounds, probs):
-            #     lo = min(b[0] for b in bounds.values())
-            #     hi = max(b[1] for b in bounds.values())
-            #     xs = np.arange(lo, hi + 1)
-            #     pmf = np.zeros_like(xs, dtype=float)
-            #     for cat, p in probs.items():
-            #         a, b = bounds[cat]
-            #         pmf[(xs >= a) & (xs <= b)] += p / (b - a + 1)
-            #     return xs, pmf
-
-            # from collections import defaultdict
-
-            # input_by_cat = defaultdict(list)
-            # output_by_cat = defaultdict(list)
-
-            # for r in reqs:
-            #     input_by_cat[r.category].append(r.input_length)
-            #     output_by_cat[r.category].append(r.output_length)
-
-            # # 3) compute in_bounds, out_bounds per category
-            # in_bounds = {
-            #     cat: (min(lengths), max(lengths))
-            #     for cat, lengths in input_by_cat.items()
-            # }
-            # out_bounds = {
-            #     cat: (min(lengths), max(lengths))
-            #     for cat, lengths in output_by_cat.items()
-            # }
-
-            # request_type_probs_list = request_data["request_type_probs"]
-            # probs = {cat: prob for cat, prob in request_type_probs_list}
-
-            # xin,  pin  = mixture_uniform_pmf(in_bounds,  probs)
-            # xout, pout = mixture_uniform_pmf(out_bounds, probs)
-
-            # # 2) geometric PMF: P(k) = (1-λ)^{k-1} λ   for k≥1
-            # lam = getattr(arrival_pattern, "lambda_per_step", None)
-            # k_max = (inter_arr_emp.max() if inter_arr_emp.size else 1) + 20
-            # k_vals = np.arange(1, k_max + 1)
-            # if lam is not None and 0 < lam < 1:
-            #     pgeom = (1 - lam) ** (k_vals - 1) * lam
-            # else:                      # continuous pattern or λ invalid → flat 0
-            #     pgeom = np.zeros_like(k_vals, dtype=float)
-
-            # # ---------------- save helper ----------------
-            # stem = Path(output_json_path).with_suffix("")  # remove .json
-
-            # def savefig(tag, postfix):
-            #     out = f"{stem}{postfix}_{tag}.png"
-            #     plt.savefig(out, dpi=150, bbox_inches="tight")
-            #     plt.close()
-
-            # # ---------------- trace histograms ----------------
-            # plt.figure()
-            # plt.hist(input_lens, bins=50)
-            # plt.xlabel("input length (tokens)"); plt.ylabel("count")
-            # plt.title("Trace: input-length distribution")
-            # savefig("input", postfix_trace)
-
-            # plt.figure()
-            # plt.hist(output_lens, bins=50)
-            # plt.xlabel("output length (tokens)"); plt.ylabel("count")
-            # plt.title("Trace: output-length distribution")
-            # savefig("output", postfix_trace)
-
-            # if inter_arr_emp.size:
-            #     plt.figure()
-            #     plt.hist(inter_arr_emp, bins=50)
-            #     plt.xlabel("inter-arrival gap"); plt.ylabel("count")
-            #     plt.title("Trace: inter-arrival distribution")
-            #     savefig("inter", postfix_trace)
-
-            # # ---------------- analytic PDFs / PMF ----------------
-            # plt.figure()
-            # plt.step(xin, pin, where="mid")
-            # plt.xlabel("input length (tokens)"); plt.ylabel("probability")
-            # plt.title("Model: input-length PDF (mixture of uniforms)")
-            # savefig("input", postfix_model)
-
-            # plt.figure()
-            # plt.step(xout, pout, where="mid")
-            # plt.xlabel("output length (tokens)"); plt.ylabel("probability")
-            # plt.title("Model: output-length PDF (mixture of uniforms)")
-            # savefig("output", postfix_model)
-
-            # if lam is not None and 0 < lam < 1:
-            #     plt.figure()
-            #     plt.stem(k_vals, pgeom)
-            #     plt.xlabel("inter-arrival gap (steps)"); plt.ylabel("probability")
-            #     plt.title(f"Model: geometric PMF (λ={lam:g})")
-            #     savefig("inter", postfix_model)
+# ──────────────────────────────────────────────────────────
+#  output-token 합 × scale  ⇒ 타임라인 길이를 정해 주는 Arrival
+# ──────────────────────────────────────────────────────────
+class TokenScaledArrival(ArrivalPattern):
+    def __init__(self, T: int, scale_tag: str):
+        self.T = max(1, int(T))            # 전체 디코드 스텝
+        self.tag = scale_tag               # 슬러그용
+    def generate_arrival_times(self, n: int) -> List[int]:
+        times = np.linspace(0, self.T, n, endpoint=False, dtype=int)
+        np.random.shuffle(times)
+        return times.tolist()
+    def __str__(self):
+        return f"TokenScaledArrival(scale={self.tag})"
 
 
-# 사용 예시
-if __name__ == "__main__":
-    max_model_len = 8000
-    block_size = 16
-    # num_gpu_blocks = max_model_len//block_size
-    # max_parallel = 4 # batch size 
+def _timeline_len(outputs: list[int],
+                  scale: float = 0.8,
+                  minimum: int = 120) -> int:
+    """
+    타임라인 길이 T = max(minimum,  scale × Σ output_tokens)
+      • scale : 0.0–1.0  (예: 0.8 → 80 %)
+    """
+    return max(minimum, int(sum(outputs) * scale))
 
-    build_sched_save(
-        request_json_path="/home/sychoy/vllm/trace_pool/type2_8K_pressure/request.json",
-        arrival_json_path="/home/sychoy/vllm/trace_pool/type2_8K_pressure/arrivals.json",
-        max_tokens=max_model_len,
-        block_size=block_size,
-        gpu_block_ranges = [-0.6, -0.3, 0, 0.3, 0.6, 1.0],
-        plot_distributions=True,  # Set to True to plot distributions
-        skip_token_ids=True,
-        postfix_trace="_trace",
-        postfix_model="_model",
-        static=True
+def build_arrival_patterns(
+    request_json: str,
+    scales: list[float] = (0.6, 0.8, 1.0),
+) -> list[ArrivalPattern]:
+    """
+    request_json : traces/req_*.json 파일
+    scales       : [0.6,0.8,1.0] 식으로 여러 비율 지정
+    ------------------------------------------------------
+    반환값       : 각 scale × {Uniform, Periodic, Poisson, ...}
+                  5종 ArrivalPattern 이 모두 포함된 리스트
+    """
+    data = load_json(request_json)
+    outputs = [r["output_length"] for r in data["requests"].values()]
+    n_req   = len(outputs)
+
+    patterns = []
+    for sc in scales:
+        tag = f"{int(sc*100):02d}"        # 0.6 → "60", 1.2 → "120"
+        T   = _timeline_len(outputs, sc)
+
+        # 0) TokenScaledArrival
+        tksa = TokenScaledArrival(T, tag)
+        setattr(tksa, "scale_tag", tag)      # ★
+        patterns.append(tksa)
+
+        # 1) Uniform
+        uni  = DiscreteUniformArrival(max_step=T)
+        setattr(uni, "scale_tag", tag)       # ★
+        patterns.append(uni)
+
+        # 2) Periodic
+        per  = DiscretePeriodicArrival(interval=max(1, int(round(T / n_req))))
+        setattr(per, "scale_tag", tag)       # ★
+        patterns.append(per)
+
+        # 3) Poisson
+        poi  = DiscretePoissonArrival(lmbd=n_req / T, max_steps=T)
+        setattr(poi, "scale_tag", tag)       # ★
+        patterns.append(poi)
+
+        # 4) Bimodal
+        bim  = DiscreteBimodalArrival(l1=n_req/T/0.7,
+                                    l2=max(0.1, n_req/T*0.1),
+                                    p=0.7, max_steps=T)
+        setattr(bim, "scale_tag", tag)       # ★
+        patterns.append(bim)
+
+        # 5) Bursty
+        bur  = PoissonBurstyArrivalPattern(lb=max(1, int(n_req/T)),
+                                        lg=max(1, int(T/5)))
+        setattr(bur, "scale_tag", tag)       # ★
+        patterns.append(bur)
+
+    return patterns
+
+def build_request_types_S_L(short_bins=(256,512,1024,2048),
+                            long_bins =(4096,8192,16384,32384),
+                            pct=0.2, max_total=32384):
+    span = lambda c: (max(16,int((c*(1-pct))//16*16)),
+                      max(16,int((c*(1+pct))//16*16)))
+    S, L = short_bins, long_bins
+    combos = []
+    for in_bin, out_bin, tag in [
+        *( (i,o,"SS") for i in S for o in S ),
+        *( (i,o,"SL") for i in S for o in L ),
+        *( (i,o,"LS") for i in L for o in S ),
+        *( (i,o,"LL") for i in L for o in L ),
+    ]:
+        if in_bin + out_bin > max_total: continue
+        li, hi = span(in_bin)
+        lo, ho = span(out_bin)
+        name = f"{tag}_I{li}-{hi}_O{lo}-{ho}"
+        combos.append(RequestType(name, li, hi, lo, ho,
+                                  sampling_method="uniform",
+                                  dataset_name="ShareGPT"))
+    return combos            # 36개 (기본)
+
+# ────────────────────────────────
+#  (1) 모든 격자 혼합 생성
+# ────────────────────────────────
+def grid_mixtures(step: float = 0.25):
+    """step 간격 격자에서 Σ=1 조건을 만족하는 4-tuple 리스트 반환."""
+    vals = np.arange(0, 1 + 1e-9, step)
+    mixes = [(a, b, c, 1 - a - b - c)
+             for a in vals for b in vals for c in vals
+             if 0 <= 1 - a - b - c <= 1]
+    return [tuple(round(x, 4) for x in m) for m in mixes]   # 깔끔한 반올림
+
+
+# ────────────────────────────────
+#  (2) 휴리스틱 9-개 (기존)
+# ────────────────────────────────
+def _heuristic_9(mixes):
+    extremes = [m for m in mixes if m.count(1) == 1]                 # 4
+    pair_mix = [m for m in mixes if sorted(m)[-2] == 0.5][:4]        # 4
+    uniform  = (0.25, 0.25, 0.25, 0.25)                              # 1
+    return extremes + pair_mix + [uniform]                           # 9개
+
+
+# ────────────────────────────────
+#  (3) K-Means 대표 k-개
+# ────────────────────────────────
+def _kmeans_select(mixes, k: int, random_state=0):
+    try:
+        from sklearn.cluster import KMeans
+    except ImportError:
+        raise ImportError("scikit-learn이 필요합니다: pip install scikit-learn")
+
+    if len(mixes) <= k:
+        return mixes
+
+    km = KMeans(n_clusters=k, n_init="auto", random_state=random_state)
+    km.fit(np.asarray(mixes))
+    return [tuple(map(float, c)) for c in km.cluster_centers_]
+
+
+# ────────────────────────────────
+#  (4) Latin Hypercube Sampling  k-개
+#       (단순 구현: 축마다 k 등분 후 Dirichlet 사영)
+# ────────────────────────────────
+def _lhs_simplex(k: int, random_state=0):
+    rng = np.random.default_rng(random_state)
+    # LHS in 3-D cube [0,1]^3
+    P = (rng.random((k, 3)) + rng.permutation(k)[:, None]) / k  # 층화
+    mixes = []
+    for a, b, c in P:
+        d = 1 - a - b - c
+        if d < 0:                          # simplex 밖 ⇒ Dirichlet로 대체
+            mix = rng.dirichlet([1, 1, 1, 1])
+        else:
+            mix = np.array([a, b, c, d])
+            mix /= mix.sum()
+        mixes.append(tuple(round(float(x), 4) for x in mix))
+    return mixes
+
+def select_mixtures(
+    mixes: list,
+    k: int = 9,
+    mode: str = "heuristic",      # "heuristic" | "kmeans" | "lhs"
+    random_state: int = 0,
+):
+    mode = mode.lower()
+    if mode == "heuristic":
+        return _heuristic_9(mixes) if k <= 9 else _heuristic_9(mixes) + mixes[:k-9]
+    if mode == "kmeans":
+        return _kmeans_select(mixes, k, random_state)
+    if mode == "lhs":
+        return _lhs_simplex(k, random_state)
+    raise ValueError(f"unknown mode {mode}")
+
+def mix_tag(m):                         # m = (pSS,pSL,pLS,pLL)
+    return "SS{:02d}_SL{:02d}_LS{:02d}_LL{:02d}".format(
+        int(m[0]*100), int(m[1]*100),
+        int(m[2]*100), int(m[3]*100),
     )
+
+# ───────────────────────────────────────────────────────────
+# helper : ArrivalPattern → slug 문자열
+#   e.g.  "DiscretePoissonArrival(lambda_per_step=2)"
+#      →  "discretepoisson_l2"
+# ───────────────────────────────────────────────────────────
+import re
+
+def _slug_ap(ap: ArrivalPattern) -> str:
+    """
+    ArrivalPattern → 짧은 slug 문자열
+      • scale_tag 속성이 있으면  ➜  <패턴코드><scale>
+        - TokenScaledArrival  → tsa60
+        - Uniform             → uni60   … 등
+      • 없으면 기존 규칙 유지
+    """
+    # ── 1) scale_tag 우선 ………………………………………………………………………
+    if hasattr(ap, "scale_tag"):
+        tag = ap.scale_tag                # "60", "80", …
+
+        if isinstance(ap, TokenScaledArrival):
+            return f"tsa{tag}"
+        if isinstance(ap, DiscreteUniformArrival):
+            return f"uni{tag}"
+        if isinstance(ap, DiscretePeriodicArrival):
+            return f"per{tag}"
+        if isinstance(ap, DiscretePoissonArrival):
+            return f"poi{tag}"
+        if isinstance(ap, DiscreteBimodalArrival):
+            return f"bim{tag}"
+        if isinstance(ap, PoissonBurstyArrivalPattern):
+            return f"bur{tag}"
+
+    # ── 2) 기존 패턴 (scale_tag 없는 경우) …………………
+    if isinstance(ap, DiscreteUniformArrival):         # e.g. uni200
+        return f"uni{ap.max_step}"
+    if isinstance(ap, DiscretePeriodicArrival):        # e.g. per25
+        return f"per{ap.interval}"
+    if isinstance(ap, DiscretePoissonArrival):         # e.g. poi1
+        return f"poi{str(ap.lmbd).rstrip('0').rstrip('.')}"
+    if isinstance(ap, DiscreteBimodalArrival):
+        l1 = str(ap.l1).rstrip('0').rstrip('.')
+        l2 = str(ap.l2).rstrip('0').rstrip('.')
+        p  = str(ap.p ).rstrip('0').rstrip('.')
+        return f"bim{l1}-{l2}_p{p}"
+    if isinstance(ap, PoissonBurstyArrivalPattern):    # e.g. bur5-20
+        return f"bur{ap.lb}-{ap.lg}"
+
+    # ── 3) fallback – 클래스 이니셜만 ……………………
+    cls = ap.__class__.__name__
+    return ''.join(w[0] for w in re.findall(r'[A-Z][^A-Z]*', cls)).lower()
+
+
+# ────────────────────────────────────────────────
+#  Memory-pressure 분석 유틸
+#    • PPR, TPI, OV … 계산
+#    • plot_PPR=True 이면 PNG 저장
+# ────────────────────────────────────────────────
+import numpy as np, math, json
+def _tok_to_blk(toks: int, blk: int = 16) -> int:
+    if isinstance(toks, np.ndarray):
+        return np.ceil(toks / blk).astype(int)
+    else:                           # 파이썬 스칼라
+        return math.ceil(toks / blk)
+
+def memory_pressure_plot(
+    trace_path: str,
+    *,
+    plot: bool        = True,            # 그림 자체를 그릴지 여부
+    curve: bool       = True,            # 주 곡선
+    shade: Tuple[bool, bool] = (True, True),  # (lower, upper)
+    guides: bool      = True,            # 가이드선
+    crosses: Tuple[bool, bool] = (True, True),# (TJ, BJ)
+) -> Dict[str, float]:
+    """
+    vLLM trace → 메모리-압력 지표 & (선택) 시각화 PNG
+    -------------------------------------------------------------------
+    Parameters
+    ----------
+    trace_path : str
+        *.json trace 파일 경로
+    plot : bool
+        PNG 자체를 만들지 여부.
+    curve / shade / guides / crosses : 세부 레이어 토글
+        shade     = (아래 0–1, 위 1–overflow)
+        crosses   = (Type-1, Type-2)
+    -------------------------------------------------------------------
+    Returns
+    -------
+    Dict[str, float]
+        PPR, TPI, OVF 등 + 선택적 'plot_path'
+    """
+    # 0) 로드 ----------------------------------------------------------------
+    with open(trace_path, encoding="utf-8") as f:
+        j = json.load(f)
+
+    gpu_blocks = j.get("num_gpu_blocks_override") or j.get("num_gpu_blocks")
+    if gpu_blocks is None:
+        raise KeyError("trace JSON에 'num_gpu_blocks_override' 키가 없습니다.")
+
+    # 1) 요청 파싱 ------------------------------------------------------------
+    reqs: List[Tuple[int, int, int, int]] = []   # (arr, end, inpBlk, out)
+    last_step = 0
+    for r in j["requests"].values():
+        arr = int(r["arrival_time"])
+        out = int(r["output_length"])
+        inp_blk = _tok_to_blk(int(r["input_length"]))
+        last_step = max(last_step, arr + out)
+        reqs.append((arr, arr + out, inp_blk, out))
+
+    if not reqs:
+        raise ValueError("Trace has no requests")
+
+    # 2) 타임라인 스윕 (NumPy) -------------------------------------------------
+    steps = np.arange(last_step + 1)
+    live_blocks = np.zeros_like(steps, dtype=np.int32)
+
+    for arr, end, inp_blk, out in reqs:
+        span = slice(arr, end + 1)
+        dec  = np.minimum(steps[span] - arr, out)
+        live_blocks[span] += inp_blk + _tok_to_blk(dec)
+
+    y = live_blocks / gpu_blocks                   # pressure ratio
+
+    peak_blocks  = int(live_blocks.max())
+    peak_step    = int(live_blocks.argmax())
+    over_mask    = live_blocks > gpu_blocks
+    ge2_mask     = live_blocks >= 2 * gpu_blocks
+
+    shortfall_sum = int((live_blocks - gpu_blocks).clip(min=0).sum())
+    over_steps    = int(over_mask.sum())
+    ge2_steps     = int(ge2_mask.sum())
+    total_steps   = len(steps)
+
+    # 3) 메트릭 ---------------------------------------------------------------
+    out = dict(
+        PPR      = peak_blocks / gpu_blocks,
+        TPI      = over_steps / total_steps,
+        OV_block_step = shortfall_sum,
+        OV_frac  = shortfall_sum / (gpu_blocks * total_steps),
+        GE2_frac = ge2_steps / total_steps,
+        peak_blocks = peak_blocks,
+        peak_step   = peak_step,
+        gpu_blocks  = gpu_blocks,
+        total_steps = total_steps,
+    )
+
+    # 4) crossings (TJ/BJ) ----------------------------------------------------
+    tj_cnt = bj_cnt = 0
+    if any(crosses):
+        thr = [1.0] + [32 / (32 - ol) for ol in
+                       (16, 10, 8, 6, 5, 4, 3, 2, 1, 0)]
+        thr = np.asarray(thr)
+
+        prev = y[:-1, None]
+        curr = y[1:,  None]
+        hit  = ((prev - thr) * (curr - thr) < 0) | ((prev == thr) ^ (curr == thr))
+
+        hit_cnt = hit.sum(axis=1)
+        tj_cnt  = int((hit_cnt == 1).sum())
+        bj_cnt  = int((hit_cnt >  1).sum())
+
+    out.update(type1_count=tj_cnt, type2_count=bj_cnt)
+
+    # 5) 그림 ---------------------------------------------------------------
+    if plot:
+        fig, ax = plt.subplots(figsize=(8, 3))
+
+        # A. shading -----------------------------------------------------
+        sh_low, sh_up = shade
+        if sh_low or sh_up:
+            over_seg, in_seg, seg_start = [], False, None
+            for i, flag in enumerate(over_mask):
+                if flag and not in_seg:
+                    seg_start, in_seg = i, True
+                elif not flag and in_seg:
+                    over_seg.append((seg_start, i)); in_seg = False
+            if in_seg: over_seg.append((seg_start, total_steps))
+
+            for s, e in over_seg:
+                xs = steps[s:e]
+                ys = y[s:e]
+                if sh_low:
+                    ax.fill_between(xs, 0.0, 1.0, color="C0", alpha=.25)
+                if sh_up:
+                    ax.fill_between(xs, 1.0, ys, color="C1", alpha=.25)
+
+        # B. main curve ---------------------------------------------------
+        if curve:
+            ax.plot(steps, y, lw=.8, label="pressure")
+            ax.axhline(1.0, ls="--", lw=.8, label="capacity")
+
+        # C. guides -------------------------------------------------------
+        if guides:
+            for g in [1.0] + [32 / (32 - ol) for ol in (16,10,8,6,5,4,3,2,1,0)]:
+                ax.axhline(g, ls="--", lw=.5, color="grey", alpha=.5)
+
+        # D. crossings ----------------------------------------------------
+        cr1, cr2 = crosses
+        if (cr1 or cr2) and (tj_cnt or bj_cnt):
+            thr = [1.0] + [32 / (32 - ol) for ol in (16,10,8,6,5,4,3,2,1,0)]
+            type1_x = [];  type1_y = []
+            type2_x = [];  type2_y = []
+            for i in range(1, total_steps):
+                prev, cur = y[i-1], y[i]
+                hit = [t for t in thr
+                       if (prev-t)*(cur-t) < 0 or (prev == t) ^ (cur == t)]
+                if len(hit) == 1:
+                    type1_x.append(i); type1_y.append(hit[0])
+                elif len(hit) > 1:
+                    type2_x.append(i); type2_y.append(max(hit))
+            if cr1 and type1_x:
+                ax.scatter(type1_x, type1_y, s=20, marker="o", label="TJ")
+            if cr2 and type2_x:
+                ax.scatter(type2_x, type2_y, s=30, marker="s", label="BJ")
+
+        # E. final touches -----------------------------------------------
+        ax.set_xlabel("decode step")
+        ax.set_ylabel("live / gpu")
+        ax.set_title(
+            f"PPR={out['PPR']:.2f}  OTF={out['TPI']:.2f}  "
+            f"OVF={out['OV_frac']:.2f}, TJ={tj_cnt}, BJ={bj_cnt}"
+        )
+        ax.legend(frameon=False)
+        plt.tight_layout()
+
+        png = Path(trace_path).with_suffix(".png")
+        fig.savefig(png, dpi=150)
+        plt.close(fig)
+        out["plot_path"] = str(png)
+
+    return out
+# ------------------------------------------------------------
+# (A)  주어진 블록 수 → OVF 계산  (trace 생성 이전·가벼운 시뮬)
+# ------------------------------------------------------------
+def _ovf_for_blocks(reqs: Dict, arr_times: List[int],
+                    blocks: int, blk_size: int = 16) -> float:
+    peak = over_sum = steps = 0
+    for (arr, inp, out) in reqs:
+        end = arr + out
+        steps = max(steps, end)
+
+    for t in range(steps + 1):
+        live = 0
+        for (arr, inp, out) in reqs:
+            if arr <= t <= arr+out:
+                live += math.ceil((inp + min(t-arr, out)) / blk_size)
+        if live > blocks:
+            over_sum += live - blocks
+    return over_sum / (blocks * (steps + 1))
+
+def find_blocks_for_ovf(
+    reqs: List[Tuple[int,int,int]],   # (arr, inp, out)
+    arr_times: List[int],
+    target_ovf: float,
+    tol: float = 0.01,
+    blk_size: int = 16,
+    min_blk: int | None = None,
+    max_blk_cap: int = 2**14,        # 16384 블록(≈ 262k tok) 까지만 허용
+) -> int:
+    """
+    (개선판)  target_ovf 를 만족하는 최소 블록 수를 반환.
+    target 이 물리적으로 불가능하면, 최저 OVF 를 주는 최대 블록 수를 반환하고
+    `unmet=True` 를 함께 리턴한다.
+    """
+    # ── 1) 초기 lo, hi ──────────────────────────────────────────
+    peak_tok = max(inp + out for _, inp, out in reqs)
+    lo = max(min_blk or 1, math.ceil(peak_tok / blk_size))
+    hi = max(lo, 4096)                        # 4k 블록을 최초 hi 로
+
+    def ovf(b): return _ovf_for_blocks(reqs, arr_times, b, blk_size)
+
+    # ── 2) hi 가 충분히 큰지 점검; 부족하면 2× 확장 ─────────────
+    while ovf(hi) > target_ovf and hi < max_blk_cap:
+        hi *= 2                                # 2 배씩 키우기
+    hi = min(hi, max_blk_cap)                  # 안전 캡
+
+    # ── 3) 이분 탐색 ────────────────────────────────────────────
+    if ovf(lo) <= target_ovf:                  # 이미 lo 로도 OK
+        return lo, False
+        
+    while lo < hi:
+        mid = (lo + hi) // 2
+        cur = ovf(mid)
+        if abs(cur - target_ovf) <= tol:
+            return mid, False
+        if cur > target_ovf:
+            lo = mid + 1
+        else:
+            hi = mid
+    # 여기까지 오면 target 을 못 맞춤
+    return hi, True
+
+LEVEL_ABBR = {
+    "vlow"     : "vl",   # very-low
+    "low"      : "lo",
+    "mid_low"  : "ml",
+    "mid"      : "md",
+    "mid_high" : "mh",
+    "high"     : "hi",
+}
+
+def _ovf_str(val: float) -> str:
+    """
+    0.25  → ov25
+    1.53  → ov1p5
+    13.07 → ov13p1   (두 번째 자리 0 이면 삭제)
+    """
+    if val < 1:
+        return f"ov{int(round(val*100))}"
+    s = f"{val:.1f}".rstrip("0").rstrip(".")     # 1.50 → 1.5 , 13.0 → 13
+    return "ov" + s.replace(".", "p")
+
+
+# ────────────────────────────────────────────────────────────────────
+# 3. 예시 실행
+# ────────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    # NOTE(HONG): request generation with various length combinations
+    # RT_list = build_request_types_S_L()                    # 36개
+    
+    # # ① 모든 격자 혼합 생성 (step=0.25 ⇒ 35개)
+    # all_mix = grid_mixtures(step=0.25)
+
+    # # ② 대표 샘플 선택
+    # mixes_h9  = select_mixtures(all_mix, k=9,  mode="heuristic")
+    # mixes_k12 = select_mixtures(all_mix, k=12, mode="kmeans",  random_state=42)
+    # mixes_l20 = select_mixtures(all_mix, k=20, mode="lhs",     random_state=42)
+
+    # print("heuristic 9 :", mixes_h9[:3], "...")
+    # print("kmeans 12   :", mixes_k12[:3], "...")
+    # print("lhs 20      :", mixes_l20[:3], "...")
+
+    # # Combine all mixes into a single list
+    # mixes = mixes_h9 + mixes_k12 + mixes_l20
+    
+    # # Print total number of mixes
+    # print(f"Total number of mixes: {len(mixes)}")
+    
+    # for mix in mixes:                           # mixes_h9 + mixes_k12 + mixes_l20 ...
+    #     probs = {rt: 0 for rt in RT_list}
+    #     block = len(RT_list) // 4               # 9
+    #     for j, p in enumerate(mix):             # j=0:SS, 1:SL, 2:LS, 3:LL
+    #         for rt in RT_list[j*block:(j+1)*block]:
+    #             probs[rt] = p / block
+
+    #     # ─────────────── 변경된 저장 경로 ───────────────
+    #     tag = mix_tag(mix)                      # 한눈에 보이는 태그
+    #     save_request_json(
+    #         path=f"traces/req_{tag}.json",      # traces 폴더에 저장
+    #         request_types=probs,
+    #         num_req=100,
+    #         batch_size=4,
+    #         skip_token_ids=True,
+    #     )
+
+    # ────────────────────────────────────────────────────────
+    #  모든 request.json × Arrival-Pattern 조합으로 trace 생성
+    #    (앞서 “traces/req_*.json” 으로 저장한 요청 파일들을 대상으로)
+    # ────────────────────────────────────────────────────────    
+
+    level_spec = {
+        "vlow"     : dict(target_ovf = 0.05, tol = 0.010),  # 매우 여유
+        "low"      : dict(target_ovf = 0.12, tol = 0.015),
+        "mid_low"  : dict(target_ovf = 0.22, tol = 0.020),
+        "mid"      : dict(target_ovf = 0.35, tol = 0.030),
+        "mid_high" : dict(target_ovf = 0.55, tol = 0.040),
+        "high"     : dict(target_ovf = 0.80, tol = 0.050),  # 상한 유지
+    }    
+
+    for req_json in Path("traces/request_types").glob("req_*.json"):
+        build_sched_save(
+            request_json   = str(req_json),            
+            level_spec     = level_spec,
+            blk_size       = BLOCK_SIZE_TOK,
+            static         = False,
+            skip_token_ids = True,
+            scales       = [0.05], # [0.1, 0.25, 0.5]
+        )

@@ -1,0 +1,14 @@
+{
+  "PPR": 1.52423095703125,
+  "TPI": 0.30870658601237,
+  "OV_block_step": 45414117,
+  "OV_frac": 0.06279838073021095,
+  "GE2_frac": 0.0,
+  "peak_blocks": 24973,
+  "peak_step": 21393,
+  "gpu_blocks": 16384,
+  "total_steps": 44139,
+  "type1_count": 54,
+  "type2_count": 33,
+  "plot_path": "traces/request_types/SS03_SL00_LS04_LL91/per05/per05_vl_ov6.png"
+}

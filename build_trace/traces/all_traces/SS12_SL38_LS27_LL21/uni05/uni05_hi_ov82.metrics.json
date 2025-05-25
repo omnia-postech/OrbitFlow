@@ -1,0 +1,14 @@
+{
+  "PPR": 4.056900345803206,
+  "TPI": 0.7123011370798982,
+  "OV_block_step": 103662065,
+  "OV_frac": 0.8216192896387525,
+  "GE2_frac": 0.356175780954542,
+  "peak_blocks": 12905,
+  "peak_step": 18162,
+  "gpu_blocks": 3181,
+  "total_steps": 39663,
+  "type1_count": 33,
+  "type2_count": 10,
+  "plot_path": "traces/SS12_SL38_LS27_LL21/uni05/uni05_hi_ov82.png"
+}
