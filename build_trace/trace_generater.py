@@ -178,6 +178,22 @@ class RequestType:
         slo = (inp+out)*PROFILED_A + PROFILED_B
         return RawRequest(self.cat, inp, out, token_ids, slo)
 
+def peak_batch_blocks(req_dict: dict, batch_size: int,
+                      blk: int = BLOCK_SIZE_TOK) -> int:
+    """
+    req_dict : {"request_0": {...}, ...}  (input/output 길이를 포함해야 함)
+    batch_size : 동시에 GPU에 들어갈 수 있는 request 수
+    blk : KV-block 당 토큰 수
+    -----------------------------------------------------------
+    반환값 : 최악의 배치(길이 상위 batch_size 개)의
+            (input+output) 합계를 blk 로 나눈 뒤 올림한 블록 수
+    """
+    totals = sorted((r["input_length"] + r["output_length"]
+                     for r in req_dict.values()),
+                    reverse=True)
+    top_sum = sum(totals[:batch_size])
+    return math.ceil(top_sum / blk)
+
 # 1-3) request.json 저장
 def save_request_json(path: str,
                       request_types: Dict[RequestType,float],
@@ -205,10 +221,18 @@ def save_request_json(path: str,
     else:
         reqs=[pick_rt().generate(vocab) for _ in range(num_req)]
 
+    peak_blk = peak_batch_blocks(
+        {f"request_{i}": dict(input_length=r.input_length,
+                              output_length=r.output_length)
+         for i, r in enumerate(reqs)},
+        batch_size
+    )
+
     # 직렬화 형태 맞추기
     out = OrderedDict([
         ("batch_size", batch_size),
         ("vocab",      inline(vocab)),
+        ("peak_batch_blocks", peak_blk),      # ★ 추가 ★
         ("requests",   None),
     ])
 
@@ -412,12 +436,20 @@ class Trace:
             if skip_token_ids: d.pop("token_ids",None)
             return d
         # (2) ─ OrderedDict으로 키 순서 고정 -------------------------
+        peak_blk = peak_batch_blocks(
+            {f"dummy_{i}": dict(input_length=r.input_length,
+                                output_length=r.output_length)
+            for i, r in self.requests.items()},
+            self.batch_size
+        )
+
         data = OrderedDict([
             ("batch_size",        self.batch_size),
             ("max_model_len",     self.max_model_len),
             ("num_gpu_blocks_override", self.num_gpu_blocks_override),
             ("arrival_pattern",   self.arrival_pattern_name),
             ("vocab",             inline(self.vocab)),
+            ("peak_batch_blocks", peak_blk),      # ★ 추가
             ("requests",          None),               # 뒤에서 교체
         ])
 
