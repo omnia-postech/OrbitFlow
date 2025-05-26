@@ -16,7 +16,7 @@ FIGURE_ONLY=$1                      # 0 → 실행 + 그림, 1 → 그림만
 EXP_LIST=(paper_main_exp_test)
 METHOD_LIST=(Ours Flexgen)
 TRACE_CFG_DIR="${ROOT}/benchmark/SS83_SL00_LS08_LL08/"
-TRACE_LIST=(bim50_md_ov38 bim50_vl_ov5)
+TRACE_LIST=(bim50_vl_ov5 bim50_md_ov38 bim50_mh_ov54 bim50_hi_ov78)
 
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"

@@ -4,7 +4,8 @@ from collections import defaultdict
 import torch
 from gurobipy import GRB
 from vllm.worker.distn.solver import Solver, Result, Request
-
+import os
+import psutil    
 
 import gc
 
@@ -57,7 +58,18 @@ class CacheEngine(CacheEngineBase):
         # Initialize the cache.
         self.gpu_cache = self._allocate_kv_cache_gpu(
             self.num_gpu_blocks, self.device_config.device_type)
+        
+        # ------------- CPU 메모리 측정 (할당 전) -------------
+        proc = psutil.Process(os.getpid())
+        rss_before = proc.memory_info().rss / 1024 / 1024  # MB
+        logger.critical("CPU RSS before CPU-cache alloc: %.2f MB", rss_before)
+
         self.cpu_cache = self._allocate_kv_cache_cpu(self.num_cpu_blocks, "cpu")
+        
+        # ------------- CPU 메모리 측정 (할당 후) -------------
+        rss_after = proc.memory_info().rss / 1024 / 1024  # MB
+        logger.critical("CPU RSS after  CPU-cache alloc: %.2f MB", rss_after)
+        logger.critical("Δ CPU RSS: %.2f MB", rss_after - rss_before)
         
         self.is_monolithic_distn = cache_config.is_monolithic_distn
         self.prefetch_mode = cache_config.prefetch_mode
@@ -618,7 +630,18 @@ class FlattenedCacheEngine(CacheEngineBase):
         self.gpu_cache = self._allocate_kv_cache_gpu(
             self.num_gpu_blocks, self.device_config.device_type, True)
             # self.num_gpu_blocks, self.device_config.device_type, cache_config.prefetch_mode!="none")
+
+        # ------------- CPU 메모리 측정 (할당 전) -------------
+        proc = psutil.Process(os.getpid())
+        rss_before = proc.memory_info().rss / 1024 / 1024  # MB
+        logger.critical("CPU RSS before CPU-cache alloc: %.2f MB", rss_before)
+
         self.cpu_cache = self._allocate_kv_cache_cpu(self.num_cpu_blocks, "cpu")
+        
+        # ------------- CPU 메모리 측정 (할당 후) -------------
+        rss_after = proc.memory_info().rss / 1024 / 1024  # MB
+        logger.critical("CPU RSS after  CPU-cache alloc: %.2f MB", rss_after)
+        logger.critical("Δ CPU RSS: %.2f MB", rss_after - rss_before)    
         
         # NOTE(HONG): this is for first prefill distance, we use preceding decoding's distance for other prefill steps
         self.prev_selectn_distance = -1
@@ -744,7 +767,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             mib(prefetch_cache_bytes),
         )
         if len(kv_cache) == 1:
-            logger.info("GPU cache shape %s (merged)", tuple(kv_cache[0].shape))
+            logger.critical("GPU cache shape %s (merged)", tuple(kv_cache[0].shape))
         else:  # two-tensor case
             logger.info(
                 "GPU cache shapes main %s, prefetch %s",
@@ -776,8 +799,8 @@ class FlattenedCacheEngine(CacheEngineBase):
         total_cpu_bytes += byte_size
 
         total_cpu_bytes = total_cpu_bytes / 1024 / 1024
-        msg = f"CPU cache allocated {total_cpu_bytes} MB"
-        logger.info(msg)
+        msg = f"CPU cache allocated {total_cpu_bytes} MB, with shape{tuple(kv_cache[0].shape)}"
+        logger.critical(msg)
         return kv_cache
     
     def update_mapping(

@@ -529,7 +529,7 @@ def build_sched_save(request_json: str,
         req_tuples = [(at, inp, out)
                       for at, (_, inp, out) in zip(arr_times, base_reqs)]
         
-        base_dir = Path(request_json).parent / mix_tag / tag_ap
+        base_dir = Path(request_json).parent / 'all_traces' / mix_tag / tag_ap
         base_dir.mkdir(parents=True, exist_ok=True)
 
         for lvl, cfg in level_spec.items():
@@ -661,7 +661,7 @@ def build_arrival_patterns(
     return patterns
 
 def build_request_types_S_L(short_bins=(256,512,1024,2048),
-                            long_bins =(4096,8192,16384,32384),
+                            long_bins =(4096,8192,16384),
                             pct=0.2, max_total=32384):
     span = lambda c: (max(16,int((c*(1-pct))//16*16)),
                       max(16,int((c*(1+pct))//16*16)))
@@ -1113,7 +1113,7 @@ if __name__ == "__main__":
     #     # ─────────────── 변경된 저장 경로 ───────────────
     #     tag = mix_tag(mix)                      # 한눈에 보이는 태그
     #     save_request_json(
-    #         path=f"traces/req_{tag}.json",      # traces 폴더에 저장
+    #         path=f"traces/request_types/req_{tag}.json",      # traces 폴더에 저장
     #         request_types=probs,
     #         num_req=100,
     #         batch_size=4,
