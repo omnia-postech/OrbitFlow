@@ -1169,7 +1169,7 @@ class Scheduler:
             elif self.cache_config.prefetch_mode in ['static']: 
                 prefetch_distance = self.cache_config.prefetch_distance # use the same distance as the rest of the scheduler
             elif self.cache_config.prefetch_mode in ['selectn', "flexgen", "distn_single"]:
-                prefetch_distance = -2 # as long as there is blocks enough for 1 layer, we will eventually swap it in #FIXME 
+                prefetch_distance = 1 # as long as there is blocks enough for 1 layer, we will eventually swap it in #FIXME 
             else: 
                 prefetch_distance = -1 # default
             touched_blocks, alloc_status = self.block_manager.can_resume(

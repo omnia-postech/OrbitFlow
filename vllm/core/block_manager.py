@@ -663,13 +663,14 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         check_no_caching_or_swa_for_blockmgr_encdec(self, seq_group)
 
         seq = seq_group.get_seqs(status=SequenceStatus.WAITING)[0]
-        # (xinyue) for flattened kv, num_required_blocks is for one layer 
+        # (xinyue) for flattened kv, num_required_blocks is for one layer => dist 0, 
+        # (xinyue) for flattened kv, num_required_blocks is for 16 layer => dist 1, 
         num_required_blocks = BlockTable.get_num_required_blocks(
             seq.get_token_ids(),
             block_size=self.block_size,
             num_lookahead_slots=num_lookahead_slots,
         )
-
+        num_required_blocks *= 16 
         if seq_group.is_encoder_decoder():
             encoder_seq = seq_group.get_encoder_seq()
             assert encoder_seq is not None
