@@ -1,0 +1,14 @@
+{
+  "PPR": 3.483455882352941,
+  "TPI": 0.4409754301882434,
+  "OV_block_step": 87051376,
+  "OV_frac": 0.2887546767898752,
+  "GE2_frac": 0.11475054856218964,
+  "peak_blocks": 3790,
+  "peak_step": 23481,
+  "gpu_blocks": 1088,
+  "total_steps": 277088,
+  "type1_count": 160,
+  "type2_count": 96,
+  "plot_path": "traces/request_types/SS10_SL16_LS51_LL22/bim50/bim50_md_ov34.png"
+}

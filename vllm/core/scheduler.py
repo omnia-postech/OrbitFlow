@@ -828,7 +828,7 @@ class Scheduler:
         if self.cache_config.prefetch_mode == "solver":
 
             # ────────────── [ENTRY] ──────────────
-            logger.info(
+            logger.critical(
                 f"[RUNNING] {len(self.running)}  "
                 f"[WAITING] {len(self.waiting)}  "
                 f"[PAUSED]  {len(self.paused)}  "

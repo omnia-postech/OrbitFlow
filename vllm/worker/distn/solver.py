@@ -361,7 +361,10 @@ class Solver_updated:
         # ----------------------------------------------------------------------------------
         # 1.  Enumerate admissible pre-fetch strides  (one best stride for each n_off)
         # ----------------------------------------------------------------------------------
-        floor_val     = {d: L // (d + 1) for d in range(L)}          # n_off layers on CPU
+        # NOTE(HONG): allowing distance 0
+        # floor_val     = {d: L // (d + 1) for d in range(L)}          # d = 0 … 31
+        # NOTE(HONG): distance 0 is not allowed, so we start from 1
+        floor_val    = {d: L // (d + 1) for d in range(1, L)}           # 1 ≤ d < L - > distance ∈ {1,2,3,4,5,7,9,15,31}
         best_d_for_n  = {n_off: max(d for d, n in floor_val.items() if n == n_off)
                         for n_off in floor_val.values()}
         valid_dist    = sorted(best_d_for_n.values())                # final stride set
@@ -644,6 +647,7 @@ class Solver_updated:
         # -----------------------------------------------------------------
         T_batch = layer_num * compute_per_layer + sum(stall)
         return T_batch 
+    
 class LatencySolver:
     def __init__(self):
         self.profiled_estimator = ProfileBasedEstimator(profiled_path)

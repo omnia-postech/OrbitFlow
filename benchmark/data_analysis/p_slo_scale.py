@@ -48,6 +48,15 @@ def load_metrics(path: Path) -> pd.DataFrame:
             "time_between_tokens": tbt,
             "slo_threshold": np.ones(N, dtype=float)
         })
+    
+style = {
+    "spine": {
+        "color": "black",
+        "alpha": 0.7,
+        "linestyle": "-",
+        "linewidth": 1.5
+    },
+}
 
 # ───────────────────────────────────────────────
 # 3. 플롯 설정
@@ -59,19 +68,23 @@ MARKERS       = ["o", "s", "^", "d", "*"]
 TRACE_LIST  = [
     "test_fit_static_0",
     "test_shortshort_enough",
-    "test_shortlong_less",
-    "test_shortlong_enough"
-]
+    "test_shortlong_less"
+] 
+trace_labels  = [
+    "Trace 1",
+    "Trace 2",
+    "Trace 3"
+] 
 PERCENTILES  = [90, 95, 99]
 x_positions  = range(len(PERCENTILES))
 
-fig, axes = plt.subplots(1, 4, figsize=(35, 6), sharey=True)
+fig, axes = plt.subplots(1, len(trace_labels), figsize=(25, 6), sharey=True)
 plt.subplots_adjust(
     left=0.05, right=0.99, top=0.93, bottom=0.07,
-    wspace=0.05, hspace=0.1
+    wspace=0.075, hspace=0.1
 )
 
-for ax, trace in zip(axes, TRACE_LIST):
+for ax, trace, trace_label in zip(axes, TRACE_LIST, trace_labels):
     for method, label, color, marker in zip(METHODS, METHOD_LABELS, COLORS, MARKERS):
         path = Path(f"/home/heelim/vllm/outputs/benchmark/exp/{method}/{trace}/output.csv")
         df = load_metrics(path)
@@ -86,26 +99,38 @@ for ax, trace in zip(axes, TRACE_LIST):
             linewidth=3,
             markersize=10
         )
-    ax.set_title(trace, fontsize=35)
+    ax.set_title(trace_label, fontsize=30)
     ax.set_xticks(x_positions)
-    ax.set_xticklabels([f"p{p}" for p in PERCENTILES], fontsize=35)
+    ax.set_xticklabels([f"p{p}" for p in PERCENTILES], fontsize=30)
     # ax.set_xlabel("Percentile", fontsize=35)
-    ax.grid(alpha=0.3)
+    # ax.grid(alpha=0.3)
 
 # y축 tick 간격 0.5로 설정, 글자 크기 30
 max_ylim = axes[0].get_ylim()[1]
-y_ticks = np.arange(0, max_ylim + 0.5, 0.5)
+y_ticks = np.arange(0, max_ylim+0.5, 0.5)
 axes[0].set_yticks(y_ticks)
 for ax in axes:
-    ax.tick_params(axis='y', labelsize=35)
+    ax.tick_params(axis='x', labelsize=30)
+    ax.tick_params(axis='y', labelsize=30)
+
+    ax.tick_params(axis='x', which='both', length=0)
+    ax.tick_params(axis='y', which='both', length=0)
+
+    for spine in ax.spines.values():
+        spine.set_edgecolor(style["spine"]["color"])
+        spine.set_alpha(style["spine"]["alpha"])
+        spine.set_linewidth(style["spine"]["linewidth"])
+    
+    ax.set_ylim(-0.15, max_ylim + 0.15)
 
 # 공통 y축 레이블 & 범례
-axes[0].set_ylabel("SLO Scale", fontsize=35)
+axes[0].set_ylabel("SLO Scale", fontsize=30, labelpad=15)
 fig.legend(METHOD_LABELS, loc='upper center', 
-           bbox_to_anchor=(0.52, 1.25),
+           bbox_to_anchor=(0.5, 1.2),
            ncol=len(METHOD_LABELS),
-           fontsize=35, frameon=False)
+           fontsize=30, frameon=False)
 
 # 폴더 생성 및 저장
 
 plt.savefig("figures/p_slo.jpg", format='jpg', bbox_inches="tight")
+# plt.savefig("figures/p_slo.pdf", format='pdf', bbox_inches="tight")

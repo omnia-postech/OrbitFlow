@@ -19,7 +19,7 @@
     "loggers": {
       "vllm": {
         "handlers": ["vllm"],
-        "level": "INFO",
+        "level": "DEBUG",
         "propagate": false
       }
     }
