@@ -10,5 +10,6 @@
   "total_steps": 80836,
   "type1_count": 57,
   "type2_count": 34,
-  "plot_path": "traces/request_types/SS83_SL00_LS08_LL08/bim50/bim50_vl_ov5.png"
+  "plot_path": "traces/request_types/SS83_SL00_LS08_LL08/bim50/bim50_vl_ov5.png",
+  "peak_batch_blocks": 0
 }

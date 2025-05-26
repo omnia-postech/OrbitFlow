@@ -642,7 +642,7 @@ def main(configs):
     if configs.profiled_results:
         p_path = configs.profiled_results
     else:
-        p_path = "/home/xinyuema/vllm/benchmark/scripts/profiled_results.json"
+        p_path = "/home/heelim/vllm/benchmark/scripts/profiled_results.json"
     estimator = ProfileBasedEstimator(p_path)
     print("Available Profiled Fitters:", estimator.available_profiles())
     t_bt = estimator.estimate_by_profiled_results(tokens=2048,
@@ -703,7 +703,7 @@ if __name__ == "__main__":
     parser = FlexibleArgumentParser(description="distN test.")
     parser.add_argument("--config-file",
                         type=str,
-                        default="/home/xinyuema/vllm/samples/large_new_request.json",
+                        default="/home/heelim/vllm/samples/large_new_request.json",
                         help="Configurations file.")
     parser.add_argument("--prefetch-mode",
                         type=str,
@@ -719,7 +719,7 @@ if __name__ == "__main__":
                         help="prefetch distance")
     parser.add_argument("--output-log",
                         type=str,
-                        default="/home/xinyuema/vllm/outputs/default.log",
+                        default="/home/heelim/vllm/outputs/default.log",
                         help="output log file")
     parser.add_argument("--flattened-cache",
                         type=bool,
@@ -747,7 +747,7 @@ if __name__ == "__main__":
                         help="whether to use use static batching instead of continuous batching")
     parser.add_argument("--profiled-results",
                         type=str,
-                        default="/home/xinyuema/vllm/benchmark/scripts/profiled_results.json",
+                        default="/home/heelim/vllm/benchmark/scripts/profiled_results.json",
                         help="profiling results. If not provided, use the default ones.")
     parser.add_argument("--slo-ratio",
                         type=float,

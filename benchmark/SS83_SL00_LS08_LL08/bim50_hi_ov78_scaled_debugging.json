@@ -1,0 +1,813 @@
+{
+  "batch_size": 4,
+  "max_model_len": 32384,
+  "num_gpu_blocks_override": 58,
+  "arrival_pattern": "BimodalArrival(l1=0.0017034382197026478,l2=0.1,p=0.7,max=83864)",
+  "vocab": [
+    200,
+    30000
+  ],
+  "peak_batch_blocks": 580,
+  "requests": {
+    "request_0": {
+      "category": "SS_I192-304_O816-1216",
+      "input_length": 20,
+      "output_length": 109,
+      "arrival_time": 1,
+      "sched_time": 1,
+      "wait_time": 1
+    },
+    "request_1": {
+      "category": "SS_I400-608_O400-608",
+      "input_length": 56,
+      "output_length": 42,
+      "arrival_time": 109,
+      "sched_time": 109,
+      "wait_time": 1
+    },
+    "request_2": {
+      "category": "SS_I192-304_O816-1216",
+      "input_length": 27,
+      "output_length": 119,
+      "arrival_time": 151,
+      "sched_time": 151,
+      "wait_time": 1
+    },
+    "request_3": {
+      "category": "SS_I400-608_O400-608",
+      "input_length": 43,
+      "output_length": 46,
+      "arrival_time": 260,
+      "sched_time": 260,
+      "wait_time": 1
+    },
+    "request_4": {
+      "category": "SS_I816-1216_O400-608",
+      "input_length": 91,
+      "output_length": 54,
+      "arrival_time": 305,
+      "sched_time": 305,
+      "wait_time": 1
+    },
+    "request_5": {
+      "category": "SS_I192-304_O816-1216",
+      "input_length": 20,
+      "output_length": 105,
+      "arrival_time": 360,
+      "sched_time": 360,
+      "wait_time": 1
+    },
+    "request_6": {
+      "category": "SS_I400-608_O192-304",
+      "input_length": 46,
+      "output_length": 20,
+      "arrival_time": 465,
+      "sched_time": 465,
+      "wait_time": 1
+    },
+    "request_7": {
+      "category": "SS_I400-608_O816-1216",
+      "input_length": 43,
+      "output_length": 107,
+      "arrival_time": 485,
+      "sched_time": 485,
+      "wait_time": 1
+    },
+    "request_8": {
+      "category": "SS_I400-608_O816-1216",
+      "input_length": 60,
+      "output_length": 111,
+      "arrival_time": 592,
+      "sched_time": 592,
+      "wait_time": 1
+    },
+    "request_9": {
+      "category": "SS_I816-1216_O1632-2448",
+      "input_length": 89,
+      "output_length": 221,
+      "arrival_time": 703,
+      "sched_time": 703,
+      "wait_time": 1
+    },
+    "request_10": {
+      "category": "LL_I3264-4912_O6544-9824",
+      "input_length": 427,
+      "output_length": 832,
+      "arrival_time": 924,
+      "sched_time": 924,
+      "wait_time": 1
+    },
+    "request_11": {
+      "category": "LL_I13104-19648_O6544-9824",
+      "input_length": 1696,
+      "output_length": 972,
+      "arrival_time": 1060,
+      "sched_time": 1756,
+      "wait_time": 696
+    },
+    "request_12": {
+      "category": "SS_I816-1216_O400-608",
+      "input_length": 114,
+      "output_length": 41,
+      "arrival_time": 1108,
+      "sched_time": 2728,
+      "wait_time": 1620
+    },
+    "request_13": {
+      "category": "LS_I13104-19648_O192-304",
+      "input_length": 1445,
+      "output_length": 24,
+      "arrival_time": 1108,
+      "sched_time": 2769,
+      "wait_time": 1661
+    },
+    "request_14": {
+      "category": "SS_I192-304_O1632-2448",
+      "input_length": 19,
+      "output_length": 173,
+      "arrival_time": 1149,
+      "sched_time": 2793,
+      "wait_time": 1644
+    },
+    "request_15": {
+      "category": "SS_I400-608_O192-304",
+      "input_length": 60,
+      "output_length": 27,
+      "arrival_time": 1322,
+      "sched_time": 2793,
+      "wait_time": 1471
+    },
+    "request_16": {
+      "category": "SS_I816-1216_O1632-2448",
+      "input_length": 89,
+      "output_length": 215,
+      "arrival_time": 1349,
+      "sched_time": 2793,
+      "wait_time": 1444
+    },
+    "request_17": {
+      "category": "SS_I816-1216_O192-304",
+      "input_length": 84,
+      "output_length": 27,
+      "arrival_time": 1429,
+      "sched_time": 2793,
+      "wait_time": 1363
+    },
+    "request_18": {
+      "category": "SS_I192-304_O1632-2448",
+      "input_length": 22,
+      "output_length": 206,
+      "arrival_time": 1456,
+      "sched_time": 2820,
+      "wait_time": 1363
+    },
+    "request_19": {
+      "category": "SS_I400-608_O816-1216",
+      "input_length": 46,
+      "output_length": 99,
+      "arrival_time": 1571,
+      "sched_time": 2820,
+      "wait_time": 1248
+    },
+    "request_20": {
+      "category": "SS_I400-608_O1632-2448",
+      "input_length": 60,
+      "output_length": 165,
+      "arrival_time": 1671,
+      "sched_time": 2919,
+      "wait_time": 1248
+    },
+    "request_21": {
+      "category": "SS_I400-608_O400-608",
+      "input_length": 49,
+      "output_length": 56,
+      "arrival_time": 1836,
+      "sched_time": 2966,
+      "wait_time": 1130
+    },
+    "request_22": {
+      "category": "SS_I192-304_O400-608",
+      "input_length": 27,
+      "output_length": 54,
+      "arrival_time": 1892,
+      "sched_time": 3008,
+      "wait_time": 1115
+    },
+    "request_23": {
+      "category": "SS_I816-1216_O192-304",
+      "input_length": 86,
+      "output_length": 24,
+      "arrival_time": 1947,
+      "sched_time": 3022,
+      "wait_time": 1075
+    },
+    "request_24": {
+      "category": "SS_I400-608_O400-608",
+      "input_length": 40,
+      "output_length": 56,
+      "arrival_time": 1947,
+      "sched_time": 3026,
+      "wait_time": 1079
+    },
+    "request_25": {
+      "category": "SS_I192-304_O192-304",
+      "input_length": 29,
+      "output_length": 30,
+      "arrival_time": 2003,
+      "sched_time": 3047,
+      "wait_time": 1044
+    },
+    "request_26": {
+      "category": "SS_I816-1216_O400-608",
+      "input_length": 115,
+      "output_length": 52,
+      "arrival_time": 2003,
+      "sched_time": 3062,
+      "wait_time": 1059
+    },
+    "request_27": {
+      "category": "SS_I816-1216_O1632-2448",
+      "input_length": 82,
+      "output_length": 216,
+      "arrival_time": 2055,
+      "sched_time": 3077,
+      "wait_time": 1022
+    },
+    "request_28": {
+      "category": "LL_I13104-19648_O6544-9824",
+      "input_length": 1658,
+      "output_length": 672,
+      "arrival_time": 2272,
+      "sched_time": 3294,
+      "wait_time": 1022
+    },
+    "request_29": {
+      "category": "SS_I192-304_O400-608",
+      "input_length": 30,
+      "output_length": 49,
+      "arrival_time": 2272,
+      "sched_time": 3966,
+      "wait_time": 1694
+    },
+    "request_30": {
+      "category": "SS_I400-608_O1632-2448",
+      "input_length": 49,
+      "output_length": 168,
+      "arrival_time": 2615,
+      "sched_time": 3966,
+      "wait_time": 1350
+    },
+    "request_31": {
+      "category": "LL_I3264-4912_O6544-9824",
+      "input_length": 376,
+      "output_length": 731,
+      "arrival_time": 2783,
+      "sched_time": 3966,
+      "wait_time": 1182
+    },
+    "request_32": {
+      "category": "SS_I816-1216_O192-304",
+      "input_length": 103,
+      "output_length": 23,
+      "arrival_time": 2910,
+      "sched_time": 3966,
+      "wait_time": 1056
+    },
+    "request_33": {
+      "category": "SL_I816-1216_O13104-19648",
+      "input_length": 85,
+      "output_length": 1945,
+      "arrival_time": 2932,
+      "sched_time": 3988,
+      "wait_time": 1056
+    },
+    "request_34": {
+      "category": "SS_I192-304_O192-304",
+      "input_length": 19,
+      "output_length": 19,
+      "arrival_time": 3121,
+      "sched_time": 4014,
+      "wait_time": 893
+    },
+    "request_35": {
+      "category": "LL_I3264-4912_O3264-4912",
+      "input_length": 479,
+      "output_length": 439,
+      "arrival_time": 3141,
+      "sched_time": 4696,
+      "wait_time": 1556
+    },
+    "request_36": {
+      "category": "SS_I400-608_O1632-2448",
+      "input_length": 50,
+      "output_length": 241,
+      "arrival_time": 3274,
+      "sched_time": 4696,
+      "wait_time": 1423
+    },
+    "request_37": {
+      "category": "SS_I816-1216_O816-1216",
+      "input_length": 102,
+      "output_length": 117,
+      "arrival_time": 3295,
+      "sched_time": 4696,
+      "wait_time": 1401
+    },
+    "request_38": {
+      "category": "SS_I816-1216_O400-608",
+      "input_length": 110,
+      "output_length": 48,
+      "arrival_time": 3343,
+      "sched_time": 4813,
+      "wait_time": 1470
+    },
+    "request_39": {
+      "category": "SS_I192-304_O400-608",
+      "input_length": 23,
+      "output_length": 49,
+      "arrival_time": 3391,
+      "sched_time": 4861,
+      "wait_time": 1470
+    },
+    "request_40": {
+      "category": "SS_I400-608_O1632-2448",
+      "input_length": 50,
+      "output_length": 213,
+      "arrival_time": 3437,
+      "sched_time": 4910,
+      "wait_time": 1472
+    },
+    "request_41": {
+      "category": "SS_I816-1216_O192-304",
+      "input_length": 89,
+      "output_length": 30,
+      "arrival_time": 3541,
+      "sched_time": 4938,
+      "wait_time": 1396
+    },
+    "request_42": {
+      "category": "SS_I400-608_O400-608",
+      "input_length": 53,
+      "output_length": 59,
+      "arrival_time": 3572,
+      "sched_time": 4968,
+      "wait_time": 1396
+    },
+    "request_43": {
+      "category": "SS_I400-608_O400-608",
+      "input_length": 55,
+      "output_length": 46,
+      "arrival_time": 3630,
+      "sched_time": 5026,
+      "wait_time": 1396
+    },
+    "request_44": {
+      "category": "SS_I192-304_O192-304",
+      "input_length": 19,
+      "output_length": 29,
+      "arrival_time": 3676,
+      "sched_time": 5072,
+      "wait_time": 1396
+    },
+    "request_45": {
+      "category": "SS_I816-1216_O192-304",
+      "input_length": 87,
+      "output_length": 27,
+      "arrival_time": 3706,
+      "sched_time": 5102,
+      "wait_time": 1396
+    },
+    "request_46": {
+      "category": "LS_I3264-4912_O1632-2448",
+      "input_length": 462,
+      "output_length": 193,
+      "arrival_time": 3733,
+      "sched_time": 5135,
+      "wait_time": 1402
+    },
+    "request_47": {
+      "category": "SS_I192-304_O1632-2448",
+      "input_length": 24,
+      "output_length": 241,
+      "arrival_time": 3926,
+      "sched_time": 5135,
+      "wait_time": 1210
+    },
+    "request_48": {
+      "category": "SS_I192-304_O400-608",
+      "input_length": 23,
+      "output_length": 46,
+      "arrival_time": 4167,
+      "sched_time": 5135,
+      "wait_time": 968
+    },
+    "request_49": {
+      "category": "SS_I192-304_O1632-2448",
+      "input_length": 24,
+      "output_length": 171,
+      "arrival_time": 4213,
+      "sched_time": 5181,
+      "wait_time": 968
+    },
+    "request_50": {
+      "category": "SS_I192-304_O1632-2448",
+      "input_length": 30,
+      "output_length": 210,
+      "arrival_time": 4336,
+      "sched_time": 5328,
+      "wait_time": 992
+    },
+    "request_51": {
+      "category": "SS_I400-608_O192-304",
+      "input_length": 54,
+      "output_length": 25,
+      "arrival_time": 4336,
+      "sched_time": 5353,
+      "wait_time": 1016
+    },
+    "request_52": {
+      "category": "LS_I6544-9824_O816-1216",
+      "input_length": 686,
+      "output_length": 100,
+      "arrival_time": 4339,
+      "sched_time": 5377,
+      "wait_time": 1038
+    },
+    "request_53": {
+      "category": "SS_I192-304_O816-1216",
+      "input_length": 30,
+      "output_length": 117,
+      "arrival_time": 4439,
+      "sched_time": 5378,
+      "wait_time": 939
+    },
+    "request_54": {
+      "category": "SS_I816-1216_O816-1216",
+      "input_length": 108,
+      "output_length": 82,
+      "arrival_time": 4500,
+      "sched_time": 5477,
+      "wait_time": 977
+    },
+    "request_55": {
+      "category": "SS_I400-608_O400-608",
+      "input_length": 56,
+      "output_length": 54,
+      "arrival_time": 4500,
+      "sched_time": 5495,
+      "wait_time": 996
+    },
+    "request_56": {
+      "category": "SS_I400-608_O400-608",
+      "input_length": 55,
+      "output_length": 45,
+      "arrival_time": 4561,
+      "sched_time": 5539,
+      "wait_time": 978
+    },
+    "request_57": {
+      "category": "SS_I816-1216_O400-608",
+      "input_length": 110,
+      "output_length": 55,
+      "arrival_time": 4607,
+      "sched_time": 5550,
+      "wait_time": 943
+    },
+    "request_58": {
+      "category": "SS_I816-1216_O816-1216",
+      "input_length": 109,
+      "output_length": 85,
+      "arrival_time": 4662,
+      "sched_time": 5559,
+      "wait_time": 897
+    },
+    "request_59": {
+      "category": "SS_I192-304_O192-304",
+      "input_length": 21,
+      "output_length": 21,
+      "arrival_time": 4747,
+      "sched_time": 5584,
+      "wait_time": 837
+    },
+    "request_60": {
+      "category": "SS_I400-608_O192-304",
+      "input_length": 59,
+      "output_length": 22,
+      "arrival_time": 4769,
+      "sched_time": 5605,
+      "wait_time": 836
+    },
+    "request_61": {
+      "category": "LL_I3264-4912_O13104-19648",
+      "input_length": 341,
+      "output_length": 1902,
+      "arrival_time": 4791,
+      "sched_time": 5606,
+      "wait_time": 814
+    },
+    "request_62": {
+      "category": "SS_I400-608_O816-1216",
+      "input_length": 52,
+      "output_length": 98,
+      "arrival_time": 5129,
+      "sched_time": 5627,
+      "wait_time": 499
+    },
+    "request_63": {
+      "category": "SS_I400-608_O400-608",
+      "input_length": 53,
+      "output_length": 48,
+      "arrival_time": 5166,
+      "sched_time": 5644,
+      "wait_time": 478
+    },
+    "request_64": {
+      "category": "SS_I400-608_O400-608",
+      "input_length": 51,
+      "output_length": 58,
+      "arrival_time": 5177,
+      "sched_time": 5692,
+      "wait_time": 515
+    },
+    "request_65": {
+      "category": "SS_I400-608_O192-304",
+      "input_length": 56,
+      "output_length": 25,
+      "arrival_time": 5235,
+      "sched_time": 5726,
+      "wait_time": 490
+    },
+    "request_66": {
+      "category": "SS_I816-1216_O400-608",
+      "input_length": 104,
+      "output_length": 53,
+      "arrival_time": 5260,
+      "sched_time": 5750,
+      "wait_time": 490
+    },
+    "request_67": {
+      "category": "SS_I816-1216_O816-1216",
+      "input_length": 92,
+      "output_length": 91,
+      "arrival_time": 5313,
+      "sched_time": 5750,
+      "wait_time": 437
+    },
+    "request_68": {
+      "category": "SS_I400-608_O192-304",
+      "input_length": 55,
+      "output_length": 26,
+      "arrival_time": 5404,
+      "sched_time": 5803,
+      "wait_time": 399
+    },
+    "request_69": {
+      "category": "LS_I13104-19648_O400-608",
+      "input_length": 1913,
+      "output_length": 42,
+      "arrival_time": 5430,
+      "sched_time": 7507,
+      "wait_time": 2078
+    },
+    "request_70": {
+      "category": "SS_I192-304_O1632-2448",
+      "input_length": 22,
+      "output_length": 245,
+      "arrival_time": 5472,
+      "sched_time": 7549,
+      "wait_time": 2078
+    },
+    "request_71": {
+      "category": "SS_I192-304_O816-1216",
+      "input_length": 29,
+      "output_length": 102,
+      "arrival_time": 5717,
+      "sched_time": 7549,
+      "wait_time": 1832
+    },
+    "request_72": {
+      "category": "SS_I192-304_O192-304",
+      "input_length": 21,
+      "output_length": 20,
+      "arrival_time": 5819,
+      "sched_time": 7549,
+      "wait_time": 1730
+    },
+    "request_73": {
+      "category": "SS_I400-608_O816-1216",
+      "input_length": 57,
+      "output_length": 120,
+      "arrival_time": 5839,
+      "sched_time": 7549,
+      "wait_time": 1710
+    },
+    "request_74": {
+      "category": "SS_I192-304_O192-304",
+      "input_length": 22,
+      "output_length": 24,
+      "arrival_time": 5959,
+      "sched_time": 7569,
+      "wait_time": 1610
+    },
+    "request_75": {
+      "category": "SS_I816-1216_O400-608",
+      "input_length": 121,
+      "output_length": 50,
+      "arrival_time": 5983,
+      "sched_time": 7593,
+      "wait_time": 1610
+    },
+    "request_76": {
+      "category": "SS_I400-608_O192-304",
+      "input_length": 41,
+      "output_length": 28,
+      "arrival_time": 6033,
+      "sched_time": 7643,
+      "wait_time": 1610
+    },
+    "request_77": {
+      "category": "SS_I192-304_O400-608",
+      "input_length": 30,
+      "output_length": 59,
+      "arrival_time": 6061,
+      "sched_time": 7651,
+      "wait_time": 1590
+    },
+    "request_78": {
+      "category": "SS_I816-1216_O400-608",
+      "input_length": 90,
+      "output_length": 60,
+      "arrival_time": 6121,
+      "sched_time": 7669,
+      "wait_time": 1548
+    },
+    "request_79": {
+      "category": "SS_I816-1216_O192-304",
+      "input_length": 108,
+      "output_length": 26,
+      "arrival_time": 6181,
+      "sched_time": 7671,
+      "wait_time": 1490
+    },
+    "request_80": {
+      "category": "SS_I816-1216_O816-1216",
+      "input_length": 106,
+      "output_length": 88,
+      "arrival_time": 6207,
+      "sched_time": 7697,
+      "wait_time": 1490
+    },
+    "request_81": {
+      "category": "SL_I816-1216_O13104-19648",
+      "input_length": 82,
+      "output_length": 1332,
+      "arrival_time": 6295,
+      "sched_time": 7711,
+      "wait_time": 1415
+    },
+    "request_82": {
+      "category": "SS_I816-1216_O400-608",
+      "input_length": 109,
+      "output_length": 58,
+      "arrival_time": 6451,
+      "sched_time": 7729,
+      "wait_time": 1278
+    },
+    "request_83": {
+      "category": "SS_I192-304_O400-608",
+      "input_length": 23,
+      "output_length": 55,
+      "arrival_time": 6509,
+      "sched_time": 7785,
+      "wait_time": 1276
+    },
+    "request_84": {
+      "category": "SS_I400-608_O1632-2448",
+      "input_length": 56,
+      "output_length": 227,
+      "arrival_time": 6565,
+      "sched_time": 7787,
+      "wait_time": 1223
+    },
+    "request_85": {
+      "category": "SS_I816-1216_O400-608",
+      "input_length": 98,
+      "output_length": 52,
+      "arrival_time": 6792,
+      "sched_time": 7794,
+      "wait_time": 1003
+    },
+    "request_86": {
+      "category": "SS_I192-304_O816-1216",
+      "input_length": 26,
+      "output_length": 88,
+      "arrival_time": 6792,
+      "sched_time": 7840,
+      "wait_time": 1049
+    },
+    "request_87": {
+      "category": "SS_I400-608_O192-304",
+      "input_length": 46,
+      "output_length": 26,
+      "arrival_time": 6879,
+      "sched_time": 7846,
+      "wait_time": 967
+    },
+    "request_88": {
+      "category": "SS_I400-608_O400-608",
+      "input_length": 59,
+      "output_length": 41,
+      "arrival_time": 6906,
+      "sched_time": 7872,
+      "wait_time": 967
+    },
+    "request_89": {
+      "category": "SS_I192-304_O192-304",
+      "input_length": 25,
+      "output_length": 23,
+      "arrival_time": 6947,
+      "sched_time": 7914,
+      "wait_time": 967
+    },
+    "request_90": {
+      "category": "SS_I816-1216_O1632-2448",
+      "input_length": 118,
+      "output_length": 202,
+      "arrival_time": 6947,
+      "sched_time": 7928,
+      "wait_time": 981
+    },
+    "request_91": {
+      "category": "SS_I400-608_O192-304",
+      "input_length": 57,
+      "output_length": 19,
+      "arrival_time": 7149,
+      "sched_time": 7937,
+      "wait_time": 788
+    },
+    "request_92": {
+      "category": "SS_I816-1216_O400-608",
+      "input_length": 84,
+      "output_length": 47,
+      "arrival_time": 7169,
+      "sched_time": 7956,
+      "wait_time": 788
+    },
+    "request_93": {
+      "category": "SS_I400-608_O192-304",
+      "input_length": 58,
+      "output_length": 25,
+      "arrival_time": 7216,
+      "sched_time": 8003,
+      "wait_time": 788
+    },
+    "request_94": {
+      "category": "SS_I192-304_O400-608",
+      "input_length": 22,
+      "output_length": 58,
+      "arrival_time": 7241,
+      "sched_time": 8014,
+      "wait_time": 773
+    },
+    "request_95": {
+      "category": "SS_I816-1216_O816-1216",
+      "input_length": 105,
+      "output_length": 119,
+      "arrival_time": 7299,
+      "sched_time": 8028,
+      "wait_time": 729
+    },
+    "request_96": {
+      "category": "LS_I3264-4912_O1632-2448",
+      "input_length": 488,
+      "output_length": 227,
+      "arrival_time": 7418,
+      "sched_time": 8072,
+      "wait_time": 654
+    },
+    "request_97": {
+      "category": "SS_I400-608_O816-1216",
+      "input_length": 59,
+      "output_length": 116,
+      "arrival_time": 7645,
+      "sched_time": 8130,
+      "wait_time": 485
+    },
+    "request_98": {
+      "category": "SS_I192-304_O816-1216",
+      "input_length": 20,
+      "output_length": 104,
+      "arrival_time": 7761,
+      "sched_time": 8147,
+      "wait_time": 386
+    },
+    "request_99": {
+      "category": "SS_I816-1216_O1632-2448",
+      "input_length": 84,
+      "output_length": 218,
+      "arrival_time": 7865,
+      "sched_time": 8246,
+      "wait_time": 380
+    }
+  }
+}
