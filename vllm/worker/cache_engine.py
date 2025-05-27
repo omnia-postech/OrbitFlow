@@ -1439,6 +1439,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             logger.critical(f"Plan exceeds budget, partial alloc, let scheduler handle it") 
             will_alloc_blk = _count_blocks(t[2] for t in alloc_layers)          # CPU -> GPU
             post_gpu_blk = current_gpu_blk + will_alloc_blk - will_free_blk
+            logger.critical("[Adjust]GPU-blk forecast: now=%d  +alloc=%d  −free=%d  ⇒ after=%d ⇒ total=%d  left=%d for %d requests", current_gpu_blk, will_alloc_blk, will_free_blk, post_gpu_blk, self.block_manager.num_total_gpu_blocks, self.block_manager.num_total_gpu_blocks - post_gpu_blk, len(snapshot.candidates))
             plan = Plan(
                 dealloc_layers=dict(dealloc_layers),
                 expected_freed=dict(expected_freed),
