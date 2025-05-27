@@ -1404,6 +1404,7 @@ class LLMEngine:
                     virtual_engine]
 
             self.model_executor.driver_worker.cache_engine[0].resume_distances = self.scheduler[virtual_engine].resume_distances
+            self.model_executor.driver_worker.cache_engine[0].is_distnsingle_fallback = self.scheduler[virtual_engine].is_distnsingle_fallback           
 
             # (xinyue) worker entry point
             outputs = self.model_executor.execute_model(

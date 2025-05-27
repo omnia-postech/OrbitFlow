@@ -366,6 +366,9 @@ class Scheduler:
         self.paused_solver_ids: set[str] = set()   # 💡 solver-fallback 으로 pause 된 id 기억
         self.prev_sig: frozenset[str] = frozenset()# 💡 이전 iteration 의 request id 집합
         self.decode_window_left: int = 0           # 💡 solver 가 정한 window(dec. steps)
+        
+        self.is_distnsingle_fallback: bool = False
+
         self.solver = Solver()
         version = "selfattn"
         if (self.scheduler_config.runner_type == "pooling"
@@ -825,6 +828,7 @@ class Scheduler:
 
         ret.solver_time = 0.0
         ret.solver_estimated_time = 0.0
+        total_solver_time: float = 0.0
         if self.cache_config.prefetch_mode == "solver":
 
             # ────────────── [ENTRY] ──────────────
@@ -904,6 +908,7 @@ class Scheduler:
 
                 restored_once = False
 
+                solver_start = time.perf_counter()
                 while True:                    
                     decode_candidates = ret.decode_seq_groups
 
@@ -919,7 +924,7 @@ class Scheduler:
                     per_token_bytes = 2 * 2 * head_size * num_kv_heads
                     block_bytes = per_token_bytes * self.block_manager.block_size
                     block_bandwidth =  bandwidth / block_bytes # DEBUG (xinyue) bandwidth was e-06 
-                    solver_start = time.time()                \
+                    
                     # put some head room! 
                     if ret.prefill_seq_groups: # prefill
                         gpu_cap = self.block_manager.num_free_gpu_blocks 
@@ -936,10 +941,21 @@ class Scheduler:
                     # ---------- ② infeasible → victim pause ------------------------
                     if sol is None:                           # ② infeasible ⇒ fallback
                         logger.critical(f"################# Solver infeasible ❌")
-                        # logger.info(f"Solver infeasible ❌, decode_candidates={decode_candidates}")
-                        # 가장 긴 요청 1개 선택 
+                        # logger.info(f"Solver infeasible ❌, decode_candidates={decode_candidates}")                        
+                        # 가장 긴 요청 1개 선택                         
                         # TODO(HONG): tie-break 구현
-                        if self.cache_config.pause_and_resume:
+                        if self.cache_config.pause_and_resume:                            
+                            
+                            # NOTE(HONG): if there is a single request left and no solution -> use distnsingle methods to prevent from pausing it. 
+                            single_running = (len(decode_candidates) == 1)
+                            if single_running:                        
+                                self.is_distnsingle_fallback = True
+                                self.resume_distances = {r.id: -1 for r in request_list}   # -1 ⇒ distn_single
+                                self.decode_window_left = 128                             # 임의 window
+                                ret.solver_estimated_time = 100
+                                logger.critical("[Solver-fallback] single-req → prevent pause → distn_single mode")
+                                break
+
                             victim_sg = max(
                                 decode_candidates,
                                 key=lambda sg: len(
@@ -990,9 +1006,8 @@ class Scheduler:
                         ret.solver_estimated_time = sol.batch_time
 
                         break
-                self.prev_sig = cur_sig
-                solver_t = time.time() - solver_start
-                ret.solver_time += solver_t
+                self.prev_sig = cur_sig                
+                ret.solver_time = time.perf_counter() - solver_start
             else:                
                 logger.debug(f"need_solver={need_solver}  ret.decode_seq_groups={(ret.decode_seq_groups)}, self.decode_window_left={self.decode_window_left} , self.cache_config.need_solver:{self.cache_config.need_solver}" )
         self._scheduler_running_outputs_cache[self.next_cache_id].reset()
@@ -1548,6 +1563,10 @@ class Scheduler:
         running_scheduled = SchedulerRunningOutputs.create_empty()
         swapped_in = SchedulerSwappedInOutputs.create_empty()
 
+        if self.is_distnsingle_fallback:
+            if len(self.running) == 0:
+                self.is_distnsingle_fallback = False
+
         # If any requests are swapped, prioritized swapped requests.
         logger.info(f"===================================================scheduler state===================================================")
         logger.info(f"swapped: {[seq.request_id for seq in self.swapped]}, paused_cpu: {[seq.request_id for seq in self.paused_cpu]}")
@@ -1567,7 +1586,7 @@ class Scheduler:
                                                 curr_loras,
                                                 enable_chunking=False)
         else:
-            if not self.swapped and not self.paused_cpu:
+            if not self.swapped and not self.paused_cpu and not self.is_distnsingle_fallback:
                 prefills = self._schedule_prefills(budget,
                                                curr_loras,
                                                enable_chunking=False)
@@ -1602,13 +1621,14 @@ class Scheduler:
                     running_scheduled.paused) == 0
             # if there are no scheduled requests, we can swap in 
             cond2 = len(running_scheduled.prefill_seq_groups) + len(running_scheduled.decode_seq_groups) == 0
-            if cond1 or cond2: 
-                if not is_paused_to_resume:
-                    swapped_in = self._schedule_paused(budget, curr_loras, running_scheduled.preempted)
-                    # prioritize swapped requests over preempted requests. 
-                    # TODO resume and swap in cannot happend at the same time
-                    # if len(swapped_in.decode_seq_groups) == 0 and len(swapped_in.prefill_seq_groups) == 0:
-                    #     swapped_in = self._schedule_swapped(budget, curr_loras)
+            if cond1 or cond2:
+                if not self.is_distnsingle_fallback:
+                    if not is_paused_to_resume:
+                        swapped_in = self._schedule_paused(budget, curr_loras, running_scheduled.preempted)
+                        # prioritize swapped requests over preempted requests. 
+                        # TODO resume and swap in cannot happend at the same time
+                        # if len(swapped_in.decode_seq_groups) == 0 and len(swapped_in.prefill_seq_groups) == 0:
+                        #     swapped_in = self._schedule_swapped(budget, curr_loras)
             # elif cond2: # its possible that a request is preempted, but it should be set to NEVER in the next step. But it is the only thing in the waiting queue, cauing an error
             #     if (running_scheduled.preempted) > 0: 
                     

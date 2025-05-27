@@ -625,6 +625,8 @@ class FlattenedCacheEngine(CacheEngineBase):
         self.pause_and_resume = cache_config.pause_and_resume
         self.static_batching = cache_config.static_batching
         self.removable_cache = cache_config.removable_cache
+        if not hasattr(self.cache_config, "need_solver"):
+            self.cache_config.need_solver = False
         # prefetch_enabled = True 
         # Initialize the cache.
         self.gpu_cache = self._allocate_kv_cache_gpu(
@@ -655,6 +657,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         # NOTE(HONG): for solver
         self._solver_prefill_done = False
         self.resume_distances: List[int] = []
+        self.is_distnsingle_fallback: bool = False
         
         msg = f"Prefetch mode: {self.prefetch_mode}, prefetch distance: {self.prefetch_distance}"
         msg = f"Merge prefetch buffer: {self.merge_prefetch_buffer}"
@@ -945,13 +948,14 @@ class FlattenedCacheEngine(CacheEngineBase):
         dist_dict, _ = self._select_prefetch_distance(snap, self.prefetch_distance, total_context_lens, is_decoding)
         logger.critical(f"[driver] distance: {dist_dict}")
         plan, cur_blocks = self._plan_cache_delta(snap, dist_dict, pause_and_resume)
-        if plan.feasible == False and  self.prefetch_mode == "solver":
+        if (plan.feasible == False and  self.prefetch_mode == "solver") or self.is_distnsingle_fallback:
             prefetch_mode = "distn_single"
             logger.critical(f"use distn single for this step and notify solver")
             dist_dict, _ = self._select_prefetch_distance(snap, self.prefetch_distance, total_context_lens, is_decoding, custom_prefetch_mode=prefetch_mode,cur_blocks = cur_blocks)
             logger.critical(f"fall back dist:{dist_dict}")
             plan,cur_blocks = self._plan_cache_delta(snap, dist_dict, pause_and_resume)
-            self.cache_config.need_solver = True
+            if plan.feasible == False and  self.prefetch_mode == "solver":
+                self.cache_config.need_solver = True
         return plan, dist_dict
     def execute_pause_resume(
             self,
