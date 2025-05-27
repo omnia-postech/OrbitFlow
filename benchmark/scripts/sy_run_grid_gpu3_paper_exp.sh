@@ -14,7 +14,7 @@ ROOT="/home/heelim/vllm"
 
 FIGURE_ONLY=$1                      # 0 → 실행 + 그림, 1 → 그림만
 EXP_LIST=(paper_main_exp)
-METHOD_LIST=(NoPrefetch)
+METHOD_LIST=(DistNSingle)
 TRACE_CFG_DIR="${ROOT}/benchmark/selected_traces/"
 # TRACE_LIST=(bim50_hi_ov78)
 TRACE_LIST=(both_dyn_low both_dyn_mid both_dyn_high both_dyn_veryhigh)
