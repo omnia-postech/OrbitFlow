@@ -810,37 +810,20 @@ class Scheduler:
         # packed_request = [request_list, block_bandwidth, gpu_block_capacity]
         # torch.save(packed_request, file_name)
         # file_no += 1
-        # # TODO(HONG): 매 호출마다 동일 계산 위로 빼는게 좋음. 
-        # bandwidth = 25.19 * 1024**3  # B/s
-        # head_size = 128
-        # num_kv_heads = 8
-        # per_token_bytes = 2 * 2 * head_size * num_kv_heads
-        # block_bytes = per_token_bytes * self.block_manager.block_size
-        # block_bandwidth = block_bytes / bandwidth
-        # solver_start = time.time()                
-        # sol = Solver.solve(                 # 💡 “resume=1” 강제 변형판
-        #     request_list,
-        #     block_bandwidth=block_bandwidth,
-        #     gpu_block_capacity=self.block_manager.num_total_gpu_blocks,                        
-        # )                    
-        # solver_t = time.time() - solver_start
-        # ret.solver_time += solver_t               # 기록
 
         ret.solver_time = 0.0
         ret.solver_estimated_time = 0.0
         total_solver_time: float = 0.0
+        # ────────────── [ENTRY] ──────────────
+        logger.critical(
+            f"[RUNNING] {len(self.running)}  "
+            f"[WAITING] {len(self.waiting)}  "
+            f"[PAUSED]  {len(self.paused)}  "
+            f"[SWAPPED] {len(self.paused_cpu)}  "
+            f"[DECODE_CAND] {len(ret.decode_seq_groups)}  "
+            f"window_left={self.decode_window_left}"
+        )
         if self.cache_config.prefetch_mode == "solver":
-
-            # ────────────── [ENTRY] ──────────────
-            logger.critical(
-                f"[RUNNING] {len(self.running)}  "
-                f"[WAITING] {len(self.waiting)}  "
-                f"[PAUSED]  {len(self.paused)}  "
-                f"[SWAPPED] {len(self.paused_cpu)}  "
-                f"[DECODE_CAND] {len(ret.decode_seq_groups)}  "
-                f"window_left={self.decode_window_left}"
-            )
-
             if self.cache_config.pause_and_resume:
                 previous_paused_ids = {seq_group.get_seqs()[0].seq_id for seq_group in self.paused}
                 # TODO(HONG): 가능성은 작지만 pause된 request들을 한꺼번에 빼는 경우 memory가 부족할 수 있음. 
@@ -1632,7 +1615,6 @@ class Scheduler:
             # elif cond2: # its possible that a request is preempted, but it should be set to NEVER in the next step. But it is the only thing in the waiting queue, cauing an error
             #     if (running_scheduled.preempted) > 0: 
                     
-                
         assert (budget.num_batched_tokens <=
                 self.scheduler_config.max_num_batched_tokens)
         assert budget.num_curr_seqs <= self.scheduler_config.max_num_seqs
@@ -2045,8 +2027,8 @@ class Scheduler:
 
     def _allocate_and_set_running(self, seq_group: SequenceGroup) -> None:
         # (xinyue) allocating new sequence here 
-        if self.cache_config.prefetch_mode in ["solver", "flexgen", "distn_single"]:
-            num_gpu_layers = 1
+        if self.cache_config.prefetch_mode in ["solver", "flexgen", "distn_single"]: # since we disable distance 0
+            num_gpu_layers = 16
         else:
             num_gpu_layers = self.scheduler_config.num_gpu_layers
         self.block_manager.allocate(seq_group,num_gpu_layers=num_gpu_layers)

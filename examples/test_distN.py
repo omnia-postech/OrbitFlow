@@ -372,10 +372,10 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
         engine.scheduler[0].slo_from_delaysim = sim.v 
         # NOTE(HONG): use below for pipelining parallelism
         torch.cuda.synchronize()  # Ensure all GPU operations are complete before measuring time
-        step_start = time.perf_counter()
+        step_start = time.time()
         step_outputs = engine.step()
         torch.cuda.synchronize()  # Ensure all GPU operations are complete before measuring time
-        step_end = time.perf_counter()
+        step_end = time.time()
         step_count += 1
         elapsed_time_step = step_end - step_start
         overall_wall += elapsed_time_step
@@ -496,58 +496,61 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                 logger.critical(f"{rid} prompt: {len(output.prompt_token_ids)} tokens; {output.prompt_token_ids[:20]}")
                 logger.critical(f"{rid} output: {len(output.outputs[0].token_ids)} {output.outputs[0].token_ids[:20]}")
                 logger.critical(f"{rid} text: {output.outputs[0].text[:20]}")
-                running_requests.remove(rid)
+                if len(output.outputs[0].token_ids) > 0:
+                    running_requests.remove(rid)
+                else: 
+                    logger.critical(f"Request {rid} finished with no output tokens, skipping metrics collection.")
 
                 # ------------------------------------------------------------------
                 # LOCAL WALL‑CLOCK MEASUREMENTS (no out.metrics)
                 # ------------------------------------------------------------------
-                arrival_time_local = request_metadata[rid]["arrival_time"]
-                finished_time_local = step_end
-                m = output.metrics
+                if len(output.outputs[0].token_ids) > 0:
+                    arrival_time_local = request_metadata[rid]["arrival_time"]
+                    finished_time_local = step_end
+                    m = output.metrics
 
-                token_ts = request_metadata[rid]["token_timestamps"]
-                if token_ts:
-                    first_token_time_local = token_ts[0]
-                    per_token_latencies = [j - i for i, j in zip(token_ts[:-1], token_ts[1:])]
-                    avg_token_latency = sum(per_token_latencies) / len(per_token_latencies) if per_token_latencies else 0.0
-                else:
-                    first_token_time_local = finished_time_local
-                    per_token_latencies = []
-                    avg_token_latency = 0.0
+                    token_ts = request_metadata[rid]["token_timestamps"]
+                    if token_ts:
+                        first_token_time_local = token_ts[0]
+                        per_token_latencies = [j - i for i, j in zip(token_ts[:-1], token_ts[1:])]
+                        avg_token_latency = sum(per_token_latencies) / len(per_token_latencies) if per_token_latencies else 0.0
+                    else:
+                        first_token_time_local = finished_time_local
+                        per_token_latencies = []
+                        avg_token_latency = 0.0
 
-                decode_length = request_metadata[rid]["decode_length"]
+                    decode_length = request_metadata[rid]["decode_length"]
 
-                if start_time is None or arrival_time_local < start_time:
-                    start_time = arrival_time_local
-                if end_time is None or finished_time_local > end_time:
-                    end_time = finished_time_local
-
-                row = {
-                    "request_id": rid,
-                    "arrival_time": arrival_time_local - (start_time or 0),
-                    "first_scheduled_time": 0,                 # not available locally
-                    "finished_time": finished_time_local - (start_time or 0),
-                    "stall_times": json.dumps(request_metadata[rid]["stall_times"]),
-                    "time_to_first_token": first_token_time_local - arrival_time_local,
-                    "slo_threshold": 1/sim.v[rid],
-                    "slo_violations": sim.violation_count(rid),
-                    "stall_duration": request_metadata[rid]["stall_duration"],
-                    "decode_length": decode_length,
-                    "end_to_end_time": finished_time_local - arrival_time_local,
-                    "decode_time": finished_time_local - first_token_time_local,
-                    "time_per_output_token": sum(request_metadata[rid]["time_between_tokens"]) / decode_length if decode_length > 0 else 0,
-                    "finish_reason": finish_reason,
-                    # "time_between_tokens": json.dumps(per_token_latencies),
-                    "solver_time": json.dumps(request_metadata[rid]["solver_time"]),
-                    "solver_estimated_time": json.dumps(request_metadata[rid]["solver_estimated_time"]),
-                    "time_between_tokens": json.dumps(request_metadata[rid]["time_between_tokens"]),
-                    "profiled_tbt": request_metadata[rid]["profiled_tbt"],
-                    "expected_output_length": request_metadata[rid]["expected_output_length"],
-                    "stall_durations": json.dumps(request_metadata[rid]["stall_durations"]),
-                }
-                metrics_data.append(row)
-                csv_writer.writerow(row)
-                csv_fh.flush()  
+                    if start_time is None or arrival_time_local < start_time:
+                        start_time = arrival_time_local
+                    if end_time is None or finished_time_local > end_time:
+                        end_time = finished_time_local
+                    row = {
+                        "request_id": rid,
+                        "arrival_time": arrival_time_local - (start_time or 0),
+                        "first_scheduled_time": 0,                 # not available locally
+                        "finished_time": finished_time_local - (start_time or 0),
+                        "stall_times": json.dumps(request_metadata[rid]["stall_times"]),
+                        "time_to_first_token": first_token_time_local - arrival_time_local,
+                        "slo_threshold": 1/sim.v[rid],
+                        "slo_violations": sim.violation_count(rid),
+                        "stall_duration": request_metadata[rid]["stall_duration"],
+                        "decode_length": decode_length,
+                        "end_to_end_time": finished_time_local - arrival_time_local,
+                        "decode_time": finished_time_local - first_token_time_local,
+                        "time_per_output_token": sum(request_metadata[rid]["time_between_tokens"]) / decode_length if decode_length > 0 else 0,
+                        "finish_reason": finish_reason,
+                        # "time_between_tokens": json.dumps(per_token_latencies),
+                        "solver_time": json.dumps(request_metadata[rid]["solver_time"]),
+                        "solver_estimated_time": json.dumps(request_metadata[rid]["solver_estimated_time"]),
+                        "time_between_tokens": json.dumps(request_metadata[rid]["time_between_tokens"]),
+                        "profiled_tbt": request_metadata[rid]["profiled_tbt"],
+                        "expected_output_length": request_metadata[rid]["expected_output_length"],
+                        "stall_durations": json.dumps(request_metadata[rid]["stall_durations"]),
+                    }
+                    metrics_data.append(row)
+                    csv_writer.writerow(row)
+                    csv_fh.flush()  
                 finished_rids.append(rid)
                 logger.info(f"Finished request {rid} with {decode_length} decode tokens")
                 sim.finish(rid)
