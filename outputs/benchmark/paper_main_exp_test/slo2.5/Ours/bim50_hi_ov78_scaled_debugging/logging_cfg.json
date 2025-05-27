@@ -12,7 +12,7 @@
       "vllm": {
         "class": "logging.FileHandler",
         "formatter": "vllm",
-        "level": "CRITICAL",
+        "level": "INFO",
         "filename": "/home/heelim/vllm/outputs/benchmark/paper_main_exp_test/slo2.5/Ours/bim50_hi_ov78_scaled_debugging/vllm_msg.log"
       }
     },

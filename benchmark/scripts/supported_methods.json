@@ -59,8 +59,7 @@
         "--flattened-cache",      "true",
         "--merge-prefetch-buffer", "true",
         "--pause-and-resume",
-        "--enable-deposit",
-        "--removable-cache"
+        "--enable-deposit"
     ],
     "OursMinusRC": [
         "--prefetch-mode",        "solver",
@@ -75,16 +74,14 @@
         "--prefetch-distance",    "1",
         "--flattened-cache",      "true",
         "--merge-prefetch-buffer", "true",
-        "--pause-and-resume",
-        "--removable-cache"
+        "--pause-and-resume"
     ],
     "OursMinusPause": [
         "--prefetch-mode",        "solver",
         "--prefetch-distance",    "1",
         "--flattened-cache",      "true",
         "--merge-prefetch-buffer", "true",
-        "--enable-deposit",
-        "--removable-cache"
+        "--enable-deposit"
     ],
     "Ours_fallback": [
         "--prefetch-mode",        "solver",
