@@ -1416,7 +1416,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         will_free_blk += freed_paused_blks                                  # pause 회수
         will_alloc_blk = _count_blocks(t[2] for t in alloc_layers)          # CPU -> GPU
         post_gpu_blk = current_gpu_blk + will_alloc_blk - will_free_blk
-
+        left = self.block_manager.num_total_gpu_blocks - post_gpu_blk
         logger.critical("GPU-blk forecast: now=%d  +alloc=%d  −free=%d  ⇒ after=%d ⇒ total=%d  left=%d for %d requests", current_gpu_blk, will_alloc_blk, will_free_blk, post_gpu_blk, self.block_manager.num_total_gpu_blocks, self.block_manager.num_total_gpu_blocks - post_gpu_blk, len(snapshot.candidates))
 
         # NOTE(HONG): conservative estimate of worst-case extra blocks
@@ -1426,11 +1426,27 @@ class FlattenedCacheEngine(CacheEngineBase):
                 self.prefetch_mode == "solver" and
                 post_gpu_blk + worst_case_extra > self.block_manager.num_total_gpu_blocks
             )
-
         if _needs_solver(self, post_gpu_blk, len(snapshot.candidates)):
             logger.info("Plan exceeds budget → hand over to Solver")
             empty_plan = Plan({}, {}, [], 0, {}, feasible=False)
             return empty_plan, post_gpu_blk
+        elif left < 0:
+            # HACK use all blocks, so preemption can happen 
+            while left < 0: 
+                last_entry = alloc_layers.pop()  # remove last alloc layer
+                left += len(last_entry[2])  # add back the blocks
+                # will_alloc_blk = _count_blocks(t[2] for t in alloc_layers)/
+            logger.critical(f"Plan exceeds budget, partial alloc, let scheduler handle it") 
+            will_alloc_blk = _count_blocks(t[2] for t in alloc_layers)          # CPU -> GPU
+            post_gpu_blk = current_gpu_blk + will_alloc_blk - will_free_blk
+            plan = Plan(
+                dealloc_layers=dict(dealloc_layers),
+                expected_freed=dict(expected_freed),
+                alloc_layers=alloc_layers,
+                prefetch_resize=prefetch_resize,
+                pause_layers=pause_layers,
+            )
+            return plan, post_gpu_blk
         
         plan = Plan(
             dealloc_layers=dict(dealloc_layers),
