@@ -3,10 +3,10 @@ import json, re, numpy as np, pandas as pd
 from pathlib import Path
 
 # ─────────────────────────── 0. 설정 ────────────────────────────
-ROOT = Path("all_traces_v2")        # *.metrics.json 최상위 폴더
+ROOT = Path("all_traces_v6")        # *.metrics.json 최상위 폴더
 
 REPRESENTATIVE_PER_BUCKET = 1    # 버킷당 대표 trace 수
-PPR_MAX = 3.0                 # ← 2 를 넘는 trace 는 분석에서 제외
+PPR_MAX = 5.0                 # ← 2 를 넘는 trace 는 분석에서 제외
 
 # 0-1 압력 약어 → 레이블
 LVL_MAP = {"vl":"low", "lo":"low", "ml":"mid", "md":"mid", "mh":"high", "hi":"high"}
@@ -16,17 +16,19 @@ LVL_MAP = {"vl":"low", "lo":"low", "ml":"mid", "md":"mid", "mh":"high", "hi":"hi
 #   • 값 : dict {TJ_min_pct, TJ_max_pct, BJ_min_pct, BJ_max_pct}
 #          ─ min_pct 는 “이 이상”,  max_pct 는 “이 이하” 로 해석
 CATEGORY_RULES = {
+    # NOTE(HONG): it is hard think about batch dynamic only without token dynamic => use static batching with different output length 
     # batch_dynamic : BJ 크고 TJ 작을 때
-    "batch_dynamic" : dict(TJ_max_pct=100, BJ_min_pct=96),
+    # "batch_dynamic" : dict(TJ_max_pct=10, BJ_min_pct=80),
 
     # both_dynamic  : 둘 다 큰 trace
-    "both_dynamic"  : dict(TJ_min_pct=75, BJ_min_pct=80),
+    "both_dynamic"  : dict(TJ_min_pct=70, BJ_min_pct=70),
 
+    # NOTE(HONG): for both static, we have to use same output length and 
     # both_static : 둘 다 아주 작을 때
-    "both_static"   : dict(TJ_max_pct=10, BJ_max_pct=10),
+    # "both_static"   : dict(TJ_max_pct=10, BJ_max_pct=50),
 
     # token_dynamic : TJ 크고 BJ 작을 때
-    "token_dynamic" : dict(TJ_min_pct=65, BJ_max_pct=15),
+    # "token_dynamic" : dict(TJ_min_pct=70, BJ_max_pct=30),
 }
 
 # ─────── 0. 삭제 규칙 정의 ──────────────────────────────────
@@ -105,20 +107,20 @@ def classify(tj, bj):
     return "unclassified"
 
 df["category"] = [classify(t, b) for t, b in zip(df["TJ"], df["BJ"])]
-df.to_csv("trace_summary.csv", index=False)
+df.to_csv("trace_analysis/trace_summary.csv", index=False)
 
 # ───── 4. 버킷별 카운트 (unclassified 제외) 저장 ───────────────
 count_tbl = (df[df["category"] != "unclassified"]
              .pivot_table(index="category", columns="pressure",
                            values="trace_path", aggfunc="count", fill_value=0))
-count_tbl.to_csv("bucket_counts.csv")
+count_tbl.to_csv("trace_analysis/bucket_counts.csv")
 print("\nTrace counts per bucket (saved → bucket_counts.csv)")
 print(count_tbl)
 
 # ───── 5. unclassified 제외 전체 trace 목록 저장 ───────────────
 (df[df["category"] != "unclassified"]
    .sort_values(["category","pressure","trace_path"])
-   .to_csv("traces_by_bucket.csv", index=False))
+   .to_csv("trace_analysis/traces_by_bucket.csv", index=False))
 
 # ───── 6. 대표 trace 선택 & 저장 ───────────────────────────────
 eligible = df[df["category"].isin(CATEGORY_RULES.keys())]
@@ -128,5 +130,5 @@ rep = (eligible.assign(dev=lambda d: abs(
                .sort_values("dev")
                .groupby(["category","pressure"])
                .head(REPRESENTATIVE_PER_BUCKET))
-rep.to_csv("selected_12_traces.csv", index=False)
+rep.to_csv("trace_analysis/selected_12_traces.csv", index=False)
 print("\n대표 trace 목록은 selected_12_traces.csv 로 저장 완료.")

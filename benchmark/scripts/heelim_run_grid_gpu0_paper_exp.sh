@@ -14,9 +14,10 @@ ROOT="/home/heelim/vllm"
 
 FIGURE_ONLY=$1                      # 0 → 실행 + 그림, 1 → 그림만
 EXP_LIST=(paper_main_exp_test)
-METHOD_LIST=(Ours Flexgen)
+METHOD_LIST=(Flexgen)
 TRACE_CFG_DIR="${ROOT}/benchmark/SS83_SL00_LS08_LL08/"
-TRACE_LIST=(bim50_hi_ov78)
+# TRACE_LIST=(bim50_hi_ov78)
+TRACE_LIST=(bim50_hi_ov78_scaled_debugging)
 
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"

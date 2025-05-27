@@ -8,7 +8,7 @@ import json, numpy as np, matplotlib.pyplot as plt
 from pathlib import Path
 
 # ① metrics 파일이 모여 있는 “최상위” 폴더를 맞춰 주세요
-root = Path("all_traces_v3")
+root = Path("all_traces_v6")
 
 metrics = list(root.rglob("*.metrics.json"))
 if not metrics:
@@ -32,7 +32,7 @@ plt.xlabel("TJ_count per trace")
 plt.ylabel("Number of traces")
 plt.title(f"TJ distribution  (N={len(tj)})")
 plt.tight_layout()
-plt.savefig("tj_hist.png", dpi=150)
+plt.savefig("trace_analysis/tj_hist.png", dpi=150)
 plt.close()
 
 # ③ BJ 히스토그램 ------------------------------------------------------------
@@ -43,7 +43,7 @@ plt.xlabel("BJ_count per trace")
 plt.ylabel("Number of traces")
 plt.title(f"BJ distribution  (N={len(bj)})")
 plt.tight_layout()
-plt.savefig("bj_hist.png", dpi=150)
+plt.savefig("trace_analysis/bj_hist.png", dpi=150)
 plt.close()
 
 print("[saved] tj_hist.png, bj_hist.png")

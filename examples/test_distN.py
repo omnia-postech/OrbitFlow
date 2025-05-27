@@ -338,6 +338,8 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
     step_count = 1
     # The main simulation loop
     while queue or request_metadata:
+        step_start=0.0
+        step_end=0.0
         # 4) Find all requests that have arrival_time <= cumulative_steps
         #    -> these are ready to enqueue
         ready = [(req_id, req_obj) for (req_id, req_obj) in queue
@@ -369,9 +371,11 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
         engine.scheduler[0].deposit_map = deposit_map
         engine.scheduler[0].slo_from_delaysim = sim.v 
         # NOTE(HONG): use below for pipelining parallelism
-        step_start = time.time()
+        torch.cuda.synchronize()  # Ensure all GPU operations are complete before measuring time
+        step_start = time.perf_counter()
         step_outputs = engine.step()
-        step_end = time.time()
+        torch.cuda.synchronize()  # Ensure all GPU operations are complete before measuring time
+        step_end = time.perf_counter()
         step_count += 1
         elapsed_time_step = step_end - step_start
         overall_wall += elapsed_time_step
@@ -439,6 +443,9 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                         print(f"Failure (due to memory limits): {len(rids)}")
                     break
         
+        if elapsed_time_step < solver_time:
+            logger.critical(f"Elapsed time {elapsed_time_step:.3f} s is less than solver time {solver_time:.3f} s, scheduler time is {step_outputs[0].metrics.scheduler_time} "
+                           f"Skipping step {cumulative_steps}.")            
         assert(elapsed_time_step > solver_time) 
         sum_solver_time += solver_time
         for output in step_outputs:
