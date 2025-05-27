@@ -670,7 +670,6 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
             block_size=self.block_size,
             num_lookahead_slots=num_lookahead_slots,
         )
-        num_required_blocks *= 16 
         if seq_group.is_encoder_decoder():
             encoder_seq = seq_group.get_encoder_seq()
             assert encoder_seq is not None

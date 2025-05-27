@@ -1436,9 +1436,9 @@ class Scheduler:
 
             # If the sequence group cannot be allocated, stop.
             if self.cache_config.prefetch_mode in ["solver", "flexgen", "distn_single"]:
-                num_gpu_layers = 1
+                num_gpu_layers = 16
             else: 
-                num_gpu_layers = self.scheduler_config.num_gpu_layers
+                num_gpu_layers = self.block_manager.num_attention_layers
             can_allocate = self.block_manager.can_allocate(
                 seq_group, num_lookahead_slots=num_lookahead_slots,num_gpu_layers=num_gpu_layers)
             if can_allocate == AllocStatus.LATER:
@@ -2048,7 +2048,7 @@ class Scheduler:
         if self.cache_config.prefetch_mode in ["solver", "flexgen", "distn_single"]:
             num_gpu_layers = 1
         else:
-            num_gpu_layers = self.scheduler_config.num_gpu_layers
+            num_gpu_layers = self.block_manager.num_attention_layers
         self.block_manager.allocate(seq_group,num_gpu_layers=num_gpu_layers)
         for seq in seq_group.get_seqs(status=SequenceStatus.WAITING):
             seq.status = SequenceStatus.RUNNING
