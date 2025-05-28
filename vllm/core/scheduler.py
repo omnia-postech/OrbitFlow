@@ -1624,7 +1624,10 @@ class Scheduler:
         assert budget.num_curr_seqs <= self.scheduler_config.max_num_seqs
 
         # Update waiting requests.
-        self.waiting.extendleft(running_scheduled.preempted)
+        preempt_back = [sg for sg in running_scheduled.preempted
+                if sg not in self.paused_cpu]
+        self.waiting.extendleft(preempt_back)
+        # self.waiting.extendleft(running_scheduled.preempted)
         # Update new running requests.
         if len(prefills.seq_groups) > 0:
             self.running.extend([s.seq_group for s in prefills.seq_groups])
@@ -2089,17 +2092,18 @@ class Scheduler:
         # over sequence groups with a single sequence.
         # TODO(woosuk): Support recomputation for sequence groups with multiple
         # sequences. This may require a more sophisticated CUDA kernel.
-        if self.user_specified_preemption_mode is None:
-            if seq_group.get_max_num_running_seqs() == 1:
-                preemption_mode = PreemptionMode.RECOMPUTE
-            else:
-                preemption_mode = PreemptionMode.SWAP
-        elif self.user_specified_preemption_mode == "swap":
-            preemption_mode = PreemptionMode.SWAP
-        elif self.user_specified_preemption_mode == "pause":
-            preemption_mode = PreemptionMode.PAUSE
-        else:
-            preemption_mode = PreemptionMode.RECOMPUTE
+        # if self.user_specified_preemption_mode is None:
+        #     if seq_group.get_max_num_running_seqs() == 1:
+        #         preemption_mode = PreemptionMode.RECOMPUTE
+        #     else:
+        #         preemption_mode = PreemptionMode.SWAP
+        # elif self.user_specified_preemption_mode == "swap":
+        #     preemption_mode = PreemptionMode.SWAP
+        # elif self.user_specified_preemption_mode == "pause":
+        #     preemption_mode = PreemptionMode.PAUSE
+        # else:
+        #     preemption_mode = PreemptionMode.RECOMPUTE
+        preemption_mode = PreemptionMode.PAUSE
         if self.num_cumulative_preemption % 20 ==0: 
             logger.warning(
                 "Sequence group %s is preempted by %s mode because there is "
