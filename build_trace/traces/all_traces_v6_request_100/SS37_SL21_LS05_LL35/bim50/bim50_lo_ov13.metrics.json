@@ -1,0 +1,14 @@
+{
+  "PPR": 2.329799107142857,
+  "TPI": 0.31467338277491264,
+  "OV_block_step": 52402196,
+  "OV_frac": 0.14054944979020173,
+  "GE2_frac": 0.0182834511696314,
+  "peak_blocks": 4175,
+  "peak_step": 75443,
+  "gpu_blocks": 1792,
+  "total_steps": 208057,
+  "type1_count": 80,
+  "type2_count": 59,
+  "plot_path": "traces/request_types/all_traces/SS37_SL21_LS05_LL35/bim50/bim50_lo_ov13.png"
+}
