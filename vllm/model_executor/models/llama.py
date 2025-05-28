@@ -566,7 +566,7 @@ class LlamaModel(nn.Module):
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, IntermediateTensors]:
         layer_metas = attn_metadata
-        
+        logger.critical(f"len(layer_metas) = {len(layer_metas)}")
         work_map = {sid: layer_flags[:]           # shallow copy of each list
                     for sid, layer_flags in gpu_cpu_cache_map.items()}
         gap, next_cpu = init_prefetch_state(work_map) 
@@ -812,6 +812,7 @@ class LlamaModel(nn.Module):
                                 for i in range(len(seq_starts) - 1)
                             ]
                             seq_num_blocks = {sid: seq_num_blocks[i] for i, sid in enumerate(seq_ids)}
+                            logger.critical(f"target layer={tgt_layer}, len(layer_metas)={len(layer_metas)}")
                             block_table_for_prefetched, blocks_to_write, blocks_to_copy = compute_inds_for_prefetch(
                                 layer_metas[tgt_layer].cpu_block_tables,
                                 layer_metas[tgt_layer].block_tables,
