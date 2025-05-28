@@ -21,7 +21,8 @@ TRACE_CFG_DIR="${ROOT}/benchmark/selected_traces/"
 # TRACE_LIST=(batch_dyn_low both_static_low batch_dyn_mid both_static_mid batch_dyn_high both_static_high batch_dyn_veryhigh both_static_veryhigh)
 # TRACE_LIST=(token_dyn_low token_dyn_mid token_dyn_high token_dyn_veryhigh)
 # TRACE_LIST=(token_dyn_veryhigh)
-TRACE_LIST=(both_static_low both_static_mid both_static_high both_static_veryhigh)
+# TRACE_LIST=(both_static_low both_static_mid both_static_high both_static_veryhigh)
+TRACE_LIST=(token_dyn_mid token_dyn_high token_dyn_veryhigh)
 
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"
