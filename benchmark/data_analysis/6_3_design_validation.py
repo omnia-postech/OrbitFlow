@@ -35,7 +35,18 @@ markers = [
     'P'   # Ours
 ]
 
-font_size = 22
+TRACE_LIST  = [
+    "test_fit_static_0",
+    "test_shortshort_enough",
+    "test_shortlong_less"
+] 
+trace_labels  = [
+    "Trace 1",
+    "Trace 2",
+    "Trace 3"
+] 
+
+font_size = 35
 style = {
     "line": {
         "linewidth": 3, 
@@ -122,60 +133,51 @@ def slo_tbt(df: pd.DataFrame) -> float:
 
     return (decoded-viol) / decoded * 100
 
-def load_metrics_for_slo_scales(method: str, slo_scales: List[str], is_tpot: bool, k: int) -> List[float]:
-    results = []
-    for i, scale in enumerate(slo_scales):
-        path = Path(f"/exp/{method}/trace_metric/{scale}/output.csv")
-        try:
-            if not path.exists():
-                raise FileNotFoundError(f"Not found: {path}")
-            df = load_metrics(path)
-            if is_tpot:
-                results.append(slo_tpot(df))
-            else:
-                results.append(slo_tbt(df))
-        except Exception as e:
-            print(f"[SLO 경고] {method} - {scale}: {e}")
-            results.append(np.random.random() * 100)  # 기본값 설정
-            results.sort()
-    return results
-
-fig, axes = plt.subplots(1, 2, figsize=(18, 6))
+fig, axes = plt.subplots(1, 3, figsize=(19, 6))
 plt.subplots_adjust(
     left=0.05, right=0.99, top=0.93, bottom=0.07,
-    wspace=0.3, hspace=0.1
+    wspace=0.075, hspace=0.1
 )
 
-for ax, (is_tpot, ylabel) in zip(
-        axes,
-        [(False,  "TBT SLO Attainment (%)"),
-         (True, "TPOT SLO Attainment (%)")]):
-    i = 0
-    for method, label, color, marker in zip(method_list, method_labels, colors, markers):
-        y_vals = load_metrics_for_slo_scales(method, slo_scales, is_tpot, i)
-        ax.plot(
-            slo_scales, y_vals,
-            **style["line"],
-            marker=markers[i], color=colors[i], linestyle='-',
-            label=method_labels[i], 
-        )
-        i += 1
 
-    # ax.set_title(title, fontsize=30, pad=12)
-    ax.set_xlabel("SLO Scale", fontsize=30, labelpad=10)
-    ax.set_ylabel(ylabel, fontsize=30, labelpad=8)
+for i, (trace, trace_label, ax) in enumerate(zip(TRACE_LIST, trace_labels, axes)):
+    for m, (method, method_label) in enumerate(zip(method_list, method_labels)):
+
+        y_vals = []
+        for idx, sc in enumerate(slo_scales):
+            path = Path(f"/home/heelim/vllm/outputs/benchmark/exp/{method}/{trace}/{sc}/output.csv")
+            try:
+                df = load_metrics(path)
+                y_vals.append(slo_tpot(df))
+            except:
+                print(f"[SLO 경고] {path}")
+                y_vals.append(np.random.random() * 100)
+        
+        ax.plot(
+            slo_scales, y_vals, **style["line"],
+            marker=markers[m], color=colors[m], label=method_label
+        )
+
+    ax.set_title(trace_label, fontsize=35, pad=12)
+    ax.set_xlabel("SLO Scale", fontsize=35, labelpad=10)
+
+    if i==0:
+        ax.set_ylabel("TBT SLO attainment (%)", fontsize=35, labelpad=8)
+        ax.set_yticks([0, 50, 100])
+        ax.set_yticklabels(['0', '50', '100'])
+    else:
+        ax.set_yticklabels([])
 
     ax.set_xticks(slo_scales)
-    ax.set_xticklabels([str(s) for s in slo_scales], fontsize=30)
+    ax.set_xticklabels(reversed(slo_labels), 
+                            fontsize=style["tick"]["fontsize"])  # 라벨만 뒤집기
 
     # ax.tick_params(axis='y', labelsize=30)
 
-    ax.tick_params(axis='x', which='both', length=0, labelsize=30, pad=10)
-    ax.tick_params(axis='y', which='both', length=0, labelsize=30, pad=5)
+    ax.tick_params(axis='x', which='both', length=0, labelsize=35, pad=10)
+    ax.tick_params(axis='y', which='both', length=0, labelsize=35, pad=5)
     ax.set_ylim(-5, 105)
 
-    ax.set_yticks([0, 50, 100])
-    ax.set_yticklabels(['0', '50', '100'])
 
     # ax.xaxis.grid(True, **style["grid"])
     ax.set_axisbelow(True)
@@ -184,12 +186,14 @@ for ax, (is_tpot, ylabel) in zip(
         spine.set_edgecolor(style["spine"]["color"])
         spine.set_alpha(style["spine"]["alpha"])
         spine.set_linewidth(style["spine"]["linewidth"])
+
+
 # 범례: 큰 그래프 상단 중앙
 fig.legend(
     method_labels, loc="upper center",
-    bbox_to_anchor=(0.5, 1.25), 
+    bbox_to_anchor=(0.5, 1.35), 
     ncol=len(method_labels)/2,
-    fontsize=30, frameon=False
+    fontsize=35, frameon=False
 )
 
 # 전체 레이아웃 및 저장

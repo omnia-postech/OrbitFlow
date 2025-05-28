@@ -134,4 +134,4 @@ ax.legend(loc="upper center",
 
 # 저장
 plt.savefig("figures/context_window.jpg", format='jpg', bbox_inches="tight")
-# plt.savefig("figures/context_window_slo_threshold.pdf", format='pdf', bbox_inches="tight")
+plt.savefig("figures/context_window.pdf", format='pdf', bbox_inches="tight")
