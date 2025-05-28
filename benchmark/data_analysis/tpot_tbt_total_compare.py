@@ -5,19 +5,16 @@ from pathlib import Path
 
 # ───────────────────────────────────────────────
 # 1. 설정 -------------------------------------------------------
-trace_list  = ["test_fit_static_0", "test_shortshort_enough",
-               "test_shortlong_less"]
-trace_labels = ["(a) Trace 1", "(b) Trace 2",
-                "(c) Trace 3"]
+trace_list  = ["both_static", "batch_dyn", "token_dyn", "both_dyn"]
+trace_labels = ["(a) Both Static", "(b) Batch dynamic", "(c) Token dynamic", "(d) Both dynamic"]
 
-method_list   = ["Flexgen","DeepSpeed","SelectN","NoPrefetch","Ours"]
-method_labels = ["Flexgen","DeepSpeed","Placeholder(SelectN)",
-                 "No Prefetch","Ours"]
+method_list   = ["NoPrefetch", "Flexgen", "SelectN", "DistNSingle", "Ours"]
+method_labels = ["No Prefetch", "Flexgen", "Placeholder(SelectN)", "DistNSingle", "Ours"]
 
-metric_list   = ["Low","Mid","High"]
-metric_labels = ["Low","Mid","High"]           # 왼쪽 y-라벨
+metric_list   = ["low","mid","high", "veryhigh"]
+metric_labels = ["Low","Mid","High", "Very High"]           # 왼쪽 y-라벨
 
-slo_scales    = [4, 3, 2, 1]      # 내림차순!
+slo_scales    = [3.5, 2.5, 1.5]      # 내림차순!
 slo_labels    = [str(s) for s in slo_scales]   # x축 표기용 문자열
 
 colors = [
@@ -64,32 +61,49 @@ def load_metrics(path: Path) -> pd.DataFrame:
             lambda x: ast.literal_eval(x) if isinstance(x,str) else x)
     return df
 
-def slo_tpot(df: pd.DataFrame) -> float:
-    required_cols = {"end_to_end_time", "num_output_tokens", "slo_threshold"}
-    if not required_cols.issubset(df.columns):
-        print(f"Missing columns: {required_cols - set(df.columns)}")
+def _extract_request_tpot_attainment(df: pd.DataFrame) -> tuple[int, int]:
+    """Return (requests_meeting_SLO, total_requests) using TPOT criterion.
+
+    For each request, compare its time_per_output_token (TPOT) with the *mean*
+    of its slo_threshold list (or scalar). A request attains SLO if
+    TPOT <= mean(threshold).
+    """
+    if {"time_per_output_token", "slo_threshold"}.issubset(df.columns):
+        # tpot = pd.to_numeric(df["time_per_output_token"], errors="coerce").to_numpy()
+        # print(f"tpot: {tpot}")
+        # temp, compute from time_between_tokens
+        tpot = np.array([np.mean(tbt) for tbt in df["time_between_tokens"]])
+        # print(f"tpop computed: {tpot}")
+        thr = pd.to_numeric(df["slo_threshold"], errors="coerce").to_numpy()
+        # assert round(thr.mean(), 2) == round(thr.max(), 2) == round(thr.min(), 2), f"SLO threshold must be constant{thr.mean()}, {thr.max()}, {thr.min()}"
+        thr = thr.mean()
+        valid = ~np.isnan(tpot) & ~np.isnan(thr)
+        attain = (tpot[valid] <= thr).sum()
+        ok = int(attain)
+        tot  = int(valid.sum())
+    else:
+        print("Missing columns: time_per_output_token, slo_threshold")
+        ok = 0
+        tot  = 0
+    
+    if tot:
+        return ok / tot * 100
+    else:
+        print(f"{ok}, {tot}")
         return 0.0
 
-    end_to_end_time = pd.to_numeric(df["end_to_end_time"], errors="coerce")
-    num_tokens = pd.to_numeric(df["num_output_tokens"], errors="coerce")
-    tpot = end_to_end_time / num_tokens
+def _extract_token_slo_attainment(df: pd.DataFrame) -> tuple[int, int]:
+    total_decoded = int(df.get("decode_length", pd.Series(0)).sum())
+    viol = int(df.get("slo_violations", pd.Series(0)).sum())
 
-    slo_threshold = df["slo_threshold"].apply(
-        lambda x: np.mean(x) if isinstance(x, (list, np.ndarray)) else x
-    )
-    slo_threshold = pd.to_numeric(slo_threshold, errors="coerce")
+    ok = total_decoded - viol
+    tot = total_decoded
 
-    valid = ~tpot.isna() & ~slo_threshold.isna()
-    attained = (tpot[valid] <= slo_threshold[valid]).sum()
-    total = valid.sum()
-
-    return attained / total * 100 if total else 0.0
-
-def slo_tbt(df: pd.DataFrame) -> float:
-    decoded = df["decode_length"].sum()
-    viol    = df["slo_violations"].sum()
-
-    return (decoded-viol) / decoded * 100
+    if tot:
+        return ok / tot * 100
+    else:
+        print(f"{ok}, {tot}")
+        return 0.0
 
 # ───────────────────────────────────────────────
 # 3. Figure & GridSpec ---------------------------
@@ -110,6 +124,8 @@ for i in range(N_METRIC):
 
 # ───────────────────────────────────────────────
 # 4. Plot 루프 ----------------------------------
+not_open = []
+open = []
 for r, metric in enumerate(metric_list):        # row
     for c, trace in enumerate(trace_list):      # column pair
 
@@ -120,49 +136,66 @@ for r, metric in enumerate(metric_list):        # row
             # ---- TPOT ----
             yL = []
             for idx, sc in enumerate(slo_scales):
-                path = Path(f"/home/heelim/vllm/outputs/benchmark/exp/{method}/{trace}_{metric}/{sc}/output.csv")
+                path = Path(f"/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo{sc}/{method}/{trace}_{metric}/outputs.csv")
+                print(path)
                 try:
                     df = load_metrics(path)
-                    yL.append(slo_tpot(df))
-                except:
-                    print(f"[SLO 경고] {path}")
-                    yL.append(10*(idx+1)*(m+1))
-            ax_L.plot(slo_scales, yL, **style["line"],
+                    # print(f"[Open] {path}")
+                    if trace == "both_dyn":
+                        yL.append(0)
+                        continue
+                    tpot = _extract_request_tpot_attainment(df)
+                    # print(f"tpot: {tpot}")
+                    yL.append(tpot)
+                except Exception as e:
+                    # print(f"[SLO 경고] {path}")
+                    # print(f"{e}")
+                    yL.append(0)
+            ax_L.plot(slo_labels, yL, **style["line"],
                        marker=markers[m], color=colors[m], label=m_label)
 
             # 90% 교차점
-            for p in range(len(slo_scales)-1):
-                y1,y2 = yL[p], yL[p+1]
-                if (y1-90)*(y2-90) <= 0 and y1 != y2:
-                    x1,x2 = slo_scales[p], slo_scales[p+1]
-                    x_cross = x1 + (90-y1)*(x2-x1)/(y2-y1)
-                    ax_L.vlines(x_cross, 0, 90, color=colors[m],
-                                ls="--", lw=style["line"]["linewidth"], alpha=.8)
+            # for p in range(len(slo_scales)-1):
+            #     y1,y2 = yL[p], yL[p+1]
+            #     if (y1-90)*(y2-90) <= 0 and y1 != y2:
+            #         x1,x2 = slo_scales[p], slo_scales[p+1]
+            #         x_cross = x1 + (90-y1)*(x2-x1)/(y2-y1)
+            #         ax_L.vlines(x_cross, 0, 90, color=colors[m],
+            #                     ls="--", lw=style["line"]["linewidth"], alpha=.8)
 
             # ---- TBT ----
             yR = []
             for idx, sc in enumerate(slo_scales):
+                path = Path(f"/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo{sc}/{method}/{trace}_{metric}/outputs.csv")
+                print(path)
                 try:
-                    df = load_metrics(Path(f"/exp/{method}/{trace}_{metric}/{sc}/output.csv"))
-                    yR.append(slo_tbt(df))
-                except:
-                    yR.append(10*(idx+1)*(m+1))
-            ax_R.plot(slo_scales, yR, **style["line"],
+                    df = load_metrics(path)
+                    # print(f"[Open] {path}")
+                    if trace == "both_dyn":
+                        yR.append(0)
+                        continue
+                    tbt = _extract_token_slo_attainment(df)
+                    # print(f"tbt: {tbt}")
+                    yR.append(tbt)
+                except Exception as e:
+                    # print(f"[SLO 경고] {path}")
+                    # print(f"{e}")
+                    yR.append(0)
+            ax_R.plot(slo_labels, yR, **style["line"],
                        marker=markers[m], color=colors[m])
 
-            for p in range(len(slo_scales)-1):
-                y1,y2 = yR[p], yR[p+1]
-                if (y1-90)*(y2-90) <= 0 and y1 != y2:
-                    x1,x2 = slo_scales[p], slo_scales[p+1]
-                    x_cross = x1 + (90-y1)*(x2-x1)/(y2-y1)
-                    ax_R.vlines(x_cross, 0, 90, color=colors[m],
-                                ls="--", lw=style["line"]["linewidth"], alpha=.8)
+            # for p in range(len(slo_scales)-1):
+            #     y1,y2 = yR[p], yR[p+1]
+            #     if (y1-90)*(y2-90) <= 0 and y1 != y2:
+            #         x1,x2 = slo_scales[p], slo_scales[p+1]
+            #         x_cross = x1 + (90-y1)*(x2-x1)/(y2-y1)
+            #         ax_R.vlines(x_cross, 0, 90, color=colors[m],
+            #                     ls="--", lw=style["line"]["linewidth"], alpha=.8)
 
         # ── 축 공통 서식 ──────────────────────────
         for ax in (ax_L, ax_R):
-            ax.set_xticks(slo_scales)  # 원래 순서 그대로
-            ax.set_xticklabels([str(s) for s in reversed(slo_scales)], 
-                               fontsize=style["tick"]["fontsize"])  # 라벨만 뒤집기
+            ax.set_xticks(slo_labels)  # 원래 순서 그대로
+            ax.set_xticklabels(slo_labels)  # 라벨만 뒤집기
             # ax.set_xlim(slo_scales[-1], slo_scales[0])  # 오른쪽=1.0, 왼쪽=1.5
             ax.set_ylim(-5, 105)
             ax.axhline(90, color="gray", ls="--", lw=style["line"]["linewidth"])
