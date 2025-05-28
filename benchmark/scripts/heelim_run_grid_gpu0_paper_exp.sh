@@ -14,10 +14,11 @@ ROOT="/home/heelim/vllm"
 
 FIGURE_ONLY=$1                      # 0 → 실행 + 그림, 1 → 그림만
 EXP_LIST=(paper_main_exp)
-METHOD_LIST=(Ours)
+METHOD_LIST=(Flexgen)
 TRACE_CFG_DIR="${ROOT}/benchmark/selected_traces/"
 # TRACE_LIST=(bim50_hi_ov78_scaled_debugging)
-TRACE_LIST=(both_dyn_low both_dyn_mid both_dyn_high both_dyn_veryhigh)
+# TRACE_LIST=(both_dyn_low both_dyn_mid both_dyn_high)
+TRACE_LIST=(batch_dyn_high batch_dyn_veryhigh)
 
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"

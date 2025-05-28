@@ -35,7 +35,8 @@ def main(src, dst):
     print(f"saved ➜ {dst}")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("usage: python scale_trace.py <orig.json> <scaled.json>")
-        sys.exit(1)
-    main(sys.argv[1], sys.argv[2])
+    # if len(sys.argv) != 3:
+    #     print("usage: python scale_trace.py <orig.json> <scaled.json>")
+    #     sys.exit(1)
+    # main(sys.argv[1], sys.argv[2])
+    main("/home/heelim/vllm/build_trace/traces/case234/token_static_batch_static/C4_bim50_high.json", "/home/heelim/vllm/build_trace/traces/case234/token_static_batch_static/C4_bim50_high_scaled.json")

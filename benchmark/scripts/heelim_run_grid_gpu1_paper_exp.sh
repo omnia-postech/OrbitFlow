@@ -17,7 +17,8 @@ EXP_LIST=(paper_main_exp)
 METHOD_LIST=(Flexgen)
 TRACE_CFG_DIR="${ROOT}/benchmark/selected_traces/"
 # TRACE_LIST=(bim50_hi_ov78_scaled_debugging)
-TRACE_LIST=(both_dyn_low both_dyn_mid both_dyn_high both_dyn_veryhigh)
+# TRACE_LIST=(both_dyn_low both_dyn_mid both_dyn_high)
+TRACE_LIST=(batch_dyn_low both_static_low batch_dyn_mid both_static_mid batch_dyn_high both_static_high batch_dyn_veryhigh both_static_veryhigh)
 
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"
