@@ -1161,67 +1161,67 @@ def _ovf_str(val: float) -> str:
 # ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     # NOTE(HONG): request generation with various length combinations
-    RT_list = build_request_types_SML()                    # 36개
+    # RT_list = build_request_types_SML()                    # 36개
     
-    # ① 모든 격자 혼합 생성 (step=0.25 ⇒ 35개)
-    all_mix = grid_mixtures(step=0.33)
+    # # ① 모든 격자 혼합 생성 (step=0.25 ⇒ 35개)
+    # all_mix = grid_mixtures(step=0.33)
 
-    # ② 대표 샘플 선택
-    mixes_h9  = select_mixtures(all_mix, k=9,  mode="heuristic")
-    mixes_k12 = select_mixtures(all_mix, k=12, mode="kmeans",  random_state=42)
-    mixes_l20 = select_mixtures(all_mix, k=20, mode="lhs",     random_state=42)
+    # # ② 대표 샘플 선택
+    # mixes_h9  = select_mixtures(all_mix, k=9,  mode="heuristic")
+    # mixes_k12 = select_mixtures(all_mix, k=12, mode="kmeans",  random_state=42)
+    # mixes_l20 = select_mixtures(all_mix, k=20, mode="lhs",     random_state=42)
 
-    print("heuristic 9 :", mixes_h9[:3], "...")
-    print("kmeans 12   :", mixes_k12[:3], "...")
-    print("lhs 20      :", mixes_l20[:3], "...")
+    # print("heuristic 9 :", mixes_h9[:3], "...")
+    # print("kmeans 12   :", mixes_k12[:3], "...")
+    # print("lhs 20      :", mixes_l20[:3], "...")
 
-    # Combine all mixes into a single list
-    mixes = mixes_h9 + mixes_k12 + mixes_l20
+    # # Combine all mixes into a single list
+    # mixes = mixes_h9 + mixes_k12 + mixes_l20
     
-    # Print total number of mixes
-    print(f"Total number of mixes: {len(mixes)}")
+    # # Print total number of mixes
+    # print(f"Total number of mixes: {len(mixes)}")
     
-    for mix in mixes:                           # mixes_h9 + mixes_k12 + mixes_l20 ...
-        probs = {rt: 0 for rt in RT_list}
-        block = len(RT_list) // 9               # 9
-        for j, p in enumerate(mix):       # j = 0‥8 (SS, SM, …, LL)
-            for rt in RT_list[j*block:(j+1)*block]:
-                probs[rt] = p / block
+    # for mix in mixes:                           # mixes_h9 + mixes_k12 + mixes_l20 ...
+    #     probs = {rt: 0 for rt in RT_list}
+    #     block = len(RT_list) // 9               # 9
+    #     for j, p in enumerate(mix):       # j = 0‥8 (SS, SM, …, LL)
+    #         for rt in RT_list[j*block:(j+1)*block]:
+    #             probs[rt] = p / block
 
-        total = sum(probs.values())
-        for k in probs:
-            probs[k] /= total  
-            
-        # ─────────────── 변경된 저장 경로 ───────────────
-        tag = mix_tag(mix)                      # 한눈에 보이는 태그
-        save_request_json(
-            path=f"traces/request_types/req_{tag}.json",      # traces 폴더에 저장
-            request_types=probs,
-            num_req=52,
-            batch_size=4,
-            skip_token_ids=True,
-        )
+    #     total = sum(probs.values())
+    #     for k in probs:
+    #         probs[k] /= total  
+
+    #     # ─────────────── 변경된 저장 경로 ───────────────
+    #     tag = mix_tag(mix)                      # 한눈에 보이는 태그
+    #     save_request_json(
+    #         path=f"traces/request_types/req_{tag}.json",      # traces 폴더에 저장
+    #         request_types=probs,
+    #         num_req=52,
+    #         batch_size=4,
+    #         skip_token_ids=True,
+    #     )
 
     # ────────────────────────────────────────────────────────
     #  모든 request.json × Arrival-Pattern 조합으로 trace 생성
     #    (앞서 “traces/req_*.json” 으로 저장한 요청 파일들을 대상으로)
     # ────────────────────────────────────────────────────────    
 
-    # level_spec = {
-    #     "vlow"     : dict(target_ovf = 0.05, tol = 0.010),  # 매우 여유
-    #     "low"      : dict(target_ovf = 0.12, tol = 0.015),
-    #     "mid_low"  : dict(target_ovf = 0.22, tol = 0.020),
-    #     "mid"      : dict(target_ovf = 0.35, tol = 0.030),
-    #     "mid_high" : dict(target_ovf = 0.55, tol = 0.040),
-    #     "high"     : dict(target_ovf = 0.80, tol = 0.050),  # 상한 유지
-    # }    
+    level_spec = {
+        "vlow"     : dict(target_ovf = 0.05, tol = 0.010),  # 매우 여유
+        "low"      : dict(target_ovf = 0.12, tol = 0.015),
+        "mid_low"  : dict(target_ovf = 0.22, tol = 0.020),
+        "mid"      : dict(target_ovf = 0.35, tol = 0.030),
+        "mid_high" : dict(target_ovf = 0.55, tol = 0.040),
+        "high"     : dict(target_ovf = 0.80, tol = 0.050),  # 상한 유지
+    }    
 
-    # for req_json in Path("traces/request_types").glob("req_*.json"):
-    #     build_sched_save(
-    #         request_json   = str(req_json),            
-    #         level_spec     = level_spec,
-    #         blk_size       = BLOCK_SIZE_TOK,
-    #         static         = False,
-    #         skip_token_ids = True,
-    #         scales       = [0.5], # [0.1, 0.25, 0.5]
-    #     )
+    for req_json in Path("traces/request_types").glob("req_*.json"):
+        build_sched_save(
+            request_json   = str(req_json),            
+            level_spec     = level_spec,
+            blk_size       = BLOCK_SIZE_TOK,
+            static         = False,
+            skip_token_ids = True,
+            scales       = [0.5], # [0.1, 0.25, 0.5]
+        )
