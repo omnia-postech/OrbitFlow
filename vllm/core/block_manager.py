@@ -670,7 +670,6 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
             block_size=self.block_size,
             num_lookahead_slots=num_lookahead_slots,
         )
-        num_required_blocks *= 16 
         if seq_group.is_encoder_decoder():
             encoder_seq = seq_group.get_encoder_seq()
             assert encoder_seq is not None
@@ -688,6 +687,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         num_free_gpu_blocks = self.block_allocator.get_num_free_blocks(
             device=Device.GPU)
 
+        logger.critical(f"seq:{seq.seq_id} num_required_blocks {num_required_blocks}, num_free_gpu_blocks {num_free_gpu_blocks}, watermark_blocks {self.watermark_blocks}, num_total_gpu_blocks {self.num_total_gpu_blocks}")
         # Use watermark to avoid frequent cache eviction.
         if (self.num_total_gpu_blocks - num_required_blocks <
                 self.watermark_blocks):
@@ -1297,7 +1297,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         #     watermark_blocks = self.watermark_blocks
         if prefetch_distance > -1:
             assert(prefetch_distance < self.num_attention_layers) # does not work for distance == 0
-            temp_gpu_map = [0 if (x+1) % prefetch_distance == 0 else 1 for x in range(self.num_attention_layers)]
+            temp_gpu_map = [0 if x % (prefetch_distance + 1) == prefetch_distance else 1 for x in range(self.num_attention_layers)]
             num_gpu_layers = sum(temp_gpu_map) 
             num_blocks_touched = (((num_blocks_touched // self.num_attention_layers)+1)*num_gpu_layers)
             if self.block_allocator.get_num_total_blocks(
