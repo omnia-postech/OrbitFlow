@@ -334,6 +334,8 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         plan_data['new_gpu_blocks'] = new_gpu_blocks
 
         cache_engine._sync_active_gpu_cpu_map(cache_engine.mapping.seq_row_order)
+        # logger.critical(f"[driver] active_gpu_cpu_cache_map: {cache_engine.active_gpu_cpu_cache_map}")
+        # logger.critical(f"cache_engine.mapping: {cache_engine.mapping}")
 
         # bm = cache_engine._get_bm()
         # plan_data['bm'] = bm
