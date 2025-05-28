@@ -1225,7 +1225,7 @@ class Scheduler:
             paused_queue.popleft()
             
             self._reuse(seq_group)
-            # self._append_slots(seq_group, [], enable_chunking)
+            self._append_slots(seq_group, [], enable_chunking)
             
             logger.info(f"RESUME: {seq_group}")
             is_prefill = seq_group.is_prefill()
