@@ -13,7 +13,7 @@ from trace_generator import (
 # ─────────────────────────────────────────────────────────────
 # 공통 파라미터
 # ─────────────────────────────────────────────────────────────
-NUM_REQ     = 100          # 요청 개수
+NUM_REQ     = 52          # 요청 개수
 BATCH_SIZE  = 4            # 시스템 batch_size 와 동일해야 함
 VOCAB       = (200, 30_000)
 BASE_DIR    = Path("traces/case234")      # 모든 산출물 루트
@@ -116,9 +116,9 @@ def _mk_short_output_types(tag_prefix: str,
 #   • 출력 길이  → 4 096 ~ 16 384 token  (최대 16 K)
 # ------------------------------------------------------------
 def _mk_long_output_types(tag_prefix: str,
-                          in_bins  = (256, 512, 1024, 2048),   # short/mid
+                          in_bins  = (32, 64),   # short/mid
                           out_low  = 256,
-                          out_high = 8192):
+                          out_high = 4096):
     """
     • 출력 512–1024 토큰 → decode 동안 KV 크게 팽창  ⇒ token-dynamic
     """
