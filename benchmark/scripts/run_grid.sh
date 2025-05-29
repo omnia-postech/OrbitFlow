@@ -4,19 +4,18 @@
 ###############################################################################
 # CONSTANTS (edit these lists only)                                           #
 ###############################################################################
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=2
 export VLLM_CONFIGURE_LOGGING=1
 LOGGING_LEVEL=CRITICAL
 ROOT="/home/xinyuema/vllm"
 
 FIGURE_ONLY=$1
-EXP_LIST=(GroundWork)                         # ← your “experiments”
+EXP_LIST=(TestPPRBased)                         # ← your “experiments”
 # METHOD_LIST=(Ours NoPrefetch Flexgen NextLayer Static8 SelectN DistNSingle Ours_TP)      # ← indexes into JSON above
-METHOD_LIST=(Flexgen)      # ← indexes into JSON above
-
-TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/test_best_worst"
-TRACE_LIST=(mixed_scaled)
-# TRACE_LIST=(test)
+METHOD_LIST=(Ours)      # ← indexes into JSON above
+TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/PPR_based/"
+TRACE_LIST=(PPR158_TPI005 PPR250_TPI051 PPR260_TPI040 PPR394_TPI099)
+# TRACE_LIST=(profile_trace)
 # TRACE_LIST=(test_longlong_enough test_fit_static_0 test_fit_static_2 test_longlong_less test_longshort_less test_mix4_enough test_mix4_less test_shortlong_enough test_shortlong_less test_shortshort_enough)
 
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
