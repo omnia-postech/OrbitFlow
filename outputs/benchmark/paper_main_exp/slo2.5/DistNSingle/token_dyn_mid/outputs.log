@@ -1,0 +1,8 @@
+All requests completed. Now saving CSV...
+Metrics saved to /home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/DistNSingle/token_dyn_mid/outputs.csv
+------Wall-clock stats (non-overlapping)------
+Overall runtime  : 3480.004 s
+Prefill time     : 1848 tokens over 4.129 s ( 447.54 t/s)
+Decode  time     : 116487 tokens over 3475.875 s ( 33.51 t/s)
+Preemptions  time     : 4
+Overall solver time: 0.000 s

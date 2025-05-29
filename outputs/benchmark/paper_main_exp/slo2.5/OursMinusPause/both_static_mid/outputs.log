@@ -1,0 +1,1752 @@
+Set parameter WLSAccessID
+Set parameter WLSSecret
+Set parameter LicenseID to value 2663553
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 800.01 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0xeb4d1941
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [3e-01, 2e+02]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [2e-03, 5e+03]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 22 rows and 30 columns
+Presolve time: 0.00s
+Presolved: 49 rows, 65 columns, 353 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 24 continuous, 41 integer (36 binary)
+Warning: Markowitz tolerance tightened to 0.25
+
+Root relaxation: objective 6.836684e+00, 59 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    6.83668    0   11          -    6.83668      -     -    0s
+     0     0    6.83668    0   19          -    6.83668      -     -    0s
+     0     0    6.83668    0   14          -    6.83668      -     -    0s
+     0     0    6.83668    0   15          -    6.83668      -     -    0s
+     0     0    6.83668    0   16          -    6.83668      -     -    0s
+     0     0    6.84093    0   13          -    6.84093      -     -    0s
+     0     0    6.84093    0   11          -    6.84093      -     -    0s
+     0     0    6.84093    0   19          -    6.84093      -     -    0s
+     0     0    6.84099    0   24          -    6.84099      -     -    0s
+     0     0    6.84099    0   24          -    6.84099      -     -    0s
+     0     0    6.84099    0   23          -    6.84099      -     -    0s
+
+Cutting planes:
+  Gomory: 2
+  Cover: 3
+  MIR: 5
+  Mod-K: 1
+  RLT: 6
+  Relax-and-lift: 1
+
+Explored 1 nodes (114 simplex iterations) in 0.03 seconds (0.01 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 0
+
+Model is infeasible
+Best objective -, best bound -, gap -
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 741.98 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0x9bbc272e
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [4e-01, 3e+02]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [2e-03, 8e+03]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 22 rows and 30 columns
+Presolve time: 0.00s
+Presolved: 49 rows, 65 columns, 353 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 24 continuous, 41 integer (36 binary)
+Warning: Markowitz tolerance tightened to 0.25
+
+Root relaxation: objective 1.085296e+01, 68 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0   10.85296    0    7          -   10.85296      -     -    0s
+     0     0   10.85296    0   10          -   10.85296      -     -    0s
+     0     0   10.85296    0   12          -   10.85296      -     -    0s
+     0     0   10.85296    0   14          -   10.85296      -     -    0s
+     0     0   10.85296    0   16          -   10.85296      -     -    0s
+     0     0   10.85296    0    9          -   10.85296      -     -    0s
+     0     0   10.85296    0   11          -   10.85296      -     -    0s
+     0     0   10.85296    0   11          -   10.85296      -     -    0s
+     0     0   10.85296    0   11          -   10.85296      -     -    0s
+     0     0   10.85296    0   14          -   10.85296      -     -    0s
+     0     0   10.85296    0   12          -   10.85296      -     -    0s
+     0     0   10.85296    0   15          -   10.85296      -     -    0s
+     0     0 infeasible    0               - infeasible      -     -    0s
+
+Cutting planes:
+  Gomory: 1
+  Cover: 2
+  MIR: 1
+  GUB cover: 1
+  Zero half: 1
+  Mod-K: 1
+  RLT: 6
+
+Explored 1 nodes (160 simplex iterations) in 0.05 seconds (0.01 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 0
+
+Model is infeasible
+Best objective -, best bound -, gap -
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 849.85 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0x0276c6a1
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [3e-01, 2e+02]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [2e-03, 3e+03]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 22 rows and 30 columns
+Presolve time: 0.00s
+Presolved: 49 rows, 65 columns, 353 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 24 continuous, 41 integer (36 binary)
+Warning: Markowitz tolerance tightened to 0.25
+
+Root relaxation: objective 4.128938e+00, 65 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    4.12894    0   12          -    4.12894      -     -    0s
+     0     0    4.13529    0   15          -    4.13529      -     -    0s
+     0     0    4.13709    0   12          -    4.13709      -     -    0s
+     0     0    4.13719    0   12          -    4.13719      -     -    0s
+     0     0    4.13719    0   12          -    4.13719      -     -    0s
+     0     0    4.14173    0   17          -    4.14173      -     -    0s
+     0     0    4.14173    0   12          -    4.14173      -     -    0s
+     0     0    4.14185    0   23          -    4.14185      -     -    0s
+     0     0    4.14199    0   24          -    4.14199      -     -    0s
+     0     0    4.14205    0   23          -    4.14205      -     -    0s
+     0     0    4.14207    0   23          -    4.14207      -     -    0s
+     0     0    4.14220    0   23          -    4.14220      -     -    0s
+     0     0    4.14254    0   23          -    4.14254      -     -    0s
+     0     0    4.14304    0   11          -    4.14304      -     -    0s
+     0     0    4.14304    0   22          -    4.14304      -     -    0s
+
+Cutting planes:
+  Gomory: 3
+  MIR: 5
+  RLT: 6
+  Relax-and-lift: 5
+
+Explored 1 nodes (136 simplex iterations) in 0.05 seconds (0.01 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 0
+
+Model is infeasible
+Best objective -, best bound -, gap -
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 2665.76 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0x9e9996ea
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [3e-02, 7e+01]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [2e-03, 2e+04]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 37 rows and 68 columns
+Presolve time: 0.00s
+Presolved: 34 rows, 27 columns, 117 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 14 continuous, 13 integer (12 binary)
+Found heuristic solution: objective 0.1503480
+
+Root relaxation: objective 1.488379e-01, 23 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    0.14884    0    6    0.15035    0.14884  1.00%     -    0s
+     0     0          -    0         0.15035    0.15035  0.00%     -    0s
+
+Explored 1 nodes (28 simplex iterations) in 0.04 seconds (0.00 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 1: 0.150348 
+
+Optimal solution found (tolerance 1.00e-04)
+Best objective 1.503480003497e-01, best bound 1.503479925102e-01, gap 0.0000%
+
+--- Optimal solution (or best found) ---
+ id | offload | SLO-fail | actual_time
+----|---------|----------|------------
+ 12 |       1 |     1.77 |     0.1503s
+ 13 |       1 |     1.77 |     0.1503s
+ 14 |       1 |     1.77 |     0.1503s
+ 15 |       1 |     1.77 |     0.1503s
+
+Good-put           : 0.1503 tokens/s
+Batch latency      : 0.1503s (includes 0.1020s stall)
+GPU KV usage       : 8556.0 / 26496 blocks
+decode_window size : 32.0
+batch_time (token_time) : 0.1503s
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 2933.28 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0xe93fc3c4
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [2e-02, 6e+01]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [1e-03, 2e+04]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 37 rows and 68 columns
+Presolve time: 0.00s
+Presolved: 34 rows, 27 columns, 117 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 14 continuous, 13 integer (12 binary)
+Found heuristic solution: objective 0.1309794
+
+Root relaxation: objective 1.294816e-01, 19 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    0.12948    0    6    0.13098    0.12948  1.14%     -    0s
+     0     0          -    0         0.13098    0.13098  0.00%     -    0s
+
+Explored 1 nodes (22 simplex iterations) in 0.04 seconds (0.00 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 1: 0.130979 
+
+Optimal solution found (tolerance 1.00e-04)
+Best objective 1.309794169036e-01, best bound 1.309794081835e-01, gap 0.0000%
+
+--- Optimal solution (or best found) ---
+ id | offload | SLO-fail | actual_time
+----|---------|----------|------------
+ 16 |       1 |    16.00 |     0.1310s
+ 17 |       1 |    16.00 |     0.1310s
+ 18 |       1 |    16.00 |     0.1310s
+ 19 |       1 |    16.00 |     0.1310s
+
+Good-put           : 0.1310 tokens/s
+Batch latency      : 0.1310s (includes 0.0830s stall)
+GPU KV usage       : 7688.0 / 26496 blocks
+decode_window size : 32.0
+batch_time (token_time) : 0.1310s
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 2851.52 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0xb132b112
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [2e-02, 6e+01]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [2e-03, 2e+04]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 37 rows and 68 columns
+Presolve time: 0.00s
+Presolved: 34 rows, 27 columns, 117 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 14 continuous, 13 integer (12 binary)
+Found heuristic solution: objective 0.1363175
+
+Root relaxation: objective 1.348161e-01, 19 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    0.13482    0    6    0.13632    0.13482  1.10%     -    0s
+     0     0          -    0         0.13632    0.13632  0.00%     -    0s
+
+Explored 1 nodes (21 simplex iterations) in 0.04 seconds (0.00 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 1: 0.136317 
+
+Optimal solution found (tolerance 1.00e-04)
+Best objective 1.363174653492e-01, best bound 1.363174565927e-01, gap 0.0000%
+
+--- Optimal solution (or best found) ---
+ id | offload | SLO-fail | actual_time
+----|---------|----------|------------
+ 20 |       1 |    16.00 |     0.1363s
+ 21 |       1 |    16.00 |     0.1363s
+ 22 |       1 |    16.00 |     0.1363s
+ 23 |       1 |    16.00 |     0.1363s
+
+Good-put           : 0.1363 tokens/s
+Batch latency      : 0.1363s (includes 0.0883s stall)
+GPU KV usage       : 7936.0 / 26496 blocks
+decode_window size : 32.0
+batch_time (token_time) : 0.1363s
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 7944.98 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0xe09a033c
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [2e-03, 3e+01]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [1e-03, 2e+04]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 37 rows and 68 columns
+Presolve time: 0.00s
+Presolved: 34 rows, 27 columns, 117 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 14 continuous, 13 integer (12 binary)
+Found heuristic solution: objective 0.0531789
+
+Root relaxation: objective 5.175573e-02, 19 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    0.05176    0    6    0.05318    0.05176  2.68%     -    0s
+     0     0          -    0         0.05318    0.05318  0.00%     -    0s
+
+Explored 1 nodes (21 simplex iterations) in 0.04 seconds (0.00 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 1: 0.0531789 
+
+Optimal solution found (tolerance 1.00e-04)
+Best objective 5.317885245845e-02, best bound 5.317884369304e-02, gap 0.0000%
+
+--- Optimal solution (or best found) ---
+ id | offload | SLO-fail | actual_time
+----|---------|----------|------------
+ 24 |       1 |    16.00 |     0.0532s
+ 25 |       1 |    16.00 |     0.0532s
+ 26 |       1 |    16.00 |     0.0532s
+ 27 |       1 |    16.00 |     0.0532s
+
+Good-put           : 0.0532 tokens/s
+Batch latency      : 0.0532s (includes 0.0076s stall)
+GPU KV usage       : 2232.0 / 26496 blocks
+decode_window size : 32.0
+batch_time (token_time) : 0.0532s
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 822.52 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0x0bafa1a2
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [3e-01, 2e+02]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [2e-03, 4e+03]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 22 rows and 30 columns
+Presolve time: 0.00s
+Presolved: 49 rows, 65 columns, 353 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 24 continuous, 41 integer (36 binary)
+Warning: Markowitz tolerance tightened to 0.25
+
+Root relaxation: objective 5.583649e+00, 68 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    5.58365    0   13          -    5.58365      -     -    0s
+     0     0    5.58365    0   15          -    5.58365      -     -    0s
+     0     0    5.58809    0   12          -    5.58809      -     -    0s
+     0     0    5.58809    0   11          -    5.58809      -     -    0s
+     0     0    5.59054    0    6          -    5.59054      -     -    0s
+     0     0    5.59226    0    8          -    5.59226      -     -    0s
+     0     0    5.59241    0   11          -    5.59241      -     -    0s
+     0     0    5.59287    0   14          -    5.59287      -     -    0s
+     0     0    5.59287    0   11          -    5.59287      -     -    0s
+
+Cutting planes:
+  Gomory: 3
+  MIR: 3
+  GUB cover: 3
+  RLT: 4
+  Relax-and-lift: 1
+
+Explored 1 nodes (125 simplex iterations) in 0.05 seconds (0.01 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 0
+
+Model is infeasible
+Best objective -, best bound -, gap -
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 8265.96 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0x1072459d
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [2e-03, 3e+01]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [1e-03, 2e+04]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 37 rows and 68 columns
+Presolve time: 0.00s
+Presolved: 34 rows, 27 columns, 117 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 14 continuous, 13 integer (12 binary)
+Found heuristic solution: objective 0.0522919
+
+Root relaxation: objective 5.087043e-02, 19 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    0.05087    0    6    0.05229    0.05087  2.72%     -    0s
+     0     0    0.05087    0    6    0.05229    0.05087  2.72%     -    0s
+     0     0    0.05087    0    6    0.05229    0.05087  2.72%     -    0s
+H    0     0                       0.0521408    0.05087  2.44%     -    0s
+
+Explored 1 nodes (20 simplex iterations) in 0.04 seconds (0.00 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 2: 0.0521408 0.0522919 
+
+Optimal solution found (tolerance 1.00e-04)
+Best objective 5.214076013947e-02, best bound 5.214076013947e-02, gap 0.0000%
+
+--- Optimal solution (or best found) ---
+ id | offload | SLO-fail | actual_time
+----|---------|----------|------------
+ 32 |       1 |     0.00 |     0.0521s
+ 33 |       1 |     0.00 |     0.0521s
+ 34 |       1 |     0.00 |     0.0521s
+ 35 |       2 |     0.00 |     0.0521s
+
+Good-put           : 0.0521 tokens/s
+Batch latency      : 0.0521s (includes 0.0067s stall)
+GPU KV usage       : 2074.000003417245 / 26496 blocks
+decode_window size : 1000.0
+batch_time (token_time) : 0.0521s
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 2891.82 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0x0483badf
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [2e-02, 6e+01]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [1e-03, 2e+04]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 37 rows and 68 columns
+Presolve time: 0.00s
+Presolved: 34 rows, 27 columns, 117 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 14 continuous, 13 integer (12 binary)
+Found heuristic solution: objective 0.1336289
+
+Root relaxation: objective 1.321293e-01, 19 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    0.13213    0    6    0.13363    0.13213  1.12%     -    0s
+     0     0          -    0         0.13363    0.13363  0.00%     -    0s
+
+Explored 1 nodes (21 simplex iterations) in 0.03 seconds (0.00 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 1: 0.133629 
+
+Optimal solution found (tolerance 1.00e-04)
+Best objective 1.336288577991e-01, best bound 1.336288490351e-01, gap 0.0000%
+
+--- Optimal solution (or best found) ---
+ id | offload | SLO-fail | actual_time
+----|---------|----------|------------
+ 36 |       1 |    16.00 |     0.1336s
+ 37 |       1 |    16.00 |     0.1336s
+ 38 |       1 |    16.00 |     0.1336s
+ 39 |       1 |    16.00 |     0.1336s
+
+Good-put           : 0.1336 tokens/s
+Batch latency      : 0.1336s (includes 0.0856s stall)
+GPU KV usage       : 7812.0 / 26496 blocks
+decode_window size : 32.0
+batch_time (token_time) : 0.1336s
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 8613.96 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0xd8416861
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [2e-03, 3e+01]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [1e-03, 2e+04]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 37 rows and 68 columns
+Presolve time: 0.00s
+Presolved: 34 rows, 27 columns, 117 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 14 continuous, 13 integer (12 binary)
+Found heuristic solution: objective 0.0514441
+
+Root relaxation: objective 5.002430e-02, 19 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    0.05002    0    6    0.05144    0.05002  2.76%     -    0s
+     0     0    0.05002    0    6    0.05144    0.05002  2.76%     -    0s
+     0     0    0.05002    0    6    0.05144    0.05002  2.76%     -    0s
+H    0     0                       0.0508996    0.05002  1.72%     -    0s
+     0     2    0.05002    0    6    0.05090    0.05002  1.72%     -    0s
+
+Explored 3 nodes (22 simplex iterations) in 0.04 seconds (0.00 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 2: 0.0508996 0.0514441 
+
+Optimal solution found (tolerance 1.00e-04)
+Best objective 5.089956426231e-02, best bound 5.089956426231e-02, gap 0.0000%
+
+--- Optimal solution (or best found) ---
+ id | offload | SLO-fail | actual_time
+----|---------|----------|------------
+ 40 |       1 |     0.00 |     0.0509s
+ 41 |       1 |     0.00 |     0.0509s
+ 42 |       1 |     0.00 |     0.0509s
+ 43 |       2 |     0.00 |     0.0509s
+
+Good-put           : 0.0509 tokens/s
+Batch latency      : 0.0509s (includes 0.0055s stall)
+GPU KV usage       : 1952.000008642301 / 26496 blocks
+decode_window size : 1000.0
+batch_time (token_time) : 0.0509s
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 726.18 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0xc1389f21
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [4e-01, 3e+02]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [2e-03, 9e+03]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 22 rows and 30 columns
+Presolve time: 0.00s
+Presolved: 49 rows, 65 columns, 353 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 24 continuous, 41 integer (36 binary)
+Warning: Markowitz tolerance tightened to 0.25
+
+Root relaxation: objective 1.209136e+01, 68 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0   12.09136    0   10          -   12.09136      -     -    0s
+     0     0   12.09136    0    6          -   12.09136      -     -    0s
+     0     0   12.09136    0    6          -   12.09136      -     -    0s
+     0     0   12.09136    0   10          -   12.09136      -     -    0s
+     0     0   12.09136    0    7          -   12.09136      -     -    0s
+     0     0   12.09136    0   11          -   12.09136      -     -    0s
+     0     2   12.09136    0   11          -   12.09136      -     -    0s
+
+Cutting planes:
+  Gomory: 1
+  Cover: 4
+  MIR: 3
+  StrongCG: 2
+  GUB cover: 1
+  Zero half: 2
+  Mod-K: 1
+  RLT: 1
+
+Explored 227 nodes (639 simplex iterations) in 0.04 seconds (0.01 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 0
+
+Model is infeasible
+Best objective -, best bound -, gap -
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 2933.28 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0xe93fc3c4
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [2e-02, 6e+01]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [1e-03, 2e+04]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 37 rows and 68 columns
+Presolve time: 0.00s
+Presolved: 34 rows, 27 columns, 117 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 14 continuous, 13 integer (12 binary)
+Found heuristic solution: objective 0.1309794
+
+Root relaxation: objective 1.294816e-01, 19 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    0.12948    0    6    0.13098    0.12948  1.14%     -    0s
+     0     0          -    0         0.13098    0.13098  0.00%     -    0s
+
+Explored 1 nodes (22 simplex iterations) in 0.04 seconds (0.00 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 1: 0.130979 
+
+Optimal solution found (tolerance 1.00e-04)
+Best objective 1.309794169036e-01, best bound 1.309794081835e-01, gap 0.0000%
+
+--- Optimal solution (or best found) ---
+ id | offload | SLO-fail | actual_time
+----|---------|----------|------------
+ 48 |       1 |    16.00 |     0.1310s
+ 49 |       1 |    16.00 |     0.1310s
+ 50 |       1 |    16.00 |     0.1310s
+ 51 |       1 |    16.00 |     0.1310s
+
+Good-put           : 0.1310 tokens/s
+Batch latency      : 0.1310s (includes 0.0830s stall)
+GPU KV usage       : 7688.0 / 26496 blocks
+decode_window size : 32.0
+batch_time (token_time) : 0.1310s
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 8613.96 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0xd8416861
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [2e-03, 3e+01]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [1e-03, 2e+04]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 37 rows and 68 columns
+Presolve time: 0.00s
+Presolved: 34 rows, 27 columns, 117 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 14 continuous, 13 integer (12 binary)
+Found heuristic solution: objective 0.0514441
+
+Root relaxation: objective 5.002430e-02, 19 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    0.05002    0    6    0.05144    0.05002  2.76%     -    0s
+     0     0    0.05002    0    6    0.05144    0.05002  2.76%     -    0s
+     0     0    0.05002    0    6    0.05144    0.05002  2.76%     -    0s
+H    0     0                       0.0508996    0.05002  1.72%     -    0s
+     0     2    0.05002    0    6    0.05090    0.05002  1.72%     -    0s
+
+Explored 3 nodes (22 simplex iterations) in 0.04 seconds (0.00 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 2: 0.0508996 0.0514441 
+
+Optimal solution found (tolerance 1.00e-04)
+Best objective 5.089956426231e-02, best bound 5.089956426231e-02, gap 0.0000%
+
+--- Optimal solution (or best found) ---
+ id | offload | SLO-fail | actual_time
+----|---------|----------|------------
+ 52 |       1 |     0.00 |     0.0509s
+ 53 |       1 |     0.00 |     0.0509s
+ 54 |       1 |     0.00 |     0.0509s
+ 55 |       2 |     0.00 |     0.0509s
+
+Good-put           : 0.0509 tokens/s
+Batch latency      : 0.0509s (includes 0.0055s stall)
+GPU KV usage       : 1952.000008642301 / 26496 blocks
+decode_window size : 1000.0
+batch_time (token_time) : 0.0509s
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 8265.96 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0x1072459d
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [2e-03, 3e+01]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [1e-03, 2e+04]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 37 rows and 68 columns
+Presolve time: 0.00s
+Presolved: 34 rows, 27 columns, 117 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 14 continuous, 13 integer (12 binary)
+Found heuristic solution: objective 0.0522919
+
+Root relaxation: objective 5.087043e-02, 19 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    0.05087    0    6    0.05229    0.05087  2.72%     -    0s
+     0     0    0.05087    0    6    0.05229    0.05087  2.72%     -    0s
+     0     0    0.05087    0    6    0.05229    0.05087  2.72%     -    0s
+H    0     0                       0.0521408    0.05087  2.44%     -    0s
+
+Explored 1 nodes (20 simplex iterations) in 0.01 seconds (0.00 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 2: 0.0521408 0.0522919 
+
+Optimal solution found (tolerance 1.00e-04)
+Best objective 5.214076013947e-02, best bound 5.214076013947e-02, gap 0.0000%
+
+--- Optimal solution (or best found) ---
+ id | offload | SLO-fail | actual_time
+----|---------|----------|------------
+ 56 |       1 |     0.00 |     0.0521s
+ 57 |       1 |     0.00 |     0.0521s
+ 58 |       1 |     0.00 |     0.0521s
+ 59 |       2 |     0.00 |     0.0521s
+
+Good-put           : 0.0521 tokens/s
+Batch latency      : 0.0521s (includes 0.0067s stall)
+GPU KV usage       : 2074.000003417245 / 26496 blocks
+decode_window size : 1000.0
+batch_time (token_time) : 0.0521s
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 728.77 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0x5dfb1b5d
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [4e-01, 3e+02]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [2e-03, 8e+03]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 22 rows and 30 columns
+Presolve time: 0.00s
+Presolved: 49 rows, 65 columns, 353 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 24 continuous, 41 integer (36 binary)
+Warning: Markowitz tolerance tightened to 0.25
+
+Root relaxation: objective 1.162997e+01, 53 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0   11.62997    0   15          -   11.62997      -     -    0s
+     0     0   11.62997    0   15          -   11.62997      -     -    0s
+     0     0   11.62997    0   12          -   11.62997      -     -    0s
+     0     0   11.62997    0   12          -   11.62997      -     -    0s
+     0     0 infeasible    0               - infeasible      -     -    0s
+
+Cutting planes:
+  Gomory: 2
+  Cover: 2
+  Implied bound: 1
+  MIR: 5
+  StrongCG: 2
+  GUB cover: 2
+  Mod-K: 3
+  RLT: 7
+
+Explored 1 nodes (108 simplex iterations) in 0.04 seconds (0.00 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 0
+
+Model is infeasible
+Best objective -, best bound -, gap -
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 2891.82 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0x0483badf
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [2e-02, 6e+01]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [1e-03, 2e+04]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 37 rows and 68 columns
+Presolve time: 0.00s
+Presolved: 34 rows, 27 columns, 117 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 14 continuous, 13 integer (12 binary)
+Found heuristic solution: objective 0.1336289
+
+Root relaxation: objective 1.321293e-01, 19 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    0.13213    0    6    0.13363    0.13213  1.12%     -    0s
+     0     0          -    0         0.13363    0.13363  0.00%     -    0s
+
+Explored 1 nodes (21 simplex iterations) in 0.03 seconds (0.00 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 1: 0.133629 
+
+Optimal solution found (tolerance 1.00e-04)
+Best objective 1.336288577991e-01, best bound 1.336288490351e-01, gap 0.0000%
+
+--- Optimal solution (or best found) ---
+ id | offload | SLO-fail | actual_time
+----|---------|----------|------------
+ 64 |       1 |    16.00 |     0.1336s
+ 65 |       1 |    16.00 |     0.1336s
+ 66 |       1 |    16.00 |     0.1336s
+ 67 |       1 |    16.00 |     0.1336s
+
+Good-put           : 0.1336 tokens/s
+Batch latency      : 0.1336s (includes 0.0856s stall)
+GPU KV usage       : 7812.0 / 26496 blocks
+decode_window size : 32.0
+batch_time (token_time) : 0.1336s
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 772.81 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0xe9cade66
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [3e-01, 3e+02]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [2e-03, 6e+03]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 22 rows and 30 columns
+Presolve time: 0.00s
+Presolved: 49 rows, 65 columns, 353 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 24 continuous, 41 integer (36 binary)
+Warning: Markowitz tolerance tightened to 0.25
+
+Root relaxation: objective 8.330719e+00, 64 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    8.33072    0   14          -    8.33072      -     -    0s
+     0     0    8.33072    0   18          -    8.33072      -     -    0s
+     0     0    8.33072    0   15          -    8.33072      -     -    0s
+     0     0    8.33072    0   11          -    8.33072      -     -    0s
+     0     0    8.33072    0   17          -    8.33072      -     -    0s
+     0     0    8.33072    0   15          -    8.33072      -     -    0s
+     0     0    8.33072    0   15          -    8.33072      -     -    0s
+
+Cutting planes:
+  MIR: 1
+  RLT: 5
+  Relax-and-lift: 2
+
+Explored 1 nodes (158 simplex iterations) in 0.05 seconds (0.01 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 0
+
+Model is infeasible
+Best objective -, best bound -, gap -
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 734.00 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0xe07ba2ac
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [4e-01, 3e+02]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [2e-03, 8e+03]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 22 rows and 30 columns
+Presolve time: 0.00s
+Presolved: 49 rows, 65 columns, 353 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 24 continuous, 41 integer (36 binary)
+Warning: Markowitz tolerance tightened to 0.25
+
+Root relaxation: objective 1.146273e+01, 73 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0   11.46273    0    7          -   11.46273      -     -    0s
+     0     0   11.46273    0   13          -   11.46273      -     -    0s
+     0     0   11.46273    0   10          -   11.46273      -     -    0s
+     0     0   11.46273    0    8          -   11.46273      -     -    0s
+     0     0   11.46273    0    9          -   11.46273      -     -    0s
+     0     0   11.46273    0   13          -   11.46273      -     -    0s
+     0     0   11.46273    0   16          -   11.46273      -     -    0s
+     0     0   11.46273    0    6          -   11.46273      -     -    0s
+     0     0   11.46273    0   18          -   11.46273      -     -    0s
+     0     0 infeasible    0               - infeasible      -     -    0s
+
+Cutting planes:
+  Cover: 4
+  MIR: 1
+  StrongCG: 1
+  GUB cover: 4
+  Zero half: 1
+  RLT: 5
+
+Explored 1 nodes (136 simplex iterations) in 0.05 seconds (0.01 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 0
+
+Model is infeasible
+Best objective -, best bound -, gap -
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 8613.96 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0xd8416861
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [2e-03, 3e+01]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [1e-03, 2e+04]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 37 rows and 68 columns
+Presolve time: 0.00s
+Presolved: 34 rows, 27 columns, 117 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 14 continuous, 13 integer (12 binary)
+Found heuristic solution: objective 0.0514441
+
+Root relaxation: objective 5.002430e-02, 19 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    0.05002    0    6    0.05144    0.05002  2.76%     -    0s
+     0     0    0.05002    0    6    0.05144    0.05002  2.76%     -    0s
+     0     0    0.05002    0    6    0.05144    0.05002  2.76%     -    0s
+H    0     0                       0.0508996    0.05002  1.72%     -    0s
+     0     2    0.05002    0    6    0.05090    0.05002  1.72%     -    0s
+
+Explored 3 nodes (22 simplex iterations) in 0.04 seconds (0.00 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 2: 0.0508996 0.0514441 
+
+Optimal solution found (tolerance 1.00e-04)
+Best objective 5.089956426231e-02, best bound 5.089956426231e-02, gap 0.0000%
+
+--- Optimal solution (or best found) ---
+ id | offload | SLO-fail | actual_time
+----|---------|----------|------------
+ 76 |       1 |     0.00 |     0.0509s
+ 77 |       1 |     0.00 |     0.0509s
+ 78 |       1 |     0.00 |     0.0509s
+ 79 |       2 |     0.00 |     0.0509s
+
+Good-put           : 0.0509 tokens/s
+Batch latency      : 0.0509s (includes 0.0055s stall)
+GPU KV usage       : 1952.000008642301 / 26496 blocks
+decode_window size : 1000.0
+batch_time (token_time) : 0.0509s
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 2737.08 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0xadf12a7e
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [2e-02, 7e+01]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [2e-03, 2e+04]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 37 rows and 68 columns
+Presolve time: 0.00s
+Presolved: 34 rows, 27 columns, 117 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 14 continuous, 13 integer (12 binary)
+Found heuristic solution: objective 0.1446183
+
+Root relaxation: objective 1.431117e-01, 19 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    0.14311    0    6    0.14462    0.14311  1.04%     -    0s
+     0     0          -    0         0.14462    0.14462  0.00%     -    0s
+
+Explored 1 nodes (25 simplex iterations) in 0.03 seconds (0.00 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 1: 0.144618 
+
+Optimal solution found (tolerance 1.00e-04)
+Best objective 1.446182868728e-01, best bound 1.446182790098e-01, gap 0.0000%
+
+--- Optimal solution (or best found) ---
+ id | offload | SLO-fail | actual_time
+----|---------|----------|------------
+ 80 |       1 |     0.57 |     0.1446s
+ 81 |       1 |     0.57 |     0.1446s
+ 82 |       1 |     0.57 |     0.1446s
+ 83 |       1 |     0.57 |     0.1446s
+
+Good-put           : 0.1446 tokens/s
+Batch latency      : 0.1446s (includes 0.0964s stall)
+GPU KV usage       : 8308.0 / 26496 blocks
+decode_window size : 32.0
+batch_time (token_time) : 0.1446s
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 2933.28 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0xe93fc3c4
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [2e-02, 6e+01]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [1e-03, 2e+04]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 37 rows and 68 columns
+Presolve time: 0.00s
+Presolved: 34 rows, 27 columns, 117 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 14 continuous, 13 integer (12 binary)
+Found heuristic solution: objective 0.1309794
+
+Root relaxation: objective 1.294816e-01, 19 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    0.12948    0    6    0.13098    0.12948  1.14%     -    0s
+     0     0          -    0         0.13098    0.13098  0.00%     -    0s
+
+Explored 1 nodes (22 simplex iterations) in 0.03 seconds (0.00 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 1: 0.130979 
+
+Optimal solution found (tolerance 1.00e-04)
+Best objective 1.309794169036e-01, best bound 1.309794081835e-01, gap 0.0000%
+
+--- Optimal solution (or best found) ---
+ id | offload | SLO-fail | actual_time
+----|---------|----------|------------
+ 84 |       1 |    16.00 |     0.1310s
+ 85 |       1 |    16.00 |     0.1310s
+ 86 |       1 |    16.00 |     0.1310s
+ 87 |       1 |    16.00 |     0.1310s
+
+Good-put           : 0.1310 tokens/s
+Batch latency      : 0.1310s (includes 0.0830s stall)
+GPU KV usage       : 7688.0 / 26496 blocks
+decode_window size : 32.0
+batch_time (token_time) : 0.1310s
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 832.56 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0xbe522a25
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [3e-01, 2e+02]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [2e-03, 4e+03]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 22 rows and 30 columns
+Presolve time: 0.00s
+Presolved: 49 rows, 65 columns, 353 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 24 continuous, 41 integer (36 binary)
+Warning: Markowitz tolerance tightened to 0.25
+
+Root relaxation: objective 4.876257e+00, 69 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    4.87626    0    7          -    4.87626      -     -    0s
+     0     0    4.87742    0   12          -    4.87742      -     -    0s
+     0     0    4.87970    0   14          -    4.87970      -     -    0s
+     0     0    4.88019    0   14          -    4.88019      -     -    0s
+     0     0    4.88043    0   14          -    4.88043      -     -    0s
+     0     0    4.88203    0   13          -    4.88203      -     -    0s
+     0     0    4.88361    0   15          -    4.88361      -     -    0s
+     0     0    4.88361    0    9          -    4.88361      -     -    0s
+     0     0    4.88361    0   17          -    4.88361      -     -    0s
+     0     0    4.88361    0   14          -    4.88361      -     -    0s
+     0     0    4.88363    0   14          -    4.88363      -     -    0s
+
+Cutting planes:
+  Gomory: 2
+  MIR: 5
+  RLT: 3
+  Relax-and-lift: 3
+
+Explored 1 nodes (162 simplex iterations) in 0.05 seconds (0.01 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 0
+
+Model is infeasible
+Best objective -, best bound -, gap -
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 739.30 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0xa604da68
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [4e-01, 3e+02]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [2e-03, 8e+03]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 22 rows and 30 columns
+Presolve time: 0.00s
+Presolved: 49 rows, 65 columns, 353 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 24 continuous, 41 integer (36 binary)
+Warning: Markowitz tolerance tightened to 0.25
+
+Root relaxation: objective 1.093285e+01, 68 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0   10.93285    0   13          -   10.93285      -     -    0s
+     0     0   10.93285    0   10          -   10.93285      -     -    0s
+     0     0   10.93285    0    6          -   10.93285      -     -    0s
+     0     0   10.93285    0    6          -   10.93285      -     -    0s
+     0     0   10.93285    0   14          -   10.93285      -     -    0s
+     0     0   10.93285    0   10          -   10.93285      -     -    0s
+     0     0   10.93285    0   11          -   10.93285      -     -    0s
+     0     0   10.93285    0   13          -   10.93285      -     -    0s
+
+Cutting planes:
+  Gomory: 1
+  MIR: 4
+  StrongCG: 1
+  GUB cover: 3
+  Zero half: 1
+  Mod-K: 1
+  RLT: 2
+
+Explored 1 nodes (125 simplex iterations) in 0.03 seconds (0.01 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 0
+
+Model is infeasible
+Best objective -, best bound -, gap -
+Set parameter NonConvex to value 2
+[solve] profiled PCIe/NVLink bandwidth  : 825.84 blocks/s
+Set parameter OutputFlag to value 1
+Gurobi Optimizer version 12.0.2 build v12.0.2rc0 (linux64 - "Ubuntu 20.04.6 LTS")
+
+CPU model: Intel(R) Xeon(R) Gold 6326 CPU @ 2.90GHz, instruction set [SSE2|AVX|AVX2|AVX512]
+Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
+
+Non-default parameters:
+NonConvex  2
+
+Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Optimize a model with 47 rows, 94 columns and 413 nonzeros
+Model fingerprint: 0x1cd35af1
+Model has 8 quadratic constraints
+Model has 8 simple general constraints
+  8 INDICATOR
+Variable types: 45 continuous, 49 integer (40 binary)
+Coefficient statistics:
+  Matrix range     [3e-01, 2e+02]
+  QMatrix range    [1e+00, 1e+00]
+  QLMatrix range   [1e-01, 1e+00]
+  Objective range  [1e+00, 1e+00]
+  Bounds range     [1e+00, 1e+06]
+  RHS range        [2e-03, 4e+03]
+  GenCon rhs range [1e+06, 1e+06]
+  GenCon coe range [1e+00, 1e+00]
+Presolve removed 22 rows and 30 columns
+Presolve time: 0.00s
+Presolved: 49 rows, 65 columns, 353 nonzeros
+Presolved model has 8 bilinear constraint(s)
+
+Solving non-convex MIQCP
+
+Variable types: 24 continuous, 41 integer (36 binary)
+Warning: Markowitz tolerance tightened to 0.25
+
+Root relaxation: objective 5.247629e+00, 72 iterations, 0.00 seconds (0.00 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0    5.24763    0   13          -    5.24763      -     -    0s
+     0     0    5.25502    0   14          -    5.25502      -     -    0s
+     0     0    5.25868    0   12          -    5.25868      -     -    0s
+     0     0    5.25889    0   11          -    5.25889      -     -    0s
+     0     0    5.25901    0   11          -    5.25901      -     -    0s
+     0     0    5.25960    0   17          -    5.25960      -     -    0s
+     0     0    5.25960    0   17          -    5.25960      -     -    0s
+     0     0    5.25960    0   16          -    5.25960      -     -    0s
+     0     0    5.25960    0   16          -    5.25960      -     -    0s
+     0     0    5.25960    0   11          -    5.25960      -     -    0s
+     0     0    5.25960    0   14          -    5.25960      -     -    0s
+     0     2    5.25960    0   14          -    5.25960      -     -    0s
+
+Cutting planes:
+  Gomory: 4
+  Cover: 4
+  MIR: 5
+  GUB cover: 4
+  Relax-and-lift: 4
+
+Explored 567 nodes (1423 simplex iterations) in 0.09 seconds (0.02 work units)
+Thread count was 32 (of 64 available processors)
+
+Solution count 0
+
+Model is infeasible
+Best objective -, best bound -, gap -
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+All requests completed. Now saving CSV...
+Metrics saved to /home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/OursMinusPause/both_static_mid/outputs.csv
+------Wall-clock stats (non-overlapping)------
+Overall runtime  : 324.592 s
+Prefill time     : 216632 tokens over 292.774 s ( 739.93 t/s)
+Decode  time     : 1608 tokens over 31.817 s ( 50.54 t/s)
+Preemptions  time     : 0
+Overall solver time: 1.237 s
