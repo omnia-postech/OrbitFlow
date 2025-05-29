@@ -335,6 +335,17 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
     trace_token_count = sum([req_obj.input_length + req_obj.output_length for _, req_obj in requests_sorted])
     trace_avg_token_count = trace_token_count / len(requests_sorted)
     engine.model_executor.driver_worker.cache_engine[0].flexgen_tok_estimate = trace_avg_token_count 
+    # compute global slo 
+    token_limit = trace_obj.num_gpu_blocks_override * BLOCK_SIZE 
+    max_comp_time = estimator.estimate_by_profiled_results(tokens=token_limit,
+                                                                    which="NoPrefetch" ,
+                                                                    mode="upper_quad")
+    slo_scale = sim.slo_ratio 
+    engine.model_executor.driver_worker.cache_engine[0].max_slo = max_comp_time * slo_scale
+    engine.model_executor.driver_worker.cache_engine[0].max_comp_time = max_comp_time 
+    engine.model_executor.driver_worker.cache_engine[0].estimator = estimator 
+    
+    
     step_count = 1
     # The main simulation loop
     while queue or request_metadata:
@@ -356,7 +367,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                     max_slo = estimator.estimate_by_profiled_results(tokens=token_limit,
                                                                     which="NoPrefetch" ,
                                                                     mode="upper_quad")
-    
+
                     # max_slo = estimator.estimate_by_profiled_results(tokens=req_obj.input_length + req_obj.output_length,
                     #                                                 which="NoPrefetch" ,
                     #                                                 mode="upper_quad")

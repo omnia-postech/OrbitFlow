@@ -647,6 +647,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         
         # NOTE(HONG): this is for first prefill distance, we use preceding decoding's distance for other prefill steps
         self.prev_selectn_distance = -1
+        self.prev_candidates = None
         # NOTE(HONG): flag that refers first decoding step -> update distance and fix it until new prefill
         self.need_update_selectn = False
         # NOTE(HONG): to save memroy left with model weight
@@ -677,6 +678,9 @@ class FlattenedCacheEngine(CacheEngineBase):
         self._paused_layers_freed: Dict[int, List[int]] = defaultdict(list)
         
         self.flexgen_tok_estimate = 0 # used by flexgen as an estimate of the token length 
+        self.max_slo = 0 # used by selectN 
+        self.max_comp_time = 0  # used by selectN
+        self.estimator = None # used by selectN, to estimate the token length
     def register_bm(self, block_manager): 
         self.block_manager = block_manager
         # logger.debug(f"Linking block manager")
@@ -1138,8 +1142,11 @@ class FlattenedCacheEngine(CacheEngineBase):
 
     def prefetch_distance_for_seletcn(self, comm_time: float, comp_time: float):
         num_layers_to_offload = int(comp_time / comm_time)
-        selectn_prefetch_distance = math.floor(self.block_manager.num_attention_layers / num_layers_to_offload)
-        selectn_prefetch_distance = max(0, selectn_prefetch_distance)
+        if 0 <= num_layers_to_offload < 1: # 
+            selectn_prefetch_distance = 1 # max is set to 1 now, not 0
+        else:
+            selectn_prefetch_distance = math.floor(self.block_manager.num_attention_layers / num_layers_to_offload)
+            selectn_prefetch_distance = max(1, selectn_prefetch_distance)
         return selectn_prefetch_distance
 
     def get_KV_cache_size_for_single_layers(self, total_context_lens):
@@ -1210,27 +1217,41 @@ class FlattenedCacheEngine(CacheEngineBase):
             dist = [self.flexgen_dist] * len(snapshot.candidates)
             if not is_decoding:
                 self.prev_flexgen_distance = None
-
         elif prefetch_mode == "selectn":
             # NOTE(HONG): flag that refers first decoding step -> update distance and fix it until new prefill
+            
             if not is_decoding:
                 logger.info(f"[driver] Prefill going on")
+                self.need_update_selectn = True
+            elif self.prev_candidates is None: 
+                self.need_update_selectn = True
+            elif set(self.prev_candidates) != set(snapshot.candidates): 
+                logger.info(f"[driver] candidates changed, update selectN distance")
                 self.need_update_selectn = True
 
             # NOTE(HONG): -1 for first prefill step and use preceding decoding step's distance for other prefill steps
             if is_decoding and self.need_update_selectn: 
+                assert (self.estimator is not None), "estimator should be set before using selectN prefetch mode"
+                assert (self.max_comp_time > 0), "max_comp_time should be set before using selectN prefetch mode"
+                assert (self.max_slo > 0), "max_slo should be set before using selectN prefetch mode" 
+                tot_ctx_len = 0
+                for ctx_len in total_context_lens:
+                    # use the estimate 
+                    if ctx_len < self.flexgen_tok_estimate:
+                        ctx_len = self.flexgen_tok_estimate
+                    tot_ctx_len += ctx_len
                 logger.info(f"[driver] First decoding going on")                     
-                comm_time = self.compute_comm_time_for_requests(total_context_lens)
-                slo_ratio = 0.5 # hardcoded
-                max_comp_time = sum(total_context_lens) * PROFILED_A + PROFILED_B
-                slo_allowed = max_comp_time / slo_ratio 
-                
-                comp_time = self.compute_comp_time_for_requests(slo_allowed, max_comp_time)
+                comm_time = self.estimator.estimate_by_profiled_results(tot_ctx_len,
+                                                                        which="Communication", 
+                                                                        mode="linear")
+                comp_time = self.estimator.estimate_by_profiled_results(tot_ctx_len,
+                                                                        which="NoPrefetch",
+                                                                        mode="upper_quad") 
+                                
                 self.prev_selectn_distance = self.prefetch_distance_for_seletcn(comm_time, comp_time)
                 if self.prev_selectn_distance == 32:
                     self.prev_selectn_distance = -1
                 self.need_update_selectn = False
-
             dist = [self.prev_selectn_distance] * len(snapshot.candidates)
         elif prefetch_mode == "static_req_wise": 
             dist = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10][:len(snapshot.candidates)] # FIXME Xinyue hard code
@@ -1264,6 +1285,7 @@ class FlattenedCacheEngine(CacheEngineBase):
                 if d == 0:
                     dist[s] = 1
         logger.info(f"[driver] prefetch distance: {dist}")
+        self.prev_candidates = snapshot.candidates.copy() # save for next step
         return dist, {"policy": prefetch_mode}
     
     def _pick_removable_layers(self, layer_map: dict[int, list[int]], need_blocks: int) -> tuple[list[int], list[int]]:        
@@ -1450,7 +1472,7 @@ class FlattenedCacheEngine(CacheEngineBase):
                 prefetch_resize=prefetch_resize,
                 pause_layers=pause_layers,
             )
-            self._sync_active_gpu_cpu_map(snapshot.seq_row_order)
+            self._sync_active_gpu_cpu_map(snapshot.mapping.seq_row_order)
             return plan, post_gpu_blk
         
         plan = Plan(
@@ -1560,7 +1582,8 @@ class FlattenedCacheEngine(CacheEngineBase):
                 # logger.debug(f"[driver] Updated slot_mapping[{layer}][{row}] = {attn_meta.slot_mapping[layer][row]}")
         logger.debug(f"[driver] mapping after resize: {mapping}")
         # logger.debug(f"[driver] GPU map after resize:{mapping.gpu_map}")
-        # logger.debug(f"[driver] gpu_cpu_cache_map after resize:{mapping.gpu_cpu_cache_map}")
+        # logger.critical(f"[driver] gpu_cpu_cache_map after resize:{mapping.gpu_cpu_cache_map}")
+        # logger.critical(f"mapping after resize: {self.mapping}")
         
         # ---------------- sync ordered view -----------
         self._sync_active_gpu_cpu_map(seq_row_order)

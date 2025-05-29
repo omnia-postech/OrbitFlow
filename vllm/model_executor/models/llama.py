@@ -824,7 +824,6 @@ class LlamaModel(nn.Module):
                                 for i in range(len(seq_starts) - 1)
                             ]
                             seq_num_blocks = {sid: seq_num_blocks[i] for i, sid in enumerate(seq_ids)}
-                            logger.critical(f"target layer={tgt_layer}")
                             # if isinstance(layer_metas, list):
                             #     logger.critical(f"len(layer_metas) = {len(layer_metas)}")
                             # else: 

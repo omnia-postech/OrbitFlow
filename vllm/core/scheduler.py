@@ -1222,7 +1222,7 @@ class Scheduler:
             if lora_int_id > 0 and curr_loras is not None:
                 curr_loras.add(lora_int_id)
             paused_queue.popleft()
-            
+            logger.critical(f"resume, gpu_cpu_map: {self.cache_config.gpu_cpu_cache_map}")
             self._reuse(seq_group)
             self._append_slots(seq_group, [], enable_chunking)
             
@@ -1558,11 +1558,12 @@ class Scheduler:
         # logger.info(f"swapped: {[seq.request_id for seq in self.swapped]}, paused_cpu: {[seq.request_id for seq in self.paused_cpu]}")
         # logger.info(f"running: {[seq.request_id for seq in self.running]}, paused by fallback mechanism: {[seq.request_id for seq in self.paused]}")        
         # logger.info(f"waiting: {[seq.request_id for seq in self.waiting]}")
-        logger.critical(f"waiting seq ids: {[seq.get_seqs()[0].seq_id for seq in self.waiting]}")
-        logger.critical(f"running seq ids: {[seq.get_seqs()[0].seq_id for seq in self.running]}")
-        logger.critical(f"swapped seq ids: {[seq.get_seqs()[0].seq_id for seq in self.swapped]}")
-        logger.critical(f"paused_cpu seq ids: {[seq.get_seqs()[0].seq_id for seq in self.paused_cpu]}")
-        logger.critical(f"paused seq ids: {[seq.get_seqs()[0].seq_id for seq in self.paused]}")
+        msg = f"waiting: {[seq.get_seqs()[0].seq_id for seq in self.waiting]}, "
+        msg += f"running: {[seq.get_seqs()[0].seq_id for seq in self.running]}, "
+        msg += f"swapped: {[seq.get_seqs()[0].seq_id for seq in self.swapped]}, "
+        msg += f"paused_cpu: {[seq.get_seqs()[0].seq_id for seq in self.paused_cpu]}, "
+        msg += f"paused: {[seq.get_seqs()[0].seq_id for seq in self.paused]}"
+        logger.critical(msg)
         if self.cache_config.static_batching:            
             num_current_requests = len(self.running) + len(self.swapped) + len(self.paused_cpu) + len(self.paused)
             logger.info(f"live requests in batch: {num_current_requests}")
@@ -2145,10 +2146,10 @@ class Scheduler:
         self,
         seq_group: SequenceGroup,
     ) -> List[int]:
-        logger.critical("Preemption by pause")
         for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
             seq.status = SequenceStatus.SWAPPED
         seq_id = seq.seq_id
+        logger.critical(f"Preemption by pause, seq {seq.seq_id}")
         seq_layers_to_drop = {seq_id:list(range(self.block_manager.num_attention_layers))}
         logger.debug(f"seq_layers_to_drop:{seq_layers_to_drop}")
         freed_gpu_blocks = self.block_manager.free_seq_by_layer(seq_layers_to_drop)
@@ -2169,9 +2170,11 @@ class Scheduler:
         # only used for requests paused by preemption
         for seq in seq_group.get_seqs(status=SequenceStatus.SWAPPED):
             seq.status = SequenceStatus.RUNNING
+            # allocate at least one layer
             # num_blocks = seq.get_num_computed_tokens()//16
-            # self.block_manager.allocate_seq_by_layer(seq.seq_id,0,num_blocks)
-            
+            self.block_manager.allocate_seq_by_layer(seq.seq_id,0,-1)
+            self.cache_config.gpu_cpu_cache_map[seq.seq_id][0] = 1
+            self.cache_config.gpu_cpu_cache_map[seq.seq_id][1:] = [0] * (self.block_manager.num_attention_layers - 1)
     def _swap_out(
         self,
         seq_group: SequenceGroup,
