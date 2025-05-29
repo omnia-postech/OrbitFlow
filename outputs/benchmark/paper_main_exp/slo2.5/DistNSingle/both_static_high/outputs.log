@@ -1,0 +1,68 @@
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+Failure (due to memory limits): 60
+All requests completed. Now saving CSV...
+Metrics saved to /home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/DistNSingle/both_static_high/outputs.csv
+------Wall-clock stats (non-overlapping)------
+Overall runtime  : 341.853 s
+Prefill time     : 216632 tokens over 301.154 s ( 719.34 t/s)
+Decode  time     : 1608 tokens over 40.698 s ( 39.51 t/s)
+Preemptions  time     : 0
+Overall solver time: 0.000 s
