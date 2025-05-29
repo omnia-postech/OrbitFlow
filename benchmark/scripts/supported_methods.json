@@ -110,6 +110,18 @@
         "--prefetch-distance",    "1",
         "--flattened-cache",      "true",
         "--merge-prefetch-buffer", "true"
+    ],
+    "NoPrefetch_TP": [
+        "--prefetch-mode",        "none",
+        "--prefetch-distance",    "1",
+        "--flattened-cache",      "true",
+        "--merge-prefetch-buffer", "true"
+    ],
+    "DistNSingle_TP": [
+        "--prefetch-mode",        "distn_single",
+        "--prefetch-distance",    "1",
+        "--flattened-cache",      "true",
+        "--merge-prefetch-buffer", "true"
     ]
   }
   
