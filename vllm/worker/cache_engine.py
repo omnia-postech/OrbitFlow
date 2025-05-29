@@ -1437,6 +1437,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             while left < 0: 
                 last_entry = alloc_layers.pop()  # remove last alloc layer
                 left += len(last_entry[2])  # add back the blocks
+                self.mapping.gpu_cpu_cache_map[last_entry[0]][last_entry[1]] = []  # clear the mapping
                 # will_alloc_blk = _count_blocks(t[2] for t in alloc_layers)/
             logger.critical(f"Plan exceeds budget, partial alloc, let scheduler handle it") 
             will_alloc_blk = _count_blocks(t[2] for t in alloc_layers)          # CPU -> GPU
@@ -1449,6 +1450,7 @@ class FlattenedCacheEngine(CacheEngineBase):
                 prefetch_resize=prefetch_resize,
                 pause_layers=pause_layers,
             )
+            self._sync_active_gpu_cpu_map(snapshot.seq_row_order)
             return plan, post_gpu_blk
         
         plan = Plan(

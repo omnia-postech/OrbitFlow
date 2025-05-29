@@ -60,8 +60,8 @@ plot_global() {
     --metric "slo_99" \
     --trace "${TRACE_LIST[0]}" \
     --xlabel "Methods" \
-    --ylabel "99th decode latency / SLO" \
-    --title "99th decode latency / SLO" \
+    --ylabel "99th decode latency" \
+    --title "99th decode latency" \
     --output "${EXP_OUT}/slo_99th.pdf"
 }
 

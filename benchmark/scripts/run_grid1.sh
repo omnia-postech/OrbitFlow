@@ -10,12 +10,13 @@ LOGGING_LEVEL=CRITICAL
 ROOT="/home/xinyuema/vllm"
 
 FIGURE_ONLY=$1
-EXP_LIST=(Test0521_SLO2_5_FIXED)                         # ← your “experiments”
+EXP_LIST=(Test0519)                         # ← your “experiments”
 # METHOD_LIST=(Ours NoPrefetch Flexgen NextLayer Static8 SelectN DistNSingle Ours_TP)      # ← indexes into JSON above
-METHOD_LIST=(OursMinusPause OursMinusDeposit)      # ← indexes into JSON above
-TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/PPR_based/"
-TRACE_LIST=(PPR394_TPI099)
-# TRACE_LIST=(PPR158_TPI005 PPR250_TPI051 PPR394_TPI099)
+METHOD_LIST=(Ours)      # ← indexes into JSON above
+TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/test_best_worst/"
+TRACE_LIST=(mixed_scaled_down)
+# TRACE_LIST=(profile_trace)
+# TRACE_LIST=(test_longlong_enough test_fit_static_0 test_fit_static_2 test_longlong_less test_longshort_less test_mix4_enough test_mix4_less test_shortlong_enough test_shortlong_less test_shortshort_enough)
 
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"

@@ -999,7 +999,6 @@ class Scheduler:
                 logger.debug(f"need_solver={need_solver}  ret.decode_seq_groups={(ret.decode_seq_groups)}, self.decode_window_left={self.decode_window_left} , self.cache_config.need_solver:{self.cache_config.need_solver}" )
         self._scheduler_running_outputs_cache[self.next_cache_id].reset()
         self._scheduled_seq_group_cache[self.next_cache_id].reset()
-
         # logger.debug(f"!!!!!!!!!!! ret.paused: {ret.paused}")
         return ret, is_paused_to_resume
 
