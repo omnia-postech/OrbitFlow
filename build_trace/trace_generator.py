@@ -692,27 +692,55 @@ def build_arrival_patterns(
 
     return patterns
 
-def build_request_types_S_L(short_bins=(256,512,1024,2048),
-                            long_bins =(4096,8192,16384),
-                            pct=0.2, max_total=32384):
-    span = lambda c: (max(16,int((c*(1-pct))//16*16)),
-                      max(16,int((c*(1+pct))//16*16)))
-    S, L = short_bins, long_bins
+# def build_request_types_S_L(short_bins=(128,256,512),
+#                             long_bins =(1024,2048,4096,8192),
+#                             pct=0.2, max_total=32384):
+#     span = lambda c: (max(16,int((c*(1-pct))//16*16)),
+#                       max(16,int((c*(1+pct))//16*16)))
+#     S, L = short_bins, long_bins
+#     combos = []
+#     for in_bin, out_bin, tag in [
+#         *( (i,o,"SS") for i in S for o in S ),
+#         *( (i,o,"SL") for i in S for o in L ),
+#         *( (i,o,"LS") for i in L for o in S ),
+#         *( (i,o,"LL") for i in L for o in L ),
+#     ]:
+#         if in_bin + out_bin > max_total: continue
+#         li, hi = span(in_bin)
+#         lo, ho = span(out_bin)
+#         name = f"{tag}_I{li}-{hi}_O{lo}-{ho}"
+#         combos.append(RequestType(name, li, hi, lo, ho,
+#                                   sampling_method="uniform",
+#                                   dataset_name="ShareGPT"))
+#     return combos            # 36개 (기본)
+
+def build_request_types_SML(
+        short_bins=(128, 256, 512),
+        mid_bins  =(1024, 2048),
+        long_bins =(4096, 8192),
+        pct=0.2, max_total=32384):
+    span = lambda c: (max(16, int((c*(1-pct))//16*16)),
+                      max(16, int((c*(1+pct))//16*16)))
+
+    S, M, L = short_bins, mid_bins, long_bins
     combos = []
-    for in_bin, out_bin, tag in [
-        *( (i,o,"SS") for i in S for o in S ),
-        *( (i,o,"SL") for i in S for o in L ),
-        *( (i,o,"LS") for i in L for o in S ),
-        *( (i,o,"LL") for i in L for o in L ),
+    for tag_src, in_set, out_set in [
+        ("S", S, S), ("S", S, M), ("S", S, L),
+        ("M", M, S), ("M", M, M), ("M", M, L),
+        ("L", L, S), ("L", L, M), ("L", L, L),
     ]:
-        if in_bin + out_bin > max_total: continue
-        li, hi = span(in_bin)
-        lo, ho = span(out_bin)
-        name = f"{tag}_I{li}-{hi}_O{lo}-{ho}"
-        combos.append(RequestType(name, li, hi, lo, ho,
-                                  sampling_method="uniform",
-                                  dataset_name="ShareGPT"))
-    return combos            # 36개 (기본)
+        for i in in_set:
+            for o in out_set:
+                if i + o > max_total:          # 모델 context upper-bound
+                    continue
+                li, hi = span(i)
+                lo, ho = span(o)
+                name   = f"{tag_src}{'SML'[out_set is M]+('L' if out_set is L else 'S')}" \
+                         f"_I{li}-{hi}_O{lo}-{ho}"
+                combos.append(RequestType(name, li, hi, lo, ho,
+                                          sampling_method="uniform",
+                                          dataset_name="ShareGPT"))
+    return combos
 
 # ────────────────────────────────
 #  (1) 모든 격자 혼합 생성
@@ -1115,63 +1143,63 @@ def _ovf_str(val: float) -> str:
 # ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     # NOTE(HONG): request generation with various length combinations
-    # RT_list = build_request_types_S_L()                    # 36개
+    RT_list = build_request_types_SML()                    # 36개
     
-    # # ① 모든 격자 혼합 생성 (step=0.25 ⇒ 35개)
-    # all_mix = grid_mixtures(step=0.25)
+    # ① 모든 격자 혼합 생성 (step=0.25 ⇒ 35개)
+    all_mix = grid_mixtures(step=0.33)
 
-    # # ② 대표 샘플 선택
-    # mixes_h9  = select_mixtures(all_mix, k=9,  mode="heuristic")
-    # mixes_k12 = select_mixtures(all_mix, k=12, mode="kmeans",  random_state=42)
-    # mixes_l20 = select_mixtures(all_mix, k=20, mode="lhs",     random_state=42)
+    # ② 대표 샘플 선택
+    mixes_h9  = select_mixtures(all_mix, k=9,  mode="heuristic")
+    mixes_k12 = select_mixtures(all_mix, k=12, mode="kmeans",  random_state=42)
+    mixes_l20 = select_mixtures(all_mix, k=20, mode="lhs",     random_state=42)
 
-    # print("heuristic 9 :", mixes_h9[:3], "...")
-    # print("kmeans 12   :", mixes_k12[:3], "...")
-    # print("lhs 20      :", mixes_l20[:3], "...")
+    print("heuristic 9 :", mixes_h9[:3], "...")
+    print("kmeans 12   :", mixes_k12[:3], "...")
+    print("lhs 20      :", mixes_l20[:3], "...")
 
-    # # Combine all mixes into a single list
-    # mixes = mixes_h9 + mixes_k12 + mixes_l20
+    # Combine all mixes into a single list
+    mixes = mixes_h9 + mixes_k12 + mixes_l20
     
-    # # Print total number of mixes
-    # print(f"Total number of mixes: {len(mixes)}")
+    # Print total number of mixes
+    print(f"Total number of mixes: {len(mixes)}")
     
-    # for mix in mixes:                           # mixes_h9 + mixes_k12 + mixes_l20 ...
-    #     probs = {rt: 0 for rt in RT_list}
-    #     block = len(RT_list) // 4               # 9
-    #     for j, p in enumerate(mix):             # j=0:SS, 1:SL, 2:LS, 3:LL
-    #         for rt in RT_list[j*block:(j+1)*block]:
-    #             probs[rt] = p / block
+    for mix in mixes:                           # mixes_h9 + mixes_k12 + mixes_l20 ...
+        probs = {rt: 0 for rt in RT_list}
+        block = len(RT_list) // 4               # 9
+        for j, p in enumerate(mix):             # j=0:SS, 1:SL, 2:LS, 3:LL
+            for rt in RT_list[j*block:(j+1)*block]:
+                probs[rt] = p / block
 
-    #     # ─────────────── 변경된 저장 경로 ───────────────
-    #     tag = mix_tag(mix)                      # 한눈에 보이는 태그
-    #     save_request_json(
-    #         path=f"traces/request_types/req_{tag}.json",      # traces 폴더에 저장
-    #         request_types=probs,
-    #         num_req=100,
-    #         batch_size=4,
-    #         skip_token_ids=True,
-    #     )
+        # ─────────────── 변경된 저장 경로 ───────────────
+        tag = mix_tag(mix)                      # 한눈에 보이는 태그
+        save_request_json(
+            path=f"traces/request_types/req_{tag}.json",      # traces 폴더에 저장
+            request_types=probs,
+            num_req=52,
+            batch_size=4,
+            skip_token_ids=True,
+        )
 
     # ────────────────────────────────────────────────────────
     #  모든 request.json × Arrival-Pattern 조합으로 trace 생성
     #    (앞서 “traces/req_*.json” 으로 저장한 요청 파일들을 대상으로)
     # ────────────────────────────────────────────────────────    
 
-    level_spec = {
-        "vlow"     : dict(target_ovf = 0.05, tol = 0.010),  # 매우 여유
-        "low"      : dict(target_ovf = 0.12, tol = 0.015),
-        "mid_low"  : dict(target_ovf = 0.22, tol = 0.020),
-        "mid"      : dict(target_ovf = 0.35, tol = 0.030),
-        "mid_high" : dict(target_ovf = 0.55, tol = 0.040),
-        "high"     : dict(target_ovf = 0.80, tol = 0.050),  # 상한 유지
-    }    
+    # level_spec = {
+    #     "vlow"     : dict(target_ovf = 0.05, tol = 0.010),  # 매우 여유
+    #     "low"      : dict(target_ovf = 0.12, tol = 0.015),
+    #     "mid_low"  : dict(target_ovf = 0.22, tol = 0.020),
+    #     "mid"      : dict(target_ovf = 0.35, tol = 0.030),
+    #     "mid_high" : dict(target_ovf = 0.55, tol = 0.040),
+    #     "high"     : dict(target_ovf = 0.80, tol = 0.050),  # 상한 유지
+    # }    
 
-    for req_json in Path("traces/request_types").glob("req_*.json"):
-        build_sched_save(
-            request_json   = str(req_json),            
-            level_spec     = level_spec,
-            blk_size       = BLOCK_SIZE_TOK,
-            static         = False,
-            skip_token_ids = True,
-            scales       = [0.5], # [0.1, 0.25, 0.5]
-        )
+    # for req_json in Path("traces/request_types").glob("req_*.json"):
+    #     build_sched_save(
+    #         request_json   = str(req_json),            
+    #         level_spec     = level_spec,
+    #         blk_size       = BLOCK_SIZE_TOK,
+    #         static         = False,
+    #         skip_token_ids = True,
+    #         scales       = [0.5], # [0.1, 0.25, 0.5]
+    #     )

@@ -20,7 +20,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only LLaMA model compatible with HuggingFace weights."""
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Type, Union, Deque
+from collections import deque
 
 import torch
 from torch import nn
@@ -69,19 +70,24 @@ def init_prefetch_state(gpu_cpu_cache_map: dict[int, list[int]]):
     """
     num_seqs   = len(gpu_cpu_cache_map)
 
-    gap, next_cpu = {}, {}    
+    gap: Dict[int, Deque[int]] = {} 
+    next_cpu: Dict[int, Optional[int]] = {}
     for (sid, mask) in (gpu_cpu_cache_map.items()):
         cpu_layers = [i for i, v in enumerate(mask) if v == 0]
         if not cpu_layers:                      # sequence fully on GPU
             next_cpu[sid] = None
-            gap[sid] = None
+            gap[sid] = deque() 
             continue
         next_cpu[sid] = cpu_layers[0]
 
         if len(cpu_layers) >= 2:                # constant pattern
-            gap[sid] = cpu_layers[1] - cpu_layers[0] - 1
+            distances = [
+                cpu_layers[i + 1] - cpu_layers[i] - 1
+                for i in range(len(cpu_layers) - 1)
+            ]
         else:                                   # only one CPU layer left
-            gap[sid] = mask[::-1].index(0)      # distance to previous CPU
+            distances = [mask[::-1].index(0)]      # distance to previous CPU
+        gap[sid] = deque(distances)
     return gap, next_cpu
 
 def scatter_blocks_cpu_to_gpu(
@@ -566,7 +572,10 @@ class LlamaModel(nn.Module):
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, IntermediateTensors]:
         layer_metas = attn_metadata
-        
+        # if isinstance(layer_metas, list):
+        #     logger.critical(f"len(layer_metas) = {len(layer_metas)}")
+        # else: 
+        #     logger.critical(f"layer_metas = {type(layer_metas)}")
         work_map = {sid: layer_flags[:]           # shallow copy of each list
                     for sid, layer_flags in gpu_cpu_cache_map.items()}
         gap, next_cpu = init_prefetch_state(work_map) 
@@ -667,8 +676,11 @@ class LlamaModel(nn.Module):
             # ── prefetch trigger ───────────────────────────────────────────
             # ‣ gap > 0  → copy 'gap' layers ahead of use
             # ‣ gap == 0 → layer is *currently* needed, so copy right now
-            if (gap[sid] == 0 and layer_num == tgt) \
-               or (gap[sid] > 0 and layer_num == tgt - gap[sid]):
+            cur_gap = gap[sid].popleft() if gap[sid] else None 
+            if cur_gap is None: 
+                continue
+            if (cur_gap == 0 and layer_num == tgt) \
+                or (cur_gap > 0 and layer_num == tgt - cur_gap):
                 layers_to_prefetch[tgt].append(sid)
         
         if is_prefill:
@@ -812,6 +824,11 @@ class LlamaModel(nn.Module):
                                 for i in range(len(seq_starts) - 1)
                             ]
                             seq_num_blocks = {sid: seq_num_blocks[i] for i, sid in enumerate(seq_ids)}
+                            logger.critical(f"target layer={tgt_layer}")
+                            # if isinstance(layer_metas, list):
+                            #     logger.critical(f"len(layer_metas) = {len(layer_metas)}")
+                            # else: 
+                            #     logger.critical(f"layer_metas = {type(layer_metas)}")
                             block_table_for_prefetched, blocks_to_write, blocks_to_copy = compute_inds_for_prefetch(
                                 layer_metas[tgt_layer].cpu_block_tables,
                                 layer_metas[tgt_layer].block_tables,
@@ -860,7 +877,7 @@ class LlamaModel(nn.Module):
                                 src_ids=blocks_to_copy, # LongTensor or list
                                 stream=prefetch_stream
                             )
-                            if gap[sid] == 0: # this means distance is 0 and we are fetching every layer, cant overlap at all
+                            if cur_gap == 0: # this means distance is 0 and we are fetching every layer, cant overlap at all
                                 # Ensure the data is resident before we launch matmul
                                 torch.cuda.default_stream().wait_stream(prefetch_stream)
                             # logger.debug(f"copying Key for layer {tgt_layer},  CPUBlock[{(blocks_to_copy).tolist()}({(blocks_to_copy+3200).tolist()}) to GPUCache[{blocks_to_write.tolist()}]")
@@ -875,7 +892,7 @@ class LlamaModel(nn.Module):
                                 src_ids=blocks_to_copy, # LongTensor or list
                                 stream=prefetch_stream
                             )
-                            if gap[sid] == 0: # this means distance is 0 and we are fetching every layer, cant overlap at all
+                            if cur_gap == 0: # this means distance is 0 and we are fetching every layer, cant overlap at all
                                 # Ensure the data is resident before we launch matmul
                                 torch.cuda.default_stream().wait_stream(prefetch_stream)
                     # ── after Value Prefetching block ─────────────────────────────
@@ -885,11 +902,20 @@ class LlamaModel(nn.Module):
                     # ----------------------- bookkeeping ----------------------------
                     for sid in seqs_to_prefetch:
                         work_map[sid][tgt_layer] = 1           # mark on-GPU
-                        next_cpu[sid] += gap[sid] + 1                  # point to next CPU layer
-                        # if we ran out of zeros, mark done
-                        if 0 not in work_map[sid][tgt_layer+1:]:
+                        
+                        cur_gap = gap[sid].popleft() if gap[sid] else 0
+                        
+                        if next_cpu[sid] is not None:
+                            next_cpu[sid] += cur_gap + 1
+                        
+                        no_cpu_left = (
+                            next_cpu[sid] is None or            # 이미 None
+                            not gap[sid] or                     # 간격 deque가 비었음
+                            0 not in work_map[sid][next_cpu[sid]:]  # 이후에 0이 더 없음
+                        )
+                        if no_cpu_left:
                             next_cpu[sid] = None
-                            gap[sid] = None
+                            gap[sid].clear()
                     
             # flat kv cache, no offload
             elif len(kv_caches) == 1: 

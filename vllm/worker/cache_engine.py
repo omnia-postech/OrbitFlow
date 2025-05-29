@@ -1227,6 +1227,8 @@ class FlattenedCacheEngine(CacheEngineBase):
                 
                 comp_time = self.compute_comp_time_for_requests(slo_allowed, max_comp_time)
                 self.prev_selectn_distance = self.prefetch_distance_for_seletcn(comm_time, comp_time)
+                if self.prev_selectn_distance == 32:
+                    self.prev_selectn_distance = -1
                 self.need_update_selectn = False
 
             dist = [self.prev_selectn_distance] * len(snapshot.candidates)

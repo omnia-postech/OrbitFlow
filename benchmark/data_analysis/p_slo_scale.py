@@ -78,7 +78,7 @@ trace_labels  = [
 PERCENTILES  = [90, 95, 99]
 x_positions  = range(len(PERCENTILES))
 
-fig, axes = plt.subplots(1, len(trace_labels), figsize=(25, 6), sharey=True)
+fig, axes = plt.subplots(1, len(trace_labels), figsize=(19, 6), sharey=True)
 plt.subplots_adjust(
     left=0.05, right=0.99, top=0.93, bottom=0.07,
     wspace=0.075, hspace=0.1
@@ -99,9 +99,9 @@ for ax, trace, trace_label in zip(axes, TRACE_LIST, trace_labels):
             linewidth=3,
             markersize=10
         )
-    ax.set_title(trace_label, fontsize=30)
+    ax.set_title(trace_label, fontsize=35)
     ax.set_xticks(x_positions)
-    ax.set_xticklabels([f"p{p}" for p in PERCENTILES], fontsize=30)
+    ax.set_xticklabels([f"p{p}" for p in PERCENTILES], fontsize=35)
     # ax.set_xlabel("Percentile", fontsize=35)
     # ax.grid(alpha=0.3)
 
@@ -124,13 +124,13 @@ for ax in axes:
     ax.set_ylim(-0.15, max_ylim + 0.15)
 
 # 공통 y축 레이블 & 범례
-axes[0].set_ylabel("SLO Scale", fontsize=30, labelpad=15)
+axes[0].set_ylabel("SLO Scale", fontsize=35, labelpad=15)
 fig.legend(METHOD_LABELS, loc='upper center', 
-           bbox_to_anchor=(0.5, 1.2),
-           ncol=len(METHOD_LABELS),
-           fontsize=30, frameon=False)
+           bbox_to_anchor=(0.5, 1.3),
+           ncol=len(METHOD_LABELS) / 2 + 1,
+           fontsize=35, frameon=False)
 
 # 폴더 생성 및 저장
 
-plt.savefig("figures/p_slo.jpg", format='jpg', bbox_inches="tight")
-# plt.savefig("figures/p_slo.pdf", format='pdf', bbox_inches="tight")
+plt.savefig("figures/6_2_tail_tbt.jpg", format='jpg', bbox_inches="tight")
+plt.savefig("figures/6_2_tail_tbt.pdf", format='pdf', bbox_inches="tight")

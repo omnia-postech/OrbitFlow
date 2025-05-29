@@ -1,0 +1,14 @@
+{
+  "PPR": 1.953125,
+  "TPI": 0.22047106590120277,
+  "OV_block_step": 841778,
+  "OV_frac": 0.05742193468817533,
+  "GE2_frac": 0.0,
+  "peak_blocks": 625,
+  "peak_step": 3281,
+  "gpu_blocks": 320,
+  "total_steps": 45811,
+  "type1_count": 87,
+  "type2_count": 49,
+  "plot_path": "traces/case234/token_dynamic_batch_static/C3_bim50_vlow.png"
+}

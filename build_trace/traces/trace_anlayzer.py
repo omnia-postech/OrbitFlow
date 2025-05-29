@@ -3,13 +3,13 @@ import json, re, numpy as np, pandas as pd
 from pathlib import Path
 
 # ─────────────────────────── 0. 설정 ────────────────────────────
-ROOT = Path("all_traces_v6")        # *.metrics.json 최상위 폴더
+ROOT = Path("all_traces_v7_request_52_for_both_dyn")        # *.metrics.json 최상위 폴더
 
 REPRESENTATIVE_PER_BUCKET = 1    # 버킷당 대표 trace 수
 PPR_MAX = 3.0                 # ← 2 를 넘는 trace 는 분석에서 제외
 
 # 0-1 압력 약어 → 레이블
-LVL_MAP = {"vl":"low", "lo":"low", "ml":"mid", "md":"mid", "mh":"high", "hi":"high"}
+LVL_MAP = {"vl":"verylow", "lo":"low", "ml":"midlow", "md":"mid", "mh":"midhigh", "hi":"high"}
 
 # 0-2 카테고리별 퍼센타일 규칙
 #   • 키 이름 : 카테고리
@@ -21,7 +21,7 @@ CATEGORY_RULES = {
     # "batch_dynamic" : dict(TJ_max_pct=10, BJ_min_pct=80),
 
     # both_dynamic  : 둘 다 큰 trace
-    "both_dynamic"  : dict(TJ_min_pct=40, BJ_min_pct=40),
+    "both_dynamic"  : dict(TJ_min_pct=50, BJ_min_pct=50),
 
     # NOTE(HONG): for both static, we have to use same output length and 
     # both_static : 둘 다 아주 작을 때

@@ -1,0 +1,14 @@
+{
+  "PPR": 3.409855769230769,
+  "TPI": 0.4108527131782946,
+  "OV_block_step": 225768,
+  "OV_frac": 0.35058884913536076,
+  "GE2_frac": 0.1421188630490956,
+  "peak_blocks": 2837,
+  "peak_step": 602,
+  "gpu_blocks": 832,
+  "total_steps": 774,
+  "type1_count": 18,
+  "type2_count": 45,
+  "plot_path": "traces/case234/token_static_batch_dyn/C2_bim50_mid.png"
+}

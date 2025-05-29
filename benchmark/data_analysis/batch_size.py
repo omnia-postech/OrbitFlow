@@ -132,4 +132,4 @@ ax.legend(loc="upper center",
 
 # 저장
 plt.savefig("figures/batch_size.jpg", format='jpg', bbox_inches="tight")
-# plt.savefig("figures/batch_size.pdf", format='pdf', bbox_inches="tight")
+plt.savefig("figures/batch_size.pdf", format='pdf', bbox_inches="tight")

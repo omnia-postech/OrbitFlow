@@ -194,4 +194,5 @@ fig.legend(
 
 # 전체 레이아웃 및 저장
 # plt.tight_layout(rect=[0,0,1,0.95])
-plt.savefig("figures/desing_validation.jpg", format='jpg', bbox_inches="tight")
+plt.savefig("figures/6_3_design_validation.jpg", format='jpg', bbox_inches="tight")
+plt.savefig("figures/6_3_design_validation.pdf", format='pdf', bbox_inches="tight")
