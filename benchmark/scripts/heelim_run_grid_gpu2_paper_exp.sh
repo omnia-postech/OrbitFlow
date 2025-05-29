@@ -4,7 +4,7 @@
 ###############################################################################
 # CONSTANTS (edit these lists only)                                           #
 ###############################################################################
-export CUDA_VISIBLE_DEVICES=2
+export CUDA_VISIBLE_DEVICES=3
 export VLLM_CONFIGURE_LOGGING=1
 
 # LOGGING_LEVEL=DEBUG
@@ -17,12 +17,9 @@ EXP_LIST=(paper_main_exp)
 METHOD_LIST=(SelectN)
 TRACE_CFG_DIR="${ROOT}/benchmark/selected_traces/"
 # TRACE_LIST=(bim50_hi_ov78_scaled_debugging)
-# TRACE_LIST=(both_dyn_low both_dyn_mid both_dyn_high both_dyn_veryhigh)
-# TRACE_LIST=(batch_dyn_low both_static_low batch_dyn_mid both_static_mid batch_dyn_high both_static_high batch_dyn_veryhigh both_static_veryhigh)
+# TRACE_LIST=(batch_dyn_low batch_dyn_mid batch_dyn_high batch_dyn_veryhigh)
 # TRACE_LIST=(token_dyn_low token_dyn_mid token_dyn_high token_dyn_veryhigh)
-# TRACE_LIST=(token_dyn_veryhigh)
-# TRACE_LIST=(both_static_low both_static_mid both_static_high both_static_veryhigh)
-TRACE_LIST=(token_dyn_mid token_dyn_high token_dyn_veryhigh)
+TRACE_LIST=(both_dyn_veryhigh)
 
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"
