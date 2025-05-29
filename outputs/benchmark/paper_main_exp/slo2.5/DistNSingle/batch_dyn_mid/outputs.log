@@ -1,0 +1,20 @@
+Failure (due to memory limits): 12
+Failure (due to memory limits): 12
+Failure (due to memory limits): 12
+Failure (due to memory limits): 12
+Failure (due to memory limits): 12
+Failure (due to memory limits): 12
+Failure (due to memory limits): 12
+Failure (due to memory limits): 12
+Failure (due to memory limits): 12
+Failure (due to memory limits): 12
+Failure (due to memory limits): 12
+Failure (due to memory limits): 12
+All requests completed. Now saving CSV...
+Metrics saved to /home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/DistNSingle/batch_dyn_mid/outputs.csv
+------Wall-clock stats (non-overlapping)------
+Overall runtime  : 946.903 s
+Prefill time     : 532459 tokens over 880.678 s ( 604.60 t/s)
+Decode  time     : 1676 tokens over 66.225 s ( 25.31 t/s)
+Preemptions  time     : 0
+Overall solver time: 0.000 s

@@ -61,8 +61,8 @@ Failure (due to memory limits): 60
 All requests completed. Now saving CSV...
 Metrics saved to /home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/DistNSingle/both_static_low/outputs.csv
 ------Wall-clock stats (non-overlapping)------
-Overall runtime  : 332.432 s
-Prefill time     : 216632 tokens over 299.524 s ( 723.25 t/s)
-Decode  time     : 1608 tokens over 32.908 s ( 48.86 t/s)
+Overall runtime  : 376.803 s
+Prefill time     : 216632 tokens over 343.488 s ( 630.68 t/s)
+Decode  time     : 1608 tokens over 33.314 s ( 48.27 t/s)
 Preemptions  time     : 0
 Overall solver time: 0.000 s
