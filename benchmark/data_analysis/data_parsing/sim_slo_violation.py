@@ -124,11 +124,16 @@ def process_experiment(exp_dir: Path):
         vio, exc = compute_slo_violation(req_id, tbt, solver, slo_thr)
         ref_len  = reference["requests"][f"request_{req_id}"]["output_length"]
         vio     += max(ref_len - dl - 1, 0)       # 미생성 토큰 보정
+        failed = False
+        if ref_len -1 != dl:
+            failed = True   
         results.append(
             {"request_id": f"request_{req_id}",
              "slo_violation": vio,
-             "exceptions":   exc}
-        )
+             "exceptions":   exc, 
+             "failed": failed,
+             }
+        )        
 
     out_csv = exp_dir / "slo_violation.csv"
     pd.DataFrame(results).to_csv(out_csv, index=False, encoding="utf-8-sig")

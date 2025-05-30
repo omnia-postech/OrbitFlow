@@ -25,12 +25,37 @@ def load_output_metrics(path: Path) -> pd.DataFrame:
     return df
 
 # ───────────────────────────────────────────────
-def _extract_request_tpot_attainment(df: pd.DataFrame) -> float:
-    tpot = np.array([np.mean(tbt) for tbt in df["time_between_tokens"]])
-    thr = pd.to_numeric(df["slo_threshold"], errors="coerce").to_numpy().mean()
-    valid = ~np.isnan(tpot)
-    attain = (tpot[valid] <= thr).sum()
-    return (attain / valid.sum() * 100 if valid.sum() else 0.0)
+def _extract_request_tpot_attainment(output_df: pd.DataFrame, slo_df: pd.DataFrame, penalty_tbt: float = 1000.0) -> float:
+    # 1) 실패한 request_id 집합 만들기  (slo_violation.csv 기준)
+    if {"failed", "request_id"}.issubset(slo_df.columns):
+        failed_reqs = set(slo_df.loc[slo_df["failed"], "request_id"])
+    else:
+        failed_reqs = set()
+
+    # 2) 요청별 TPOT 배열 생성
+    tpot_list = []
+    req_ids   = (
+        output_df["request_id"]
+        if "request_id" in output_df.columns
+        else [f"request_{i}" for i in range(len(output_df))]
+    )
+    for rid, tbt_series in zip(req_ids, output_df["time_between_tokens"]):
+        if rid in failed_reqs:
+            tpot_list.append(penalty_tbt)          # 실패 → 패널티
+        else:
+            tpot_list.append(np.mean(tbt_series))  # 정상 → 실제 TPOT
+
+    tpot = np.asarray(tpot_list, dtype=float)
+
+    # 3) SLO 임계값(요청별 값이 모두 동일하면 평균으로 충분)
+    thr = pd.to_numeric(output_df["slo_threshold"],
+                        errors="coerce").to_numpy().mean()
+
+    valid_mask = ~np.isnan(tpot)          # 실패 요청 포함
+    attain_cnt = (tpot[valid_mask] <= thr).sum()
+
+    return (attain_cnt / valid_mask.sum() * 100
+            if valid_mask.sum() else 0.0)
 
 def _extract_token_slo_attainment(output_df: pd.DataFrame, slo_df: pd.DataFrame) -> float:
     total_decoded = int(output_df.get("decode_length", pd.Series(0)).sum())
@@ -79,7 +104,7 @@ def extract_metrics(input_base_path):
     output_df = load_output_metrics(Path(input_base_path, "outputs.csv"))
     slo_df = pd.read_csv(Path(input_base_path, "slo_violation.csv"))
 
-    tpot_slo = _extract_request_tpot_attainment(output_df)
+    tpot_slo = _extract_request_tpot_attainment(output_df, slo_df)
     tbt_slo = _extract_token_slo_attainment(output_df, slo_df)
     throughput = compute_throughput(output_df)
 
