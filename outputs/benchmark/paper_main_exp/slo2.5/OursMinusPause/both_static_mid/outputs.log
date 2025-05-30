@@ -1,7 +1,7 @@
 Set parameter WLSAccessID
 Set parameter WLSSecret
-Set parameter LicenseID to value 2663553
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Set parameter LicenseID to value 2558285
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Set parameter NonConvex to value 2
 [solve] profiled PCIe/NVLink bandwidth  : 800.01 blocks/s
 Set parameter OutputFlag to value 1
@@ -13,7 +13,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0xeb4d1941
 Model has 8 quadratic constraints
@@ -82,7 +82,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0x9bbc272e
 Model has 8 quadratic constraints
@@ -154,7 +154,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0x0276c6a1
 Model has 8 quadratic constraints
@@ -225,7 +225,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0x9e9996ea
 Model has 8 quadratic constraints
@@ -259,7 +259,7 @@ Root relaxation: objective 1.488379e-01, 23 iterations, 0.00 seconds (0.00 work 
      0     0    0.14884    0    6    0.15035    0.14884  1.00%     -    0s
      0     0          -    0         0.15035    0.15035  0.00%     -    0s
 
-Explored 1 nodes (28 simplex iterations) in 0.04 seconds (0.00 work units)
+Explored 1 nodes (28 simplex iterations) in 0.03 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.150348 
@@ -291,7 +291,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0xe93fc3c4
 Model has 8 quadratic constraints
@@ -325,7 +325,7 @@ Root relaxation: objective 1.294816e-01, 19 iterations, 0.00 seconds (0.00 work 
      0     0    0.12948    0    6    0.13098    0.12948  1.14%     -    0s
      0     0          -    0         0.13098    0.13098  0.00%     -    0s
 
-Explored 1 nodes (22 simplex iterations) in 0.04 seconds (0.00 work units)
+Explored 1 nodes (22 simplex iterations) in 0.03 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.130979 
@@ -357,7 +357,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0xb132b112
 Model has 8 quadratic constraints
@@ -391,7 +391,7 @@ Root relaxation: objective 1.348161e-01, 19 iterations, 0.00 seconds (0.00 work 
      0     0    0.13482    0    6    0.13632    0.13482  1.10%     -    0s
      0     0          -    0         0.13632    0.13632  0.00%     -    0s
 
-Explored 1 nodes (21 simplex iterations) in 0.04 seconds (0.00 work units)
+Explored 1 nodes (21 simplex iterations) in 0.03 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.136317 
@@ -423,7 +423,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0xe09a033c
 Model has 8 quadratic constraints
@@ -457,7 +457,7 @@ Root relaxation: objective 5.175573e-02, 19 iterations, 0.00 seconds (0.00 work 
      0     0    0.05176    0    6    0.05318    0.05176  2.68%     -    0s
      0     0          -    0         0.05318    0.05318  0.00%     -    0s
 
-Explored 1 nodes (21 simplex iterations) in 0.04 seconds (0.00 work units)
+Explored 1 nodes (21 simplex iterations) in 0.03 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.0531789 
@@ -489,7 +489,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0x0bafa1a2
 Model has 8 quadratic constraints
@@ -537,7 +537,7 @@ Cutting planes:
   RLT: 4
   Relax-and-lift: 1
 
-Explored 1 nodes (125 simplex iterations) in 0.05 seconds (0.01 work units)
+Explored 1 nodes (125 simplex iterations) in 0.04 seconds (0.01 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 0
@@ -555,7 +555,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0x1072459d
 Model has 8 quadratic constraints
@@ -591,7 +591,7 @@ Root relaxation: objective 5.087043e-02, 19 iterations, 0.00 seconds (0.00 work 
      0     0    0.05087    0    6    0.05229    0.05087  2.72%     -    0s
 H    0     0                       0.0521408    0.05087  2.44%     -    0s
 
-Explored 1 nodes (20 simplex iterations) in 0.04 seconds (0.00 work units)
+Explored 1 nodes (20 simplex iterations) in 0.03 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 2: 0.0521408 0.0522919 
@@ -623,7 +623,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0x0483badf
 Model has 8 quadratic constraints
@@ -689,7 +689,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0xd8416861
 Model has 8 quadratic constraints
@@ -726,7 +726,7 @@ Root relaxation: objective 5.002430e-02, 19 iterations, 0.00 seconds (0.00 work 
 H    0     0                       0.0508996    0.05002  1.72%     -    0s
      0     2    0.05002    0    6    0.05090    0.05002  1.72%     -    0s
 
-Explored 3 nodes (22 simplex iterations) in 0.04 seconds (0.00 work units)
+Explored 3 nodes (22 simplex iterations) in 0.03 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 2: 0.0508996 0.0514441 
@@ -758,7 +758,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0xc1389f21
 Model has 8 quadratic constraints
@@ -807,7 +807,7 @@ Cutting planes:
   Mod-K: 1
   RLT: 1
 
-Explored 227 nodes (639 simplex iterations) in 0.04 seconds (0.01 work units)
+Explored 227 nodes (639 simplex iterations) in 0.06 seconds (0.01 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 0
@@ -825,7 +825,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0xe93fc3c4
 Model has 8 quadratic constraints
@@ -859,7 +859,7 @@ Root relaxation: objective 1.294816e-01, 19 iterations, 0.00 seconds (0.00 work 
      0     0    0.12948    0    6    0.13098    0.12948  1.14%     -    0s
      0     0          -    0         0.13098    0.13098  0.00%     -    0s
 
-Explored 1 nodes (22 simplex iterations) in 0.04 seconds (0.00 work units)
+Explored 1 nodes (22 simplex iterations) in 0.03 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.130979 
@@ -891,7 +891,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0xd8416861
 Model has 8 quadratic constraints
@@ -928,7 +928,7 @@ Root relaxation: objective 5.002430e-02, 19 iterations, 0.00 seconds (0.00 work 
 H    0     0                       0.0508996    0.05002  1.72%     -    0s
      0     2    0.05002    0    6    0.05090    0.05002  1.72%     -    0s
 
-Explored 3 nodes (22 simplex iterations) in 0.04 seconds (0.00 work units)
+Explored 3 nodes (22 simplex iterations) in 0.03 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 2: 0.0508996 0.0514441 
@@ -960,7 +960,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0x1072459d
 Model has 8 quadratic constraints
@@ -996,7 +996,7 @@ Root relaxation: objective 5.087043e-02, 19 iterations, 0.00 seconds (0.00 work 
      0     0    0.05087    0    6    0.05229    0.05087  2.72%     -    0s
 H    0     0                       0.0521408    0.05087  2.44%     -    0s
 
-Explored 1 nodes (20 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 1 nodes (20 simplex iterations) in 0.03 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 2: 0.0521408 0.0522919 
@@ -1028,7 +1028,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0x5dfb1b5d
 Model has 8 quadratic constraints
@@ -1093,7 +1093,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0x0483badf
 Model has 8 quadratic constraints
@@ -1159,7 +1159,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0xe9cade66
 Model has 8 quadratic constraints
@@ -1203,7 +1203,7 @@ Cutting planes:
   RLT: 5
   Relax-and-lift: 2
 
-Explored 1 nodes (158 simplex iterations) in 0.05 seconds (0.01 work units)
+Explored 1 nodes (158 simplex iterations) in 0.04 seconds (0.01 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 0
@@ -1221,7 +1221,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0xe07ba2ac
 Model has 8 quadratic constraints
@@ -1271,7 +1271,7 @@ Cutting planes:
   Zero half: 1
   RLT: 5
 
-Explored 1 nodes (136 simplex iterations) in 0.05 seconds (0.01 work units)
+Explored 1 nodes (136 simplex iterations) in 0.04 seconds (0.01 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 0
@@ -1289,7 +1289,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0xd8416861
 Model has 8 quadratic constraints
@@ -1358,7 +1358,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0xadf12a7e
 Model has 8 quadratic constraints
@@ -1424,7 +1424,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0xe93fc3c4
 Model has 8 quadratic constraints
@@ -1490,7 +1490,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0xbe522a25
 Model has 8 quadratic constraints
@@ -1557,7 +1557,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0xa604da68
 Model has 8 quadratic constraints
@@ -1606,7 +1606,7 @@ Cutting planes:
   Mod-K: 1
   RLT: 2
 
-Explored 1 nodes (125 simplex iterations) in 0.03 seconds (0.01 work units)
+Explored 1 nodes (125 simplex iterations) in 0.04 seconds (0.01 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 0
@@ -1624,7 +1624,7 @@ Thread count: 32 physical cores, 64 logical processors, using up to 32 threads
 Non-default parameters:
 NonConvex  2
 
-Academic license 2663553 - for non-commercial use only - registered to he___@unist.ac.kr
+Academic license 2558285 - for non-commercial use only - registered to js___@postech.ac.kr
 Optimize a model with 47 rows, 94 columns and 413 nonzeros
 Model fingerprint: 0x1cd35af1
 Model has 8 quadratic constraints
@@ -1675,7 +1675,7 @@ Cutting planes:
   GUB cover: 4
   Relax-and-lift: 4
 
-Explored 567 nodes (1423 simplex iterations) in 0.09 seconds (0.02 work units)
+Explored 567 nodes (1423 simplex iterations) in 0.08 seconds (0.02 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 0
@@ -1745,8 +1745,8 @@ Failure (due to memory limits): 60
 All requests completed. Now saving CSV...
 Metrics saved to /home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/OursMinusPause/both_static_mid/outputs.csv
 ------Wall-clock stats (non-overlapping)------
-Overall runtime  : 324.592 s
-Prefill time     : 216632 tokens over 292.774 s ( 739.93 t/s)
-Decode  time     : 1608 tokens over 31.817 s ( 50.54 t/s)
+Overall runtime  : 382.269 s
+Prefill time     : 216632 tokens over 346.310 s ( 625.54 t/s)
+Decode  time     : 1608 tokens over 35.958 s ( 44.72 t/s)
 Preemptions  time     : 0
-Overall solver time: 1.237 s
+Overall solver time: 1.157 s
