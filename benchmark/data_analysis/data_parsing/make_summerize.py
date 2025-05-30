@@ -3,6 +3,8 @@ import numpy as np
 import ast
 from pathlib import Path
 from typing import List
+import sys
+import ast, json, logging
 
 # ───────────────────────────────────────────────
 # 1. load_metrics 정의 (기존 함수 활용)
@@ -25,7 +27,12 @@ def load_output_metrics(path: Path) -> pd.DataFrame:
     return df
 
 # ───────────────────────────────────────────────
-def _extract_request_tpot_attainment(output_df: pd.DataFrame, slo_df: pd.DataFrame, penalty_tbt: float = 1000.0) -> float:
+def _extract_request_tpot_attainment(
+        output_df: pd.DataFrame, 
+        slo_df: pd.DataFrame, 
+        total_decode: int,
+        penalty_tbt: float = 1000.0
+    ) -> float:
     # 1) 실패한 request_id 집합 만들기  (slo_violation.csv 기준)
     if {"failed", "request_id"}.issubset(slo_df.columns):
         failed_reqs = set(slo_df.loc[slo_df["failed"], "request_id"])
@@ -35,15 +42,24 @@ def _extract_request_tpot_attainment(output_df: pd.DataFrame, slo_df: pd.DataFra
     # 2) 요청별 TPOT 배열 생성
     tpot_list = []
     req_ids   = (
-        output_df["request_id"]
-        if "request_id" in output_df.columns
-        else [f"request_{i}" for i in range(len(output_df))]
+        slo_df["request_id"]
+        if "request_id" in slo_df.columns
+        else [f"request_{i}" for i in range(len(slo_df))]
     )
-    for rid, tbt_series in zip(req_ids, output_df["time_between_tokens"]):
+
+    for rid in req_ids:
         if rid in failed_reqs:
-            tpot_list.append(penalty_tbt)          # 실패 → 패널티
-        else:
-            tpot_list.append(np.mean(tbt_series))  # 정상 → 실제 TPOT
+            tpot_list.append(penalty_tbt) 
+        else :
+            vals = output_df.loc[output_df["request_id"] == rid, "time_between_tokens"]
+            tpot_list.append(np.mean(vals.iloc[0]))
+
+
+    # for rid, tbt_series in zip(req_ids, output_df["time_between_tokens"]):
+    #     if rid in failed_reqs:
+    #         tpot_list.append(penalty_tbt)          # 실패 → 패널티
+    #     else:
+    #         tpot_list.append(np.mean(tbt_series))  # 정상 → 실제 TPOT
 
     tpot = np.asarray(tpot_list, dtype=float)
 
@@ -57,12 +73,19 @@ def _extract_request_tpot_attainment(output_df: pd.DataFrame, slo_df: pd.DataFra
     return (attain_cnt / valid_mask.sum() * 100
             if valid_mask.sum() else 0.0)
 
-def _extract_token_slo_attainment(output_df: pd.DataFrame, slo_df: pd.DataFrame) -> float:
-    total_decoded = int(output_df.get("decode_length", pd.Series(0)).sum())
+def _extract_token_slo_attainment(
+        output_df: pd.DataFrame, 
+        slo_df: pd.DataFrame,
+        total_decoded: int
+    ) -> float:
+    # total_decoded = int(output_df.get("decode_length", pd.Series(0)).sum())
     viol = int(slo_df.get("slo_violation", pd.Series(0)).sum())
     return ((total_decoded - viol) / total_decoded * 100 if total_decoded else 0.0)
 
-def compute_throughput(df: pd.DataFrame) -> float:
+def compute_throughput(
+        df: pd.DataFrame,
+        # total_decode: int
+    ) -> float:
     # 총 토큰 수 = input_length(존재 시) + decode_length
     total_input = df.get("input_length", pd.Series(0)).sum()
     total_decode = df["decode_length"].sum()
@@ -75,42 +98,59 @@ def compute_throughput(df: pd.DataFrame) -> float:
     return total_tokens / wall_time if wall_time and total_tokens else 0.0
 
 def _extract_percentile_ratio_lists(
-    df: pd.DataFrame, percentiles: List[int]
+    df: pd.DataFrame, percentiles: List[int], total_decode:int
 ) -> List[List[float]]:
-    """For each percentile, return a list of Pxx/SLO ratios (one per request)."""
-    lists = [[] for _ in percentiles]
-    if {"time_between_tokens", "slo_threshold"}.issubset(df.columns):
-        # system-wise SLO if all thresholds equal
+    """
+    For each percentile, return a list of Pxx/SLO ratios (one per request).
+    
+    Request‐wise: use (expected_output_length − 1) as the index into that request’s
+    sorted time_between_tokens list; if out‐of‐range, append np.nan.
+    
+    System‐wide: sum all (expected_output_length − 1) across requests to get a total
+    index length, then index into the flattened, sorted union of all time_between_tokens.
+    """
+    import numpy as np
+    
+    lists: List[List[float]] = [[] for _ in percentiles]
+    # need expected_output_length column as well
+    if {"time_between_tokens", "slo_threshold", "expected_output_length"}.issubset(df.columns):
+        # parse thresholds
         thr_vals = pd.to_numeric(df["slo_threshold"], errors="coerce").to_numpy()
-        if np.all(thr_vals == thr_vals[0]):
-            flat_tbt = np.concatenate(df["time_between_tokens"].values)
-            thr = thr_vals[0]
-            for idx, pct in enumerate(percentiles):
-                px = np.percentile(flat_tbt, pct)
+        
+        flat = []
+        total_intervals = 0
+        for tbt_list, exp_len in zip(df["time_between_tokens"], df["expected_output_length"]):
+            if not tbt_list or exp_len is None:
+                continue
+            flat.extend(tbt_list)
+            total_intervals += int(exp_len) - 1
+        if total_intervals <= 0:
+            return lists
+        sorted_flat = sorted(flat)
+        thr = thr_vals[0]
+        for idx, pct in enumerate(percentiles):
+            pos = int(np.floor(pct/100 * total_decode))
+            if 0 <= pos < len(sorted_flat):
+                px = sorted_flat[pos]
                 lists[idx] = [px / thr]
-        else:
-            for tbt_list, thr_item in zip(df["time_between_tokens"], df["slo_threshold"]):
-                if not tbt_list: 
-                    continue
-                thr_val = np.mean(thr_item) if isinstance(thr_item, (list, tuple, np.ndarray)) else float(thr_item)
-                if thr_val <= 0:
-                    continue
-                for idx, pct in enumerate(percentiles):
-                    px = np.percentile(tbt_list, pct)
-                    lists[idx].append(px / thr_val)
+                if px == 100:
+                    lists[idx] = [np.nan]
+                # print(f"{px}, {thr}, {lists[idx]}")
+            else:
+                lists[idx] = [np.nan]
     return lists
 
-def extract_metrics(input_base_path):
+def extract_metrics(input_base_path, total_decode):
     output_df = load_output_metrics(Path(input_base_path, "outputs.csv"))
     slo_df = pd.read_csv(Path(input_base_path, "slo_violation.csv"))
 
-    tpot_slo = _extract_request_tpot_attainment(output_df, slo_df)
-    tbt_slo = _extract_token_slo_attainment(output_df, slo_df)
+    tpot_slo = _extract_request_tpot_attainment(output_df, slo_df, total_decode)
+    tbt_slo = _extract_token_slo_attainment(output_df, slo_df, total_decode)
     throughput = compute_throughput(output_df)
 
     slo_thr = pd.to_numeric(output_df["slo_threshold"], errors="coerce").to_numpy().mean()
 
-    pct_lists = _extract_percentile_ratio_lists(output_df, [90, 95, 99])
+    pct_lists = _extract_percentile_ratio_lists(output_df, [90, 95, 99], total_decode)
     ratio_means = [np.mean(lst) if lst else 0.0 for lst in pct_lists]
     p90_ratio, p95_ratio, p99_ratio = ratio_means
 
@@ -220,6 +260,57 @@ def extract_metrics(input_base_path):
 
 # output_csv = input_paths[0].parent / "summerize.csv"
 
+REFERENCE_ROOT = Path("/home/heelim/vllm/benchmark/selected_traces")
+
+def make_summerize(input_paths: list):
+    results = []
+    for path in input_paths:
+        slo = path.parts[-3].replace('slo', '')
+        method = path.parts[-2]
+        trace_metric = path.name  # 'both_static_low'
+        trace, metric = trace_metric.rsplit('_', 1)
+
+        ref_json = REFERENCE_ROOT / f"{path.name}.json"
+
+        if not ref_json.exists():
+            # log.warning(f"reference JSON missing: {ref_json}")
+            return
+
+        with open(ref_json, "r") as f:
+            reference = json.load(f)
+        ref_reqs = reference.get("requests", {})
+
+        total_decode = 0
+        for id in range(len(ref_reqs)):
+            total_decode += ref_reqs[f"request_{id}"]["output_length"]
+
+        # print(f"{trace} {metric}")
+
+        # extract_metrics(path) -> (tpot_slo, tbt_slo, throughput, slo_thr, p90, p95, p99)
+        tpot_slo, tbt_slo, throughput, slo_thr, p90_ratio, p95_ratio, p99_ratio = extract_metrics(path, total_decode)
+        results.append({
+            'slo': slo,
+            'method': method,
+            'trace': trace,
+            'metric': metric,
+            'tpot_attainment': tpot_slo,
+            'tbt_attainment': tbt_slo,
+            'throughput_tokens_per_sec': throughput,
+            'slo_threshold_mean': slo_thr,
+            'p90_ratio': p90_ratio,
+            'p95_ratio': p95_ratio,
+            'p99_ratio': p99_ratio,
+        })
+
+    # DataFrame 생성 및 저장
+    df_result = pd.DataFrame(results)
+    df_result.to_csv(OUTPUT_CSV, index=False, encoding='utf-8-sig')
+    for i in input_paths:
+        print(f"{i}")
+    print(f"Aggregated CSV saved to {OUTPUT_CSV}")
+    print()
+
+
 import pandas as pd
 from pathlib import Path
 
@@ -227,8 +318,35 @@ from pathlib import Path
 # 설정: paper_main_exp 아래 모든 slo/<scale>/<method>/<trace_metric> 경로 자동 수집
 BASE_DIR = Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp")
 
+
+input_base_paths = [
+    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1/NoPrefetch")
+]
+
+if len(input_base_paths) > 0:
+    
+    for method_dir in input_base_paths:
+        input_paths = []    
+        OUTPUT_CSV = method_dir / "summerize.csv"
+
+        # 각 trace_metric 디렉터리
+        for trace_dir in sorted(method_dir.iterdir(), key=lambda p: p.name):
+            if not trace_dir.is_dir():
+                continue
+            outputs_csv = trace_dir / 'outputs.csv'
+            slo_violation = trace_dir / 'slo_violation.csv'
+            if outputs_csv.exists() and slo_violation.exists():
+                input_paths.append(trace_dir)
+        
+        make_summerize(input_paths)
+    
+    sys.exit()  # 프로그램을 완전히 종료
+
 # ──────────────────────────────────────────────────────
 # input_paths: slo 디렉터리 하위의 method별 trace_metric 디렉터리 필터링
+    
+print("Run All Start")
+print()
 for slo_dir in BASE_DIR.glob('slo*'):
     if not slo_dir.is_dir():
         continue
@@ -238,6 +356,12 @@ for slo_dir in BASE_DIR.glob('slo*'):
 
         if not method_dir.is_dir():
             continue
+
+        skip_paths = [
+        # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/NoPrefetch/both_dyn_mid"),
+        # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/NoPrefetch/token_dyn_low"),
+        # 추가하고 싶은 경로들...
+        ]
         # 각 trace_metric 디렉터리
         for trace_dir in sorted(method_dir.iterdir(), key=lambda p: p.name):
             if not trace_dir.is_dir():
@@ -245,7 +369,11 @@ for slo_dir in BASE_DIR.glob('slo*'):
             outputs_csv = trace_dir / 'outputs.csv'
             slo_violation = trace_dir / 'slo_violation.csv'
             if outputs_csv.exists() and slo_violation.exists():
+                if outputs_csv.parent in skip_paths:
+                    continue
                 input_paths.append(trace_dir)
+        
+        make_summerize(input_paths)
 
         # ──────────────────────────────────────────────────────
         # 추출 함수가 정의된 모듈 import
@@ -253,33 +381,5 @@ for slo_dir in BASE_DIR.glob('slo*'):
 
         # ──────────────────────────────────────────────────────
         # 데이터 수집 및 저장
-        results = []
-        for path in input_paths:
-            slo = path.parts[-3].replace('slo', '')
-            method = path.parts[-2]
-            trace_metric = path.name  # 'both_static_low'
-            trace, metric = trace_metric.rsplit('_', 1)
+        
 
-            # extract_metrics(path) -> (tpot_slo, tbt_slo, throughput, slo_thr, p90, p95, p99)
-            tpot_slo, tbt_slo, throughput, slo_thr, p90_ratio, p95_ratio, p99_ratio = extract_metrics(path)
-            results.append({
-                'slo': slo,
-                'method': method,
-                'trace': trace,
-                'metric': metric,
-                'tpot_attainment': tpot_slo,
-                'tbt_attainment': tbt_slo,
-                'throughput_tokens_per_sec': throughput,
-                'slo_threshold_mean': slo_thr,
-                'p90_ratio': p90_ratio,
-                'p95_ratio': p95_ratio,
-                'p99_ratio': p99_ratio,
-            })
-
-        # DataFrame 생성 및 저장
-        df_result = pd.DataFrame(results)
-        df_result.to_csv(OUTPUT_CSV, index=False, encoding='utf-8-sig')
-        for i in input_paths:
-            print(f"{i}")
-        print(f"Aggregated CSV saved to {OUTPUT_CSV}")
-        print()

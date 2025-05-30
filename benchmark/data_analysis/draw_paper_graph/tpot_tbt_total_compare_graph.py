@@ -9,13 +9,17 @@ from pathlib import Path
 trace_list   = ["both_static", "batch_dyn", "token_dyn", "both_dyn"]
 trace_labels = ["(a) Both Static", "(b) Batch dynamic", "(c) Token dynamic", "(d) Both dynamic"]
 
-method_list   = ["NoPrefetch", "Flexgen", "SelectN", "Ours"]
-method_labels = ["No Prefetch", "Flexgen", "Placeholder(SelectN)", "Ours"]
+method_list   = ["NoPrefetch", "Flexgen", "SelectN", 
+                #  "Ours"
+                 ]
+method_labels = ["No Prefetch", "Flexgen", "Placeholder(SelectN)", 
+                #  "Ours"
+                 ]
 
 metric_list   = ["low","mid","high", "veryhigh"]
 metric_labels = ["Low","Mid","High", "Very High"]
 
-slo_scales  = [3.5, 2.5, 1.5]
+slo_scales  = [10, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1]
 slo_labels  = [str(s) for s in slo_scales]
 
 colors = [
@@ -183,5 +187,5 @@ fig.text(0.31, -0.065, "TPOT", ha='center', fontsize=43, weight='bold')
 fig.text(0.715, -0.065, "TBT", ha='center', fontsize=43, weight='bold')
 
 # 저장
-plt.savefig("figures/tpot_tbt_combined.jpg", bbox_inches="tight", dpi=300)
-plt.savefig("figures/tpot_tbt_combined.pdf", bbox_inches="tight")
+plt.savefig("figures/6_2_tpot_tbt_combined.jpg", bbox_inches="tight", dpi=300)
+plt.savefig("figures/6_2_tpot_tbt_combined.pdf", bbox_inches="tight")
