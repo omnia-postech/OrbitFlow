@@ -5,32 +5,6 @@ from pathlib import Path
 import ast
 
 # ───────────────────────────────────────────────
-# 1. percentile→(Pxx/SLO) 리스트 추출 함수
-def extract_percentile_ratio_lists(df: pd.DataFrame, percentiles: list[int]) -> list[list[float]]:
-    """각 퍼센타일에 대해 Pxx/SLO 임계치 비율 리스트 반환."""
-    lists = [[] for _ in percentiles]
-    if {"time_between_tokens", "slo_threshold"}.issubset(df.columns):
-        # system-wise SLO
-        if df["slo_threshold"].nunique() == 1:
-            all_tbt = []
-            for tb in df["time_between_tokens"]:
-                all_tbt.extend(tb if isinstance(tb, (list, tuple, np.ndarray)) else [tb])
-            thr = float(df["slo_threshold"].iloc[0])
-            for i, pct in enumerate(percentiles):
-                px = np.percentile(all_tbt, pct)
-                lists[i].append(px / thr)
-        else:
-            # per-request SLO
-            for tb, thr in zip(df["time_between_tokens"], df["slo_threshold"]):
-                if not isinstance(tb, (list, tuple, np.ndarray)) or thr <= 0:
-                    continue
-                thr_val = float(np.mean(thr)) if isinstance(thr, (list, tuple, np.ndarray)) else float(thr)
-                for i, pct in enumerate(percentiles):
-                    px = np.percentile(tb, pct)
-                    lists[i].append(px / thr_val)
-    return lists
-
-# ───────────────────────────────────────────────
 # 2. CSV 로드 및 synthetic fallback
 def load_metrics(path: Path) -> pd.DataFrame:
     try:
@@ -60,35 +34,57 @@ style = {
 
 # ───────────────────────────────────────────────
 # 3. 플롯 설정
-METHODS       = ["Flexgen", "DeepSpeed", "SelectN", "NoPrefetch", "Ours"]
-METHOD_LABELS = ["Flexgen","DeepSpeed","Placeholder(SelectN)","No Prefetch","Ours"]
-COLORS        = ["#84C8F4", "#C59FDB", "#7CD6A4", "#63D0C2", "#E05A4F"]
-MARKERS       = ["o", "s", "^", "d", "*"]
+method_list   = ["NoPrefetch", "Flexgen", "SelectN", "Ours"]
+method_labels = ["No Prefetch", "Flexgen", "Placeholder(SelectN)", "Ours"]
+colors = [
+    "#84C8F4",  # Soft Sky Blue
+    "#C59FDB",  # Pastel Lavender
+    "#7CD6A4",  # Mint Green
+    # "#63D0C2",  # Aqua Teal
+    "#E05A4F",  # Coral Red
+]
+markers = ['o','s','^',
+        #    'D',
+           'P']
 
-TRACE_LIST  = [
-    "test_fit_static_0",
-    "test_shortshort_enough",
-    "test_shortlong_less"
-] 
-trace_labels  = [
-    "Trace 1",
-    "Trace 2",
-    "Trace 3"
-] 
+TRACE  = "both_dyn"
+
+metric_list   = ["low","mid","high", "veryhigh"]
+metric_labels = ["Low","Mid","High", "Very High"]
+
+sc = 2.5
+
 PERCENTILES  = [90, 95, 99]
 x_positions  = range(len(PERCENTILES))
 
-fig, axes = plt.subplots(1, len(trace_labels), figsize=(19, 6), sharey=True)
+fig, axes = plt.subplots(1, len(metric_list), figsize=(21, 5), sharey=True)
 plt.subplots_adjust(
     left=0.05, right=0.99, top=0.93, bottom=0.07,
     wspace=0.075, hspace=0.1
 )
 
-for ax, trace, trace_label in zip(axes, TRACE_LIST, trace_labels):
-    for method, label, color, marker in zip(METHODS, METHOD_LABELS, COLORS, MARKERS):
-        path = Path(f"/home/heelim/vllm/outputs/benchmark/exp/{method}/{trace}/output.csv")
-        df = load_metrics(path)
-        ratio_lists = extract_percentile_ratio_lists(df, PERCENTILES)
+for ax, metric, metric_label in zip(axes, metric_list, metric_labels):
+    for method, label, color, marker in zip(method_list, method_labels, colors, markers):
+        summary_path = Path(
+            f"/home/heelim/vllm/outputs/benchmark/paper_main_exp/"
+            f"slo{sc}/{method}/summerize.csv"
+        )
+        ratio_lists = []
+        try:
+            summary_df = pd.read_csv(summary_path)
+            row = summary_df[
+                (summary_df["slo"] == sc) &
+                (summary_df["method"] == method) &
+                (summary_df["trace"] == TRACE) &
+                (summary_df["metric"] == metric)
+            ]
+            ratio_lists.append(float(row["p90_ratio"].iloc[0]))
+            ratio_lists.append(float(row["p95_ratio"].iloc[0]))
+            ratio_lists.append(float(row["p99_ratio"].iloc[0]))
+        except :
+            ratio_lists.append(0)
+            ratio_lists.append(0)
+            ratio_lists.append(0)
 
         ax.plot(
             x_positions,
@@ -99,11 +95,12 @@ for ax, trace, trace_label in zip(axes, TRACE_LIST, trace_labels):
             linewidth=3,
             markersize=10
         )
-    ax.set_title(trace_label, fontsize=35)
+    ax.set_title(metric_label, fontsize=35)
     ax.set_xticks(x_positions)
     ax.set_xticklabels([f"p{p}" for p in PERCENTILES], fontsize=35)
     # ax.set_xlabel("Percentile", fontsize=35)
     # ax.grid(alpha=0.3)
+
 
 # y축 tick 간격 0.5로 설정, 글자 크기 30
 max_ylim = axes[0].get_ylim()[1]
@@ -125,9 +122,9 @@ for ax in axes:
 
 # 공통 y축 레이블 & 범례
 axes[0].set_ylabel("SLO Scale", fontsize=35, labelpad=15)
-fig.legend(METHOD_LABELS, loc='upper center', 
+fig.legend(method_labels, loc='upper center', 
            bbox_to_anchor=(0.5, 1.3),
-           ncol=len(METHOD_LABELS) / 2 + 1,
+           ncol=len(method_labels),
            fontsize=35, frameon=False)
 
 # 폴더 생성 및 저장

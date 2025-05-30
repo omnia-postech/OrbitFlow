@@ -1,198 +1,102 @@
 import pandas as pd
-import matplotlib.pyplot as plt
 import numpy as np
-import ast
+import matplotlib.pyplot as plt
 from pathlib import Path
-from typing import List
+import sys
 
-# 실험 이름
-EXP = "Debug"
+# ───────────────────────────────────────────────
+# 실험 설정
+trace          = "both_static"
+method_list    = ["OursMinusPause", "NoDeposit", "DistNSingle", 
+                  "UniformDist", "BatchDimOnly", "Base"]
+method_labels  = ["No Pause", "No Deposit", "DistNSingle", 
+                  "Uniform Distance", "Batch Dimension Only", "Best Baseline"]
+metric_list    = ["low", "mid", "high", "veryhigh"]
+metric_labels  = ["Low", "Mid", "High", "Very High"]
+slo_scales     = [5.5, 4.5, 3.5, 2.5, 1.5]
+slo_labels     = [str(s) for s in slo_scales]
 
-# 설정
+colors   = ["#84C8F4", "#C59FDB", "#7CD6A4", "#63D0C2", "#FAC07D", "#E05A4F"]
+markers  = ['o', 's', '^', 'D', '*', 'P']
 
-method_list = ["NoPause", "NoDeposit", "NoSolver", 
-               "UniformDist", "BatchDimOnly", "Base"]
-method_labels = ["No Pause", "No Deposit", "No Solver", 
-                 "Uniform Distance", "Batch Dimension Only", "Best Baseline"]
-
-slo_scales = [4, 3, 2, 1]  # 내림차순]
-slo_labels    = [str(s) for s in slo_scales]   # x축 표기용 문자열
-
-colors = [
-    "#84C8F4",  # Soft Sky Blue (연하늘색)
-    "#C59FDB",  # Pastel Lavender (연보라색)
-    "#7CD6A4",  # Mint Green (민트색)
-    "#63D0C2",  # Aqua Teal (청록색)
-    "#FAC07D",  # 파스텔 오렌지
-    "#E05A4F",  # Coral Red (산호빛 빨강)
-]
-markers = [
-    'o',  # Flexgen
-    's',  # DeepSpeed
-    '^',  # SelectN
-    'D',  # NoPrefetch
-    '*',
-    'P'   # Ours
-]
-
-font_size = 22
 style = {
-    "line": {
-        "linewidth": 3, 
-        "markersize": 10
-    },
-    "tick": {
-        "fontsize": 18
-    },
-    "label": {
-        "fontsize": font_size,
-        "labelpad":5,
-        # "weight": "bold"
-    },
-    "title": {
-        "fontsize": font_size,
-        "weight": "bold",
-        "pad": 10
-    },
-    "legend": {
-        "fontsize": font_size,
-        # "loc": "upper center",
-        # "bbox_to_anchor": (0.5, 1.2),
-        # "ncol": len(method_list)
-    },
-    "spine": {
-        "color": "black",
-        "alpha": 0.7,
-        "linestyle": "-",
-        "linewidth": 1.5
-    },
-    "grid": {
-        "color": "gray",
-        "linestyle": "-",
-        "linewidth": 2.5,
-        "alpha": 1
-    },
-    "text": {
-        "fontsize": 14,
-        "weight": "bold"
-    },
+    "line":   {"linewidth":3, "markersize":10},
+    "tick":   {"labelsize":18},
+    "label":  {"fontsize":22, "labelpad":5},
+    "title":  {"fontsize":22, "weight":"bold", "pad":10},
+    "legend": {"fontsize":22},
+    "spine":  {"color":"black","alpha":0.7,"linewidth":1.5},
 }
 
-def load_metrics(csv_path: str | Path) -> pd.DataFrame:
-    df = pd.read_csv(csv_path)
-    numeric_cols: List[str] = [
-        "arrival_time", "first_scheduled_time", "finished_time",
-        "time_to_first_token", "slo_threshold", "slo_violations",
-        "stall_duration", "decode_length", "end_to_end_time", "decode_time", "time_per_output_token"
-    ]
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-    for col in ("time_between_tokens", "stall_times", "stall_durations"):
-        if col in df.columns:
-            df[col] = df[col].apply(
-                lambda x: ast.literal_eval(x) if isinstance(x, str) else x
-            )
-    return df
-    
-def slo_tpot(df: pd.DataFrame) -> float:
-    required_cols = {"end_to_end_time", "num_output_tokens", "slo_threshold"}
-    if not required_cols.issubset(df.columns):
-        print(f"Missing columns: {required_cols - set(df.columns)}")
-        return 0.0
+base_dir = Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp")
 
-    end_to_end_time = pd.to_numeric(df["end_to_end_time"], errors="coerce")
-    num_tokens = pd.to_numeric(df["num_output_tokens"], errors="coerce")
-    tpot = end_to_end_time / num_tokens
+# ───────────────────────────────────────────────
+# 플롯 준비: 메트릭별 서브플롯
+fig, axes = plt.subplots(1, len(metric_list),
+                         figsize=(21, 5),
+                         sharey=True)
+plt.subplots_adjust(left=0.07, right=0.99,
+                    top=0.88, bottom=0.12,
+                    wspace=0.25)
 
-    slo_threshold = df["slo_threshold"].apply(
-        lambda x: np.mean(x) if isinstance(x, (list, np.ndarray)) else x
-    )
-    slo_threshold = pd.to_numeric(slo_threshold, errors="coerce")
-
-    valid = ~tpot.isna() & ~slo_threshold.isna()
-    attained = (tpot[valid] <= slo_threshold[valid]).sum()
-    total = valid.sum()
-
-    return attained / total * 100 if total else 0.0
-
-def slo_tbt(df: pd.DataFrame) -> float:
-    decoded = df["decode_length"].sum()
-    viol    = df["slo_violations"].sum()
-
-    return (decoded-viol) / decoded * 100
-
-def load_metrics_for_slo_scales(method: str, slo_scales: List[str], is_tpot: bool, k: int) -> List[float]:
-    results = []
-    for i, scale in enumerate(slo_scales):
-        path = Path(f"/exp/{method}/trace_metric/{scale}/output.csv")
-        try:
-            if not path.exists():
-                raise FileNotFoundError(f"Not found: {path}")
-            df = load_metrics(path)
-            if is_tpot:
-                results.append(slo_tpot(df))
-            else:
-                results.append(slo_tbt(df))
-        except Exception as e:
-            print(f"[SLO 경고] {method} - {scale}: {e}")
-            results.append(np.random.random() * 100)  # 기본값 설정
-            results.sort()
-    return results
-
-fig, axes = plt.subplots(1, 2, figsize=(18, 6))
-plt.subplots_adjust(
-    left=0.05, right=0.99, top=0.93, bottom=0.07,
-    wspace=0.3, hspace=0.1
-)
-
-for ax, (is_tpot, ylabel) in zip(
-        axes,
-        [(False,  "TBT SLO Attainment (%)"),
-         (True, "TPOT SLO Attainment (%)")]):
-    i = 0
+for i, metric in enumerate(metric_list):
+    ax = axes[i]
     for method, label, color, marker in zip(method_list, method_labels, colors, markers):
-        y_vals = load_metrics_for_slo_scales(method, slo_scales, is_tpot, i)
-        ax.plot(
-            slo_scales, y_vals,
-            **style["line"],
-            marker=markers[i], color=colors[i], linestyle='-',
-            label=method_labels[i], 
-        )
-        i += 1
+        y_vals = []
+        for sc in slo_scales:
+            summary_path = base_dir / f"slo{sc}" / method / "summerize.csv"
+            if summary_path.exists():
+                df_sum = pd.read_csv(summary_path)
+                sel = df_sum[
+                    (df_sum["slo"]    == sc) &
+                    (df_sum["method"] == method) &
+                    (df_sum["trace"]  == trace) &
+                    (df_sum["metric"] == metric)
+                ]
+                y_vals.append(float(sel["tbt_attainment"].iloc[0]) if len(sel)==1 else 0.0)
+                print(f"[Open] summary: {summary_path}")
+            else:
+                # print(f"[Warning] Missing summary: {summary_path}", file=sys.stderr)
+                y_vals.append(0.0)
+        ax.plot(slo_scales, y_vals,
+                label=label, color=color, marker=marker,
+                **style["line"])
 
-    # ax.set_title(title, fontsize=30, pad=12)
-    ax.set_xlabel("SLO Scale", fontsize=30, labelpad=10)
-    ax.set_ylabel(ylabel, fontsize=30, labelpad=8)
-
+    # 축 및 눈금 설정
     ax.set_xticks(slo_scales)
-    ax.set_xticklabels([str(s) for s in slo_scales], fontsize=30)
-
-    # ax.tick_params(axis='y', labelsize=30)
-
-    ax.tick_params(axis='x', which='both', length=0, labelsize=30, pad=10)
-    ax.tick_params(axis='y', which='both', length=0, labelsize=30, pad=5)
+    ax.set_xticklabels(slo_labels, fontsize=style["tick"]["labelsize"])
+    ax.tick_params(axis='x', length=0, labelsize=style["tick"]["labelsize"])
+    ax.tick_params(axis='y', length=5, labelsize=style["tick"]["labelsize"])
     ax.set_ylim(-5, 105)
-
     ax.set_yticks([0, 50, 100])
-    ax.set_yticklabels(['0', '50', '100'])
 
-    # ax.xaxis.grid(True, **style["grid"])
-    ax.set_axisbelow(True)
+    # 제목 및 레이블
+    ax.set_title(metric_labels[i], **style["title"])
+    if i == 0:
+        ax.set_ylabel("TBT SLO Attainment (%)", **style["label"])
+    # if i == len(metric_list) - 1:
+    ax.set_xlabel("SLO Scale", **style["label"])
 
+    # 스파인 스타일
     for spine in ax.spines.values():
         spine.set_edgecolor(style["spine"]["color"])
         spine.set_alpha(style["spine"]["alpha"])
         spine.set_linewidth(style["spine"]["linewidth"])
-# 범례: 큰 그래프 상단 중앙
-fig.legend(
-    method_labels, loc="upper center",
-    bbox_to_anchor=(0.5, 1.25), 
-    ncol=len(method_labels)/2,
-    fontsize=30, frameon=False
-)
 
-# 전체 레이아웃 및 저장
-# plt.tight_layout(rect=[0,0,1,0.95])
-plt.savefig("figures/6_3_design_validation.jpg", format='jpg', bbox_inches="tight")
-plt.savefig("figures/6_3_design_validation.pdf", format='pdf', bbox_inches="tight")
+# 범례
+handles, labels = axes[0].get_legend_handles_labels()
+fig.legend(handles, labels,
+           loc="upper center",
+           bbox_to_anchor=(0.5, 1.2),
+           ncol=6,
+           **style["legend"])
+
+# 전체 y축 텍스트
+# fig.text(0.02, 0.5, "Memory Pressure",
+#          va='center', rotation='vertical',
+#          fontsize=style["label"]["fontsize"])
+
+# 저장
+
+plt.savefig("figures/6_3_design_validation.jpg", bbox_inches="tight")
+plt.savefig("figures/6_3_design_validation.pdf", bbox_inches="tight")

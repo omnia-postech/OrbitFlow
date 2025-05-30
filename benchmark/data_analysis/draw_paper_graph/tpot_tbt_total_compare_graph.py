@@ -9,23 +9,25 @@ from pathlib import Path
 trace_list   = ["both_static", "batch_dyn", "token_dyn", "both_dyn"]
 trace_labels = ["(a) Both Static", "(b) Batch dynamic", "(c) Token dynamic", "(d) Both dynamic"]
 
-method_list   = ["NoPrefetch", "Flexgen", "SelectN", "DistNSingle", "Ours"]
-method_labels = ["No Prefetch", "Flexgen", "Placeholder(SelectN)", "DistNSingle", "Ours"]
+method_list   = ["NoPrefetch", "Flexgen", "SelectN", "Ours"]
+method_labels = ["No Prefetch", "Flexgen", "Placeholder(SelectN)", "Ours"]
 
 metric_list   = ["low","mid","high", "veryhigh"]
 metric_labels = ["Low","Mid","High", "Very High"]
 
-slo_scales  = [5.5, 4.5, 3.5, 2.5, 1.5, 0.5]
+slo_scales  = [3.5, 2.5, 1.5]
 slo_labels  = [str(s) for s in slo_scales]
 
 colors = [
     "#84C8F4",  # Soft Sky Blue
     "#C59FDB",  # Pastel Lavender
     "#7CD6A4",  # Mint Green
-    "#63D0C2",  # Aqua Teal
+    # "#63D0C2",  # Aqua Teal
     "#E05A4F",  # Coral Red
 ]
-markers = ['o','s','^','D','P']
+markers = ['o','s','^',
+        #    'D',
+           'P']
 
 font_size = 35
 style = {
