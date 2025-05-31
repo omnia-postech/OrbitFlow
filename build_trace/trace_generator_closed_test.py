@@ -289,7 +289,7 @@ def build_case3_traces():
 # 4. Case-4  (token-static, batch-static)
 # ─────────────────────────────────────────────────────────────
 def build_case4_traces():
-    rts   = _mk_short_output_types("C4", in_bins=(256, 1024, 4096))
+    rts   = _mk_short_output_types("C4", in_bins=(128, 256, 512, 1024, 2048), out_low = 70, out_high = 80)
     probs = {rt: 1/len(rts) for rt in rts}
 
     req_json = BASE_DIR / "token_static_batch_static.json"
@@ -317,7 +317,7 @@ def build_case4_traces():
                       for r in trace.requests.values()]
 
         stem_base  = f"C4_{_slug_ap(ap)}"
-        out_dir    = BASE_DIR / "token_static_batch_static"
+        out_dir    = BASE_DIR / "token_static_batch_static_v2"
         out_dir.mkdir(parents=True, exist_ok=True)
 
         for lvl, cfg in LEVEL_SPEC.items():
@@ -347,7 +347,7 @@ def build_case4_traces():
 # ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     BASE_DIR.mkdir(parents=True, exist_ok=True)
-    random.seed(42)
+    random.seed(41)
     # build_case2_traces()
-    build_case3_traces()
-    # build_case4_traces()
+    # build_case3_traces()
+    build_case4_traces()
