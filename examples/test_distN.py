@@ -662,6 +662,7 @@ def main(configs):
     # prompts = trace.requests if hasattr(trace, "requests") else trace.samples
     static_batching = configs.static_batching if hasattr(configs, "static_batching") else False
     removable_cache = configs.removable_cache if hasattr(configs, "removable_cache") else False
+    uniform_solver = configs.uniform_solver if hasattr(configs, "uniform_solver") else False
 
     if configs.profiled_results:
         p_path = configs.profiled_results
@@ -686,6 +687,7 @@ def main(configs):
     print(f"pause_and_resume: {pause_and_resume}")
     print(f"static_batching: {static_batching}")
     print(f"removable_cache: {removable_cache}")
+    print(f"uniform_solver: {uniform_solver}")
     
     if flattened_cache and num_gpu_blocks_override is not None:
         num_gpu_blocks_override *= 32 
@@ -709,6 +711,7 @@ def main(configs):
         flattened_cache=flattened_cache,
         merge_prefetch_buffer=merge_prefetch_buffer,
         pause_and_resume=pause_and_resume,
+        uniform_solver=uniform_solver,
         removable_cache=removable_cache,
         # static_batching=static_batching,
         disable_sliding_window=True,
@@ -761,6 +764,10 @@ if __name__ == "__main__":
                         action="store_true",
                         default=False,
                         help="whether to use use token deposit")
+    parser.add_argument("--uniform-solver",
+                        action="store_true",
+                        default=False,
+                        help="whether to use use uniform decision making sovler")
     parser.add_argument("--removable-cache",
                         action="store_true",
                         default=False,
