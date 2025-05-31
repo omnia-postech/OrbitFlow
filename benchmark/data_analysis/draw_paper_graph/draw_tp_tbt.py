@@ -16,9 +16,21 @@ metric_labels  = ["Low", "Mid", "High", "Very High"]
 slo_scales     = [5.5, 4.5, 3.5, 2.5, 1.5]
 slo_labels     = [str(s) for s in slo_scales]
 
-colors   = ["#84C8F4", "#C59FDB", "#7CD6A4", "#63D0C2", 
-            # "#FAC07D", 
-            "#E05A4F"]
+colors = [
+    "#84C8F4",  # Soft Sky Blue
+    "#7CD6A4",  # Mint Green
+    "#63D0C2",  # Aqua Teal
+    "#C59FDB",  # Pastel Lavender
+    "#E05A4F",  # Coral Red
+]
+colors = [
+    "#4DA6FF",  # Sky Blue
+    "#3CC58F",  # Mint Green
+    "#9F79C1",  # Lavender Purple
+    "#C59FDB",  # Pastel Lavender
+    "#FF8C69"   # Coral Orange
+]
+
 markers  = ['o', 's', '^', 'D', 
             # '*', 
             'P']
@@ -62,12 +74,12 @@ for i, metric in enumerate(metric_list):
             else:
                 # print(f"[Warning] Missing summary: {summary_path}", file=sys.stderr)
                 y_vals.append(0.0)
-        ax.plot(slo_scales, y_vals,
+        ax.plot(slo_labels, y_vals,
                 label=label, color=color, marker=marker,
                 **style["line"])
 
     # 축 및 눈금 설정
-    ax.set_xticks(slo_scales)
+    ax.set_xticks(slo_labels)
     ax.set_xticklabels(slo_labels, fontsize=style["tick"]["labelsize"])
     ax.tick_params(axis='x', length=0, labelsize=style["tick"]["labelsize"])
     ax.tick_params(axis='y', length=5, labelsize=style["tick"]["labelsize"])

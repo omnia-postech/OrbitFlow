@@ -3,31 +3,35 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.gridspec import GridSpec
 from pathlib import Path
+import numpy as np
 
 # ───────────────────────────────────────────────
 # 1. 설정 -------------------------------------------------------
 trace_list   = ["both_static", "batch_dyn", "token_dyn", "both_dyn"]
 trace_labels = ["(a) Both Static", "(b) Batch dynamic", "(c) Token dynamic", "(d) Both dynamic"]
 
-method_list   = ["NoPrefetch", "Flexgen", "SelectN", 
-                #  "Ours"
+method_list   = [
+    # "NoPrefetch",
+    "Flexgen", "SelectN", 
+                 "Ours"
                  ]
-method_labels = ["No Prefetch", "Flexgen", "Placeholder(SelectN)", 
-                #  "Ours"
+method_labels = [
+    # "No Prefetch",
+      "Flexgen", "Placeholder(SelectN)", 
+                 "Ours"
                  ]
 
 metric_list   = ["low","mid","high", "veryhigh"]
 metric_labels = ["Low","Mid","High", "Very High"]
 
-slo_scales  = [10, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1]
+slo_scales  = [10, 4.5, 3.5, 2.5, 1.5, 1]
 slo_labels  = [str(s) for s in slo_scales]
 
 colors = [
-    "#84C8F4",  # Soft Sky Blue
-    "#C59FDB",  # Pastel Lavender
-    "#7CD6A4",  # Mint Green
-    # "#63D0C2",  # Aqua Teal
-    "#E05A4F",  # Coral Red
+    "#4DA6FF",  # Sky Blue
+    # "#3CC58F",  # Mint Green
+    "#9F79C1",  # Lavender Purple
+    "#FF8C69"   # Coral Orange
 ]
 markers = ['o','s','^',
         #    'D',
@@ -90,12 +94,25 @@ for r, metric in enumerate(metric_list):
                     if len(row) == 1:
                         yL.append(float(row["tpot_attainment"].iloc[0]))
                     else:
-                        yL.append(0.0)
+                        yL.append(np.nan)
                 except Exception as e:
                     print(f"[No File] {e}")
-                    yL.append(0.0)
+                    yL.append(np.nan)
             ax_L.plot(slo_labels, yL, **style["line"],
                       marker=markers[m], color=colors[m], label=method_labels[m])
+
+            # ———— 마커(점)만 찍기: yL이 np.nan인 위치만 골라서 Y=0 에 점을 찍음
+            #     1) yL_zero: yL이 NaN인 곳은 0, 그렇지 않은 곳은 NaN으로 두기
+            yL_zero = [0 if np.isnan(val) else np.nan for val in yL]
+            #     2) marker만 찍으므로 linestyle="" (또는 'None') 지정
+            ax_L.plot(
+                slo_labels,
+                yL_zero,
+                linestyle="",            # 선은 그리지 않고, 마커만 표시
+                marker=markers[m],
+                color=colors[m],
+                markersize=15
+            )
 
             # TBT 데이터
             yR = []
@@ -115,11 +132,22 @@ for r, metric in enumerate(metric_list):
                     if len(row) == 1:
                         yR.append(float(row["tbt_attainment"].iloc[0]))
                     else:
-                        yR.append(0.0)
+                        yR.append(np.nan)
                 except:
-                    yR.append(0.0)
+                    yR.append(np.nan)
             ax_R.plot(slo_labels, yR, **style["line"],
                       marker=markers[m], color=colors[m])
+            
+            yR_zero = [0 if np.isnan(val) else np.nan for val in yR]
+            ax_R.plot(
+                slo_labels,
+                yR_zero,
+                linestyle="",
+                marker=markers[m],
+                color=colors[m],
+                markersize=15
+            )
+            
 
         # 공통 축 스타일
         for ax in (ax_L, ax_R):

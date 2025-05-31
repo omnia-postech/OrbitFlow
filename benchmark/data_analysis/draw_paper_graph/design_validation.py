@@ -13,10 +13,20 @@ method_labels  = ["No Pause", "No Deposit", "DistNSingle",
                   "Uniform Distance", "Batch Dimension Only", "Best Baseline"]
 metric_list    = ["low", "mid", "high", "veryhigh"]
 metric_labels  = ["Low", "Mid", "High", "Very High"]
-slo_scales     = [5.5, 4.5, 3.5, 2.5, 1.5]
+slo_scales     = [10, 4.5, 3.5, 2.5, 1]
 slo_labels     = [str(s) for s in slo_scales]
 
 colors   = ["#84C8F4", "#C59FDB", "#7CD6A4", "#63D0C2", "#FAC07D", "#E05A4F"]
+
+colors = [
+    "#4DA6FF",  # Sky Blue
+    "#3CC58F",  # Mint Green
+    "#9F79C1",  # Lavender Purple
+    "#C59FDB",  # Pastel Lavender
+    "#FAC07D",
+    "#FF8C69"   # Coral Orange
+]
+
 markers  = ['o', 's', '^', 'D', '*', 'P']
 
 style = {

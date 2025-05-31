@@ -12,12 +12,14 @@ import argparse
 ROOT_DIR = Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp")
 REFERENCE_ROOT = Path("/home/heelim/vllm/benchmark/selected_traces")
 
+Log_DIR = Path("/home/sychoy/vllm/outputs/benchmark/paper_main_exp")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(levelname)s: %(message)s",
     handlers=[
         logging.StreamHandler(),                                   # 콘솔
-        logging.FileHandler(ROOT_DIR / "slo_violation_batch.log",  # 파일
+        logging.FileHandler(Log_DIR / "slo_violation_batch.log",  # 파일
                             mode="a", encoding="utf-8")
     ],
 )
@@ -255,10 +257,10 @@ def main():
         if csv_path.parent in skip_paths:
             print(f"Skipping {csv_path}")
             continue  # 이 경로는 넘김
-        try:
+        # try:
             process_experiment(csv_path.parent)
-        except Exception as e:
-            log.error(f"{csv_path} ")
+        # except Exception as e:
+            # log.error(f"{csv_path} ")
 
 if __name__ == "__main__":
     main()

@@ -6,22 +6,27 @@ from pathlib import Path
 # ───────────────────────────────────────────────
 # 설정
 trace = "both_dyn"
-method_list   = ["NoPrefetch", "Flexgen", "SelectN", "Ours"]
-method_labels = ["No Prefetch", "Flexgen", "Placeholder(SelectN)", "Ours"]
+method_list   = ["Flexgen", "SelectN", "Ours"]
+method_labels = ["Flexgen", "Placeholder(SelectN)", "Ours"]
 metric_list   = ["low","mid","high","veryhigh"]
 metric_labels = ["Low","Mid","High","Very High"]
 
-slo_scales = [5.5, 4.5, 3.5, 2.5, 1.5]
+slo_scales = [10, 4.5, 3.5, 2.5, 1]
 slo_labels = [str(s) for s in slo_scales]
 
-colors  = ["#84C8F4","#C59FDB","#7CD6A4","#E05A4F"]
+colors = [
+    "#4DA6FF",  # Sky Blue
+    # "#3CC58F",  # Mint Green
+    "#9F79C1",  # Lavender Purple
+    "#FF8C69"   # Coral Orange
+]
 markers = ['o','s','^','P']
 
 style = {
     "line":   {"linewidth":3,"markersize":10},
-    "tick":   {"fontsize":18},
-    "label":  {"fontsize":19,"labelpad":5},
-    "legend": {"fontsize":19},
+    "tick":   {"fontsize":20},
+    "label":  {"fontsize":30,"labelpad":5},
+    "legend": {"fontsize":30},
     "spine":  {"color":"black","alpha":0.7,"linewidth":1.5},
 }
 
@@ -34,7 +39,7 @@ fig, axes = plt.subplots(1, len(metric_list),
                          sharey=False)
 plt.subplots_adjust(left=0.07, right=0.99,
                     top=0.80, bottom=0.12,
-                    wspace=0.25)
+                    wspace=0.2)
 
 # ───────────────────────────────────────────────
 for i, metric in enumerate(metric_list):
@@ -57,14 +62,14 @@ for i, metric in enumerate(metric_list):
                 )
             else:
                 thr_vals.append(0.0)
-        ax.plot(slo_scales, thr_vals,
+        ax.plot(slo_labels, thr_vals,
                 label=method_labels[m],
                 color=colors[m],
                 marker=markers[m],
                 **style["line"])
 
     # x축 설정
-    ax.set_xticks(slo_scales)
+    ax.set_xticks(slo_labels)
     ax.set_xticklabels(slo_labels,
                        fontsize=style["tick"]["fontsize"])
     ax.tick_params(axis='x', length=0)
@@ -80,7 +85,7 @@ for i, metric in enumerate(metric_list):
 
     # y축 레이블: 첫 서브플롯에만
     if i == 0:
-        ax.set_ylabel("Throughput\n(tokens/s)",
+        ax.set_ylabel("Throughput(tokens/s)",
                       fontsize=style["label"]["fontsize"],
                       labelpad=10)
 
@@ -100,9 +105,11 @@ for i, metric in enumerate(metric_list):
 handles, labels = axes[0].get_legend_handles_labels()
 fig.legend(handles, labels,
            loc="upper center",
-           bbox_to_anchor=(0.5, 1.05),
+           bbox_to_anchor=(0.5, 1.1),
            ncol=len(method_list),
-           **style["legend"])
+           **style["legend"],
+           frameon=False
+           )
 
 # 전체 y축 텍스트
 # fig.text(0.02, 0.5, "Memory Pressure",
