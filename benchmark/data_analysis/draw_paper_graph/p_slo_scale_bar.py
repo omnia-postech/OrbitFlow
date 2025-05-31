@@ -7,8 +7,8 @@ import sys
 # ───────────────────────────────────────────────
 # 1. 설정
 TRACE        = "both_dyn"
-METHODS      = ["NoPrefetch", "Flexgen", "SelectN", "Ours"]
-METHOD_LABS  = ["No Prefetch", "Flexgen", "SelectN", "Ours"]
+METHODS      = ["Flexgen", "SelectN", "Ours"]
+METHOD_LABS  = ["Flexgen", "SelectN", "Ours"]
 METRICS      = ["low", "mid", "high", "veryhigh"]
 METRIC_LABS  = ["Low", "Mid", "High", "Very High"]
 SLO_SCALES   = [3.5, 2.5, 1.5]
@@ -18,20 +18,27 @@ BASE_DIR     = Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp")
 style = {
     "line":   {"linewidth":3, "markersize":10},
     "spine":  {"color":"black", "alpha":0.7, "linewidth":1.5},
-    "title":  {"fontsize":25, "pad":8},
-    "label":  {"fontsize":25, "labelpad":8},
-    "tick":   {"labelsize":25},
-    "legend": {"fontsize":25},
+    "title":  {"fontsize":32, "pad":8},
+    "label":  {"fontsize":30, "labelpad":8},
+    "legend": {"fontsize":32},
+    "tick":   {"labelsize":28},
 }
 
-colors  = ["#84C8F4","#C59FDB","#7CD6A4","#E05A4F"]
+colors = [
+    "#4DA6FF",  # Sky Blue
+    # "#3CC58F",  # Mint Green
+    "#9F79C1",  # Lavender Purple
+    "#FF8C69"   # Coral Orange
+]
+
+
 bar_width = 0.8 / len(METHODS)
 positions = np.arange(len(SLO_SCALES))
 
 # ───────────────────────────────────────────────
 # 2. 플롯 초기화 (sharey=False)
 fig, axes = plt.subplots(1, len(METRICS), figsize=(22, 5), sharey=False)
-plt.subplots_adjust(left=0.06, right=0.98, top=0.88, bottom=0.12, wspace=0.24)
+plt.subplots_adjust(left=0.06, right=0.98, top=0.88, bottom=0.12, wspace=0.2)
 
 # ───────────────────────────────────────────────
 # 3. 서브플롯별 데이터 플로팅 (바 차트)
@@ -50,7 +57,7 @@ for ax, metric, title in zip(axes, METRICS, METRIC_LABS):
                     (df_sum["metric"] == metric)
                 ]
                 if len(sel) == 1:
-                    p99 = float(sel["p99_ratio"].fillna(7).iloc[0])
+                    p99 = float(sel["p99_ratio"].fillna(0).iloc[0])
                 else :
                     print(f"[Warning] Missing {summary_path}", file=sys.stderr)
             else:
@@ -104,10 +111,12 @@ for ax, metric, title in zip(axes, METRICS, METRIC_LABS):
 # 4. 범례 (상단 중앙으로 올리기)
 handles, labels = axes[0].get_legend_handles_labels()
 fig.legend(handles, labels,
-           loc="upper center", bbox_to_anchor=(0.5, 1.15),
-           ncol=len(METHODS), **style["legend"])
+           loc="upper center", bbox_to_anchor=(0.5, 1.2),
+           ncol=len(METHODS), **style["legend"],
+           frameon=False
+           )
 
-fig.suptitle("P99", fontsize=30, y=1.25)
+fig.suptitle("P99", fontsize=35, y=1.25)
 
 # ───────────────────────────────────────────────
 # 5. 저장
