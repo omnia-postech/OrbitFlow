@@ -10,25 +10,34 @@ trace_list   = ["both_static", "batch_dyn", "token_dyn", "both_dyn"]
 trace_labels = ["(a) Both Static", "(b) Batch dynamic", "(c) Token dynamic", "(d) Both dynamic"]
 
 method_list   = ["NoPrefetch", "Flexgen", "SelectN", 
-                #  "Ours"
+                 "Ours"
                  ]
-method_labels = ["No Prefetch", "Flexgen", "Placeholder(SelectN)", 
-                #  "Ours"
+method_labels = ["No Prefetch", "Flexgen", "SelectN", 
+                 "Ours"
                  ]
 
 metric_list   = ["low","mid","high", "veryhigh"]
 metric_labels = ["Low","Mid","High", "Very High"]
 
-slo_scales  = [10, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1]
+slo_scales  = [10, 4.5, 3.5, 2.5, 1.5, 1]
 slo_labels  = [str(s) for s in slo_scales]
 
+# colors = [
+#     "#84C8F4",  # Soft Sky Blue
+#     "#C59FDB",  # Pastel Lavender
+#     "#7CD6A4",  # Mint Green
+#     "#63D0C2",  # Aqua Teal
+#     "#E05A4F",  # Coral Red
+# ]
+
 colors = [
-    "#84C8F4",  # Soft Sky Blue
-    "#C59FDB",  # Pastel Lavender
-    "#7CD6A4",  # Mint Green
-    # "#63D0C2",  # Aqua Teal
-    "#E05A4F",  # Coral Red
+    "#4DA6FF",  # Sky Blue
+    "#3CC58F",  # Mint Green
+    "#9F79C1",  # Lavender Purple
+    "#FF8C69"   # Coral Orange
 ]
+
+
 markers = ['o','s','^',
         #    'D',
            'P']
