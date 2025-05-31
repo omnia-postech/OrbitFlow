@@ -39,7 +39,7 @@ Solving non-convex MIQCP
 Variable types: 4 continuous, 1 integer (0 binary)
 Found heuristic solution: objective 0.1213928
 
-Explored 0 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.121393 
@@ -154,7 +154,7 @@ Found heuristic solution: objective 0.1957070
 
 Root relaxation: interrupted, 0 iterations, 0.00 seconds (0.00 work units)
 
-Explored 1 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
+Explored 1 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.195707 
@@ -226,7 +226,7 @@ Cutting planes:
   RLT: 8
   Relax-and-lift: 1
 
-Explored 1 nodes (35 simplex iterations) in 0.04 seconds (0.00 work units)
+Explored 1 nodes (35 simplex iterations) in 0.01 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 0
@@ -790,7 +790,7 @@ Solving non-convex MIQCP
 Variable types: 4 continuous, 1 integer (0 binary)
 Found heuristic solution: objective 0.1489009
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.148901 
@@ -900,7 +900,7 @@ Solving non-convex MIQCP
 Variable types: 6 continuous, 1 integer (0 binary)
 Found heuristic solution: objective 15.9642016
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 15.9642 
@@ -1002,7 +1002,7 @@ Coefficient statistics:
   GenCon rhs range [1e+06, 1e+06]
   GenCon coe range [1e+00, 1e+00]
 Presolve removed 28 rows and 43 columns
-Presolve time: 0.01s
+Presolve time: 0.00s
 Presolved: 43 rows, 52 columns, 263 nonzeros
 Presolved model has 8 bilinear constraint(s)
 
@@ -1028,7 +1028,7 @@ Cutting planes:
   Mod-K: 1
   RLT: 2
 
-Explored 1 nodes (57 simplex iterations) in 0.04 seconds (0.00 work units)
+Explored 1 nodes (57 simplex iterations) in 0.01 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 0
@@ -1080,7 +1080,7 @@ Root relaxation: objective 8.247677e-02, 11 iterations, 0.00 seconds (0.00 work 
      0     0    0.08248    0    5    0.08394    0.08248  1.74%     -    0s
      0     0          -    0         0.08394    0.08394  0.00%     -    0s
 
-Explored 1 nodes (13 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 1 nodes (13 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.083938 
@@ -1215,7 +1215,7 @@ Cutting planes:
   Implied bound: 1
   Clique: 1
 
-Explored 4 nodes (21 simplex iterations) in 0.02 seconds (0.00 work units)
+Explored 4 nodes (21 simplex iterations) in 0.01 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 5: 0.0455114 0.0456776 0.0456855 ... 0.046746
@@ -1845,7 +1845,7 @@ Root relaxation: objective 1.321293e-01, 23 iterations, 0.00 seconds (0.00 work 
      0     0    0.13213    0    5    0.13363    0.13213  1.12%     -    0s
      0     0          -    0         0.13363    0.13363  0.00%     -    0s
 
-Explored 1 nodes (28 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 1 nodes (28 simplex iterations) in 0.01 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.133629 
@@ -2162,7 +2162,7 @@ Cutting planes:
   MIR: 5
   RLT: 2
 
-Explored 1 nodes (46 simplex iterations) in 0.04 seconds (0.00 work units)
+Explored 1 nodes (46 simplex iterations) in 0.01 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 3: 7.63127 8.59414 9.81128 
@@ -2296,7 +2296,7 @@ Cutting planes:
   RLT: 5
   Relax-and-lift: 2
 
-Explored 1 nodes (169 simplex iterations) in 0.05 seconds (0.01 work units)
+Explored 1 nodes (169 simplex iterations) in 0.03 seconds (0.01 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 0
@@ -2357,7 +2357,7 @@ Cutting planes:
   RLT: 5
   Relax-and-lift: 1
 
-Explored 1 nodes (41 simplex iterations) in 0.02 seconds (0.00 work units)
+Explored 1 nodes (41 simplex iterations) in 0.01 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 0
@@ -2470,7 +2470,7 @@ Cutting planes:
   Gomory: 1
   RLT: 5
 
-Explored 1 nodes (9 simplex iterations) in 0.04 seconds (0.00 work units)
+Explored 1 nodes (9 simplex iterations) in 0.03 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 0
@@ -2647,7 +2647,7 @@ Cutting planes:
   Gomory: 1
   RLT: 1
 
-Explored 1 nodes (15 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 1 nodes (15 simplex iterations) in 0.04 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 0
@@ -2785,7 +2785,7 @@ Cutting planes:
   RLT: 2
   Relax-and-lift: 1
 
-Explored 1 nodes (97 simplex iterations) in 0.04 seconds (0.00 work units)
+Explored 1 nodes (97 simplex iterations) in 0.01 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 2: 8.01464 8.40176 
@@ -2841,7 +2841,7 @@ Solving non-convex MIQCP
 Variable types: 4 continuous, 1 integer (0 binary)
 Found heuristic solution: objective 0.4123715
 
-Explored 0 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.412371 
@@ -3002,7 +3002,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 22 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -3156,7 +3156,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 22 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -3317,7 +3317,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 22 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -3617,7 +3617,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 22 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -3778,7 +3778,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 22 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -4034,7 +4034,7 @@ Found heuristic solution: objective 0.0880817
 
 Root relaxation: interrupted, 0 iterations, 0.00 seconds (0.00 work units)
 
-Explored 1 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 1 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.0880817 
@@ -4184,7 +4184,7 @@ Found heuristic solution: objective 0.5019849
 
 Root relaxation: interrupted, 0 iterations, 0.00 seconds (0.00 work units)
 
-Explored 1 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 1 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.501985 
@@ -4569,7 +4569,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 21 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -4718,7 +4718,7 @@ Coefficient statistics:
 Presolve removed 5 rows and 28 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -4855,7 +4855,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 23 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -5014,7 +5014,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 23 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -5293,7 +5293,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 23 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -5448,7 +5448,7 @@ Coefficient statistics:
 Presolve removed 5 rows and 29 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.02 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -5729,7 +5729,7 @@ Coefficient statistics:
 Presolve removed 5 rows and 28 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -5810,7 +5810,7 @@ Solving non-convex MIQCP
 Variable types: 6 continuous, 1 integer (0 binary)
 Found heuristic solution: objective 45.7648153
 
-Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 45.7648 
@@ -5859,7 +5859,7 @@ Coefficient statistics:
 Presolve removed 5 rows and 28 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -5940,7 +5940,7 @@ Solving non-convex MIQCP
 Variable types: 6 continuous, 1 integer (0 binary)
 Found heuristic solution: objective 44.1053696
 
-Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 44.1054 
@@ -6090,7 +6090,7 @@ Found heuristic solution: objective 0.3833667
 
 Root relaxation: interrupted, 0 iterations, 0.00 seconds (0.00 work units)
 
-Explored 1 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 1 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.383367 
@@ -6139,7 +6139,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 23 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -6288,7 +6288,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 23 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -6393,7 +6393,7 @@ Found heuristic solution: objective 0.1708424
 
 Root relaxation: interrupted, 0 iterations, 0.00 seconds (0.00 work units)
 
-Explored 1 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
+Explored 1 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.170842 
@@ -6442,7 +6442,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 23 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -6701,7 +6701,7 @@ Found heuristic solution: objective 0.0593230
 
 Root relaxation: interrupted, 0 iterations, 0.00 seconds (0.00 work units)
 
-Explored 1 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 1 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.059323 
@@ -6750,7 +6750,7 @@ Coefficient statistics:
 Presolve removed 5 rows and 29 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.02 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -6887,7 +6887,7 @@ Coefficient statistics:
 Presolve removed 5 rows and 29 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -6924,7 +6924,7 @@ Coefficient statistics:
 Presolve removed 6 rows and 22 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -7513,7 +7513,7 @@ Found heuristic solution: objective 0.1532716
 
 Root relaxation: interrupted, 0 iterations, 0.00 seconds (0.00 work units)
 
-Explored 1 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
+Explored 1 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.153272 
@@ -7562,7 +7562,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 24 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -7663,7 +7663,7 @@ Found heuristic solution: objective 0.4286917
 
 Root relaxation: interrupted, 0 iterations, 0.00 seconds (0.00 work units)
 
-Explored 1 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 1 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.428692 
@@ -8630,7 +8630,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 24 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.02 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -8735,7 +8735,7 @@ Found heuristic solution: objective 0.2044847
 
 Root relaxation: interrupted, 0 iterations, 0.00 seconds (0.00 work units)
 
-Explored 1 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 1 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.204485 
@@ -8977,7 +8977,7 @@ Coefficient statistics:
 Presolve removed 5 rows and 17 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -9072,7 +9072,7 @@ Coefficient statistics:
 Presolve removed 6 rows and 24 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -9209,7 +9209,7 @@ Solving non-convex MIQCP
 Variable types: 4 continuous, 1 integer (0 binary)
 Found heuristic solution: objective 15.5176288
 
-Explored 0 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 15.5176 
@@ -9613,7 +9613,7 @@ Found heuristic solution: objective 0.0607805
 
 Root relaxation: interrupted, 0 iterations, 0.00 seconds (0.00 work units)
 
-Explored 1 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 1 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.0607805 
@@ -9824,7 +9824,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 22 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.02 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -9979,7 +9979,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 22 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -10079,7 +10079,7 @@ Found heuristic solution: objective 0.1829993
 
 Root relaxation: interrupted, 0 iterations, 0.00 seconds (0.00 work units)
 
-Explored 1 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 1 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.182999 
@@ -10128,7 +10128,7 @@ Coefficient statistics:
 Presolve removed 5 rows and 29 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -10265,7 +10265,7 @@ Coefficient statistics:
 Presolve removed 5 rows and 29 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.02 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -10543,7 +10543,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 24 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.02 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -10626,7 +10626,7 @@ Found heuristic solution: objective 0.7732452
 
 Root relaxation: interrupted, 0 iterations, 0.00 seconds (0.00 work units)
 
-Explored 1 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
+Explored 1 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.773245 
@@ -10675,7 +10675,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 24 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -11117,7 +11117,7 @@ Coefficient statistics:
 Presolve removed 9 rows and 30 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -11246,7 +11246,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 24 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.02 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -11350,7 +11350,7 @@ Found heuristic solution: objective 0.1622774
 
 Root relaxation: interrupted, 0 iterations, 0.00 seconds (0.00 work units)
 
-Explored 1 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 1 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.162277 
@@ -11865,7 +11865,7 @@ Coefficient statistics:
 Presolve removed 7 rows and 28 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -11994,7 +11994,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 24 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -12247,7 +12247,7 @@ Found heuristic solution: objective 0.3756619
 
 Root relaxation: interrupted, 0 iterations, 0.00 seconds (0.00 work units)
 
-Explored 1 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 1 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.375662 
@@ -12296,7 +12296,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 24 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -12482,7 +12482,7 @@ Coefficient statistics:
 Presolve removed 5 rows and 17 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -12683,7 +12683,7 @@ Found heuristic solution: objective 0.0604841
 
 Root relaxation: interrupted, 0 iterations, 0.00 seconds (0.00 work units)
 
-Explored 1 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 1 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.0604841 
@@ -12732,7 +12732,7 @@ Coefficient statistics:
 Presolve removed 4 rows and 24 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -12836,7 +12836,7 @@ Found heuristic solution: objective 0.1797036
 
 Root relaxation: interrupted, 0 iterations, 0.00 seconds (0.00 work units)
 
-Explored 1 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 1 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 0.179704 
@@ -13247,7 +13247,7 @@ Root relaxation: objective 3.171033e+01, 12 iterations, 0.00 seconds (0.00 work 
 Cutting planes:
   RLT: 4
 
-Explored 1 nodes (12 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 1 nodes (12 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 0
@@ -13435,7 +13435,7 @@ Coefficient statistics:
 Presolve removed 10 rows and 24 columns
 Presolve time: 0.00s
 
-Explored 0 nodes (0 simplex iterations) in 0.03 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 1 (of 64 available processors)
 
 Solution count 0
@@ -13479,7 +13479,7 @@ Solving non-convex MIQCP
 Variable types: 4 continuous, 1 integer (0 binary)
 Found heuristic solution: objective 15.7662687
 
-Explored 0 nodes (0 simplex iterations) in 0.01 seconds (0.00 work units)
+Explored 0 nodes (0 simplex iterations) in 0.00 seconds (0.00 work units)
 Thread count was 32 (of 64 available processors)
 
 Solution count 1: 15.7663 
@@ -13560,8 +13560,8 @@ Failure (due to memory limits): 5
 All requests completed. Now saving CSV...
 Metrics saved to /home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1.5/Ours/batch_dyn_veryhigh/outputs.csv
 ------Wall-clock stats (non-overlapping)------
-Overall runtime  : 880.765 s
-Prefill time     : 532459 tokens over 750.493 s ( 709.48 t/s)
-Decode  time     : 1676 tokens over 130.270 s ( 12.87 t/s)
+Overall runtime  : 818.522 s
+Prefill time     : 532459 tokens over 736.802 s ( 722.66 t/s)
+Decode  time     : 1676 tokens over 81.719 s ( 20.51 t/s)
 Preemptions  time     : 0
-Overall solver time: 4.852 s
+Overall solver time: 3.969 s
