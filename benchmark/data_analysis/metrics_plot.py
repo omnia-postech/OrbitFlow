@@ -364,7 +364,7 @@ def plot_time_between_tokens_wallclock_proxy(df: pd.DataFrame, csv_path: Path) -
     ax.set_ylabel("Per-token latency Δt (s)")
     ax.set_title("TBT w/o solver (colored by request)")
     ax.grid(True, linewidth=0.3)
-    ax.set_ylim(0, 0.5)
+    ax.set_ylim(0, 0.1)
 
     # Place legend outside plot if up to ten entries; otherwise inside upper right
     if df.shape[0] <= 10:
@@ -378,7 +378,6 @@ def plot_time_between_tokens_wallclock_proxy(df: pd.DataFrame, csv_path: Path) -
     fig.savefig(out_file, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return out_file
-
 
 def plot_tbt_relerr(df: pd.DataFrame, csv_path: Path) -> Path:
     """
@@ -482,7 +481,7 @@ def main(argv: List[str] | None = None) -> None:
     argv = argv or sys.argv[1:]
     valid = {
         "stats", "tbt", "tbt_wc",
-        "tbt_err", "tbt_err_wc"          # NEW
+        "tbt_err", "tbt_err_wc"
     }
     if len(argv) != 2 or argv[0] not in valid:
         _usage()
@@ -521,3 +520,4 @@ def main(argv: List[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
+    

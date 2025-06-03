@@ -12,6 +12,8 @@ import argparse
 ROOT_DIR = Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp")
 REFERENCE_ROOT = Path("/home/heelim/vllm/benchmark/selected_traces")
 
+Fix = True
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(levelname)s: %(message)s",
@@ -104,6 +106,10 @@ def process_experiment(exp_dir: Path):
     results = []
 
     total_req_len = len(ref_reqs)
+    
+    if Fix:
+        total_req_len = max(int(str(rid).split("_")[-1]) for rid in df["request_id"].unique()) + 1
+        log.warning(f"Fixing total_req_len: (from {len(ref_reqs)})")
 
     for id in range(total_req_len):
         ref_len = ref_reqs[f"request_{id}"]["output_length"]

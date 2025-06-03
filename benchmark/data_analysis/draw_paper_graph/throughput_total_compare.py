@@ -7,11 +7,11 @@ from pathlib import Path
 # 설정
 trace = "both_dyn"
 method_list   = ["Flexgen", "SelectN", "Ours"]
-method_labels = ["Flexgen", "Placeholder(SelectN)", "Ours"]
+method_labels = ["Flexgen", "Placeholder(SelectN)", "OrbitFlow"]
 metric_list   = ["low","mid","high","veryhigh"]
 metric_labels = ["Low","Mid","High","Very High"]
 
-slo_scales = [10, 4.5, 3.5, 2.5, 1]
+slo_scales = [10, 4.5, 3.5, 2.5, 1.5, 1]
 slo_labels = [str(s) for s in slo_scales]
 
 colors = [

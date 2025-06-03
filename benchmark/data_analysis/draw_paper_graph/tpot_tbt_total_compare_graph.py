@@ -7,52 +7,27 @@ import numpy as np
 
 # ───────────────────────────────────────────────
 # 1. 설정 -------------------------------------------------------
-trace_list   = ["both_static", "batch_dyn", "token_dyn", "both_dyn"]
-trace_labels = ["(a) Both Static", "(b) Batch dynamic", "(c) Token dynamic", "(d) Both dynamic"]
+trace_list   = ["both_static", "token_dyn", "both_dyn"]
+trace_labels = ["(a) Both Static",  "(b) Token dynamic", "(c) Both dynamic"]
 
-method_list   = [
-    # "NoPrefetch",
-    "Flexgen", "SelectN", 
-                 "Ours"
-                 ]
-method_labels = [
-    # "No Prefetch",
-      "Flexgen", "Placeholder(SelectN)", 
-                 "Ours"
-                 ]
+method_list   = ["Flexgen", "SelectN", "Ours"]
+method_labels = ["FlexGen", "SLO-aware Offloading", "OrbitFlow"]
 
-metric_list   = ["low","mid","high", "veryhigh"]
-metric_labels = ["Low","Mid","High", "Very High"]
+metric_list   = ["low","mid","high"]
+metric_labels = ["Low","Mid","High"]
 
 slo_scales  = [10, 4.5, 3.5, 2.5, 1.5, 1]
 slo_labels  = [str(s) for s in slo_scales]
 
-# colors = [
-#     "#84C8F4",  # Soft Sky Blue
-#     "#C59FDB",  # Pastel Lavender
-#     "#7CD6A4",  # Mint Green
-#     "#63D0C2",  # Aqua Teal
-#     "#E05A4F",  # Coral Red
-# ]
+colors = ["#4DA6FF", "#9F79C1", "#FF8C69"]
+markers = ['o','s','^']
 
-colors = [
-    "#4DA6FF",  # Sky Blue
-    # "#3CC58F",  # Mint Green
-    "#9F79C1",  # Lavender Purple
-    "#FF8C69"   # Coral Orange
-]
-
-
-markers = ['o','s','^',
-        #    'D',
-           'P']
-
-font_size = 35
+font_size = 40
 style = {
     "line":   {"linewidth":4,"markersize":15},
     "tick":   {"fontsize":30},
     "label":  {"fontsize":font_size,"labelpad":5},
-    "legend": {"fontsize":font_size},
+    "legend": {"fontsize":font_size * 1.3},
     "spine": {
         "color": "black",
         "alpha": 0.7,
@@ -60,6 +35,9 @@ style = {
         "linewidth": 2
     },
 }
+
+# 🔽 Legend용 90% 기준선 객체 생성
+threshold_line = Line2D([0], [0], color='gray', ls='--', lw=style["line"]["linewidth"], label="SLO 90%")
 
 # ───────────────────────────────────────────────
 # 2. Figure & GridSpec ---------------------------
@@ -108,17 +86,17 @@ for r, metric in enumerate(metric_list):
                 except Exception as e:
                     print(f"[No File] {e}")
                     yL.append(np.nan)
+
+            print(f"[TPOT] trace={trace}, metric={metric}, method={method_labels[m]}: {yL}")
+
             ax_L.plot(slo_labels, yL, **style["line"],
                       marker=markers[m], color=colors[m], label=method_labels[m])
 
-            # ———— 마커(점)만 찍기: yL이 np.nan인 위치만 골라서 Y=0 에 점을 찍음
-            #     1) yL_zero: yL이 NaN인 곳은 0, 그렇지 않은 곳은 NaN으로 두기
             yL_zero = [0 if np.isnan(val) else np.nan for val in yL]
-            #     2) marker만 찍으므로 linestyle="" (또는 'None') 지정
             ax_L.plot(
                 slo_labels,
                 yL_zero,
-                linestyle="",            # 선은 그리지 않고, 마커만 표시
+                linestyle="",
                 marker=markers[m],
                 color=colors[m],
                 markersize=15
@@ -145,6 +123,9 @@ for r, metric in enumerate(metric_list):
                         yR.append(np.nan)
                 except:
                     yR.append(np.nan)
+
+            print(f"[TBT ] trace={trace}, metric={metric}, method={method_labels[m]}: {yR}")
+
             ax_R.plot(slo_labels, yR, **style["line"],
                       marker=markers[m], color=colors[m])
             
@@ -157,14 +138,13 @@ for r, metric in enumerate(metric_list):
                 color=colors[m],
                 markersize=15
             )
-            
 
         # 공통 축 스타일
         for ax in (ax_L, ax_R):
             ax.set_xticks(slo_labels)
             ax.set_xticklabels(slo_labels)
             ax.set_ylim(-5, 105)
-            ax.axhline(90, color="gray", ls="--", lw=style["line"]["linewidth"])
+            ax.axhline(90, color="gray", ls="--", lw=style["line"]["linewidth"], label="SLO 90%")
             ax.tick_params(axis='both',
                            labelsize=style["tick"]["fontsize"],
                            length=0)
@@ -184,11 +164,11 @@ for r, metric in enumerate(metric_list):
             ax_L.set_ylabel(metric_labels[r], **style["label"])
 
         # TBT y-label (마지막 열의 오른쪽)
-        if c == N_TRACE - 1:
-            ax_R.set_ylabel("SLO attainment (%)", fontsize=30,
-                            labelpad=style["label"]["labelpad"],
-                            rotation=270)
-            ax_R.yaxis.set_label_coords(1.28, 0.5)
+        # if c == N_TRACE - 1:
+            # ax_R.set_ylabel("SLO attainment (%)", fontsize=30,
+            #                 labelpad=style["label"]["labelpad"],
+            #                 rotation=270)
+            # ax_R.yaxis.set_label_coords(1.28, 0.5)
 
         # x-label
         if r == N_METRIC - 1:
@@ -201,8 +181,9 @@ for r, metric in enumerate(metric_list):
         if r == N_METRIC - 1:
             for ax, tl in [(ax_L, trace_labels[c]), (ax_R, trace_labels[c])]:
                 ax.text(0.5, -0.45, tl, transform=ax.transAxes,
-                        ha='center', va='top', fontsize=style["label"]["fontsize"])
+                        ha='center', va='top', fontsize=style["label"]["fontsize"] + 10)
 
+# ───────────────────────────────────────────────
 # 스파인 스타일
 for row in axes:
     for ax in row:
@@ -212,17 +193,24 @@ for row in axes:
             spine.set_linewidth(style["spine"]["linewidth"])
 
 # 중앙 구분선 및 범례
-fig.add_artist(Line2D([0.52,0.52], [-0.07,0.9], transform=fig.transFigure,
+fig.add_artist(Line2D([0.52,0.52], [0.1,0.9], transform=fig.transFigure,
                       color="black", lw=2))
+
 handles, labels = axes[0][0].get_legend_handles_labels()
-fig.legend(handles, labels, loc='upper center', ncol=len(method_list),
+# handles.append(threshold_line)
+# labels.append("SLO 90%")
+
+fig.legend(handles, labels, loc='upper center', ncol=len(method_list)+1, bbox_to_anchor=(0.5, 1.02),
            fontsize=style["legend"]["fontsize"], frameon=False)
 
 # 공통 텍스트
-fig.text(0.1, 0.5, "Memory Pressure", va='center',
-         rotation='vertical', fontsize=font_size)
-fig.text(0.31, -0.065, "TPOT", ha='center', fontsize=43, weight='bold')
-fig.text(0.715, -0.065, "TBT", ha='center', fontsize=43, weight='bold')
+fig.text(0.09, 0.5, "Memory Pressure", va='center',
+         rotation='vertical', fontsize=font_size + 15)
+
+fig.text(0.92, 0.5, "SLO Attainment(%)", va='center',
+         rotation=-90, fontsize=font_size + 15)
+fig.text(0.31, 0.90, "TPOT", ha='center', fontsize=50, weight='bold')
+fig.text(0.715, 0.90, "TBT", ha='center', fontsize=50, weight='bold')
 
 # 저장
 plt.savefig("figures/6_2_tpot_tbt_combined.jpg", bbox_inches="tight", dpi=300)

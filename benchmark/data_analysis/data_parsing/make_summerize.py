@@ -157,109 +157,6 @@ def extract_metrics(input_base_path, total_decode):
     return tpot_slo, tbt_slo, throughput, slo_thr, p90_ratio, p95_ratio, p99_ratio
 
 
-# ───────────────────────────────────────────────
-# 3. 입력 경로 리스트 및 출력 파일 경로 (하드코딩)
-# Ours
-# input_paths = [
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Ours/both_static_low"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Ours/both_static_mid"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Ours/both_static_high"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Ours/both_static_veryhigh"),
-
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Ours/batch_dyn_low"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Ours/batch_dyn_mid"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Ours/batch_dyn_high"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Ours/batch_dyn_veryhigh"),
-
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Ours/token_dyn_low"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Ours/token_dyn_mid"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Ours/token_dyn_high"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Ours/token_dyn_veryhigh"),
-
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Ours/both_dyn_low"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Ours/both_dyn_mid"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Ours/both_dyn_high",),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Ours/both_dyn_veryhigh",),
-# ]
-
-# output_csv = input_paths[0].parent / "summerize.csv"
-
-
-# FlexGen
-# input_paths = [
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/DistNSingle_TP/both_static_low"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/DistNSingle_TP/both_static_mid"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/DistNSingle_TP/both_static_high"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/DistNSingle_TP/both_static_veryhigh"),
-
-    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/DistNSingle/batch_dyn_low"),
-    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/DistNSingle/batch_dyn_mid"),
-    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/DistNSingle/batch_dyn_high"),
-    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/DistNSingle/batch_dyn_veryhigh"),
-
-    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/SelectN/token_dyn_low"),
-    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/SelectN/token_dyn_mid"),
-    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/SelectN/token_dyn_high"),
-    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/SelectN/token_dyn_veryhigh"),
-
-    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/Flexgen/both_dyn_low"),
-    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/Flexgen/both_dyn_mid"),
-    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/Flexgen/both_dyn_high"),
-    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/Flexgen/both_dyn_veryhigh"),
-# ]
-
-# output_csv = input_paths[0].parent / "summerize.csv"
-
-# NoPrefetch
-# input_paths = [
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/NoPrefetch/both_static_low"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/NoPrefetch/both_static_mid"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/NoPrefetch/both_static_high"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/NoPrefetch/both_static_veryhigh"),
-
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/NoPrefetch/batch_dyn_low"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/NoPrefetch/batch_dyn_mid"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/NoPrefetch/batch_dyn_high"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/NoPrefetch/batch_dyn_veryhigh"),
-
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/NoPrefetch/token_dyn_low"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/NoPrefetch/token_dyn_mid"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/NoPrefetch/token_dyn_high"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/NoPrefetch/token_dyn_veryhigh"),
-
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/NoPrefetch/both_dyn_low"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/NoPrefetch/both_dyn_mid"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/NoPrefetch/both_dyn_high"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/NoPrefetch/both_dyn_veryhigh"),
-# ]
-
-# output_csv = input_paths[0].parent / "summerize.csv"
-
-# SelectN
-# input_paths = [
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/SelectN/both_static_low"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/SelectN/both_static_mid"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/SelectN/both_static_high"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/SelectN/both_static_veryhigh"),
-
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/SelectN/batch_dyn_low"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/SelectN/batch_dyn_mid"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/SelectN/batch_dyn_high"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/SelectN/batch_dyn_veryhigh"),
-
-    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo4.5/SelectN/token_dyn_low"),
-    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo4.5/SelectN/token_dyn_mid"),
-    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/SelectN/token_dyn_high"),
-    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo4.5/SelectN/token_dyn_veryhigh"),
-
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/SelectN/both_dyn_low"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/SelectN/both_dyn_mid"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/SelectN/both_dyn_high"),
-#     Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo5.5/SelectN/both_dyn_veryhigh"),
-# ]
-
-# output_csv = input_paths[0].parent / "summerize.csv"
-
 REFERENCE_ROOT = Path("/home/heelim/vllm/benchmark/selected_traces")
 
 def make_summerize(input_paths: list):
@@ -320,8 +217,15 @@ BASE_DIR = Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp")
 
 
 input_base_paths = [
+    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1.5/Ours_TP"),
+    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/Ours"),
+    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Ours"),
+    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1.5/Ours")
     # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1/NoPrefetch")
 ]
+
+if len(sys.argv) > 1:
+    input_base_paths = [Path(p) for p in sys.argv[1:] if Path(p).exists()]
 
 if len(input_base_paths) > 0:
     
