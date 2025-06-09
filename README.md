@@ -23,7 +23,7 @@ Outputs (logs, CSVs) are saved in a structured directory.
 1. **Environment**:
    
    - Python 3.11 with vLLM.
-   - CUDA GPU (set `CUDA_VISIBLE_DEVICES=0`).
+   - CUDA GPU (e.g., set `CUDA_VISIBLE_DEVICES=0`).
 
 2. **Directory Structure**:
 
@@ -65,7 +65,7 @@ SLO_RATIO_LIST=(1.5)  # e.g., 1.5, 2.0
 
 ## Creating Custom Traces
 
-You must create your own trace files to simulate specific workloads. Place them in `TRACE_CFG_DIR` (e.g., `benchmark/test_traces/test_best_worst/`) and list their basenames (without `.json`) in `TRACE_LIST`.
+You may create your own trace files to simulate specific workloads or existing traces we made. Place them in `TRACE_CFG_DIR` (e.g., `benchmark/test_traces/test_best_worst/`) and list their basenames (without `.json`) in `TRACE_LIST`.
 
 ### Trace Format
 
@@ -75,7 +75,7 @@ Trace files are JSON objects with the following structure:
 - **max_model_len**: Integer, maximum sequence length the model supports.
 - **num_gpu_blocks_override**: Integer, number of GPU memory blocks to use.
 - **arrival_pattern**: String, defines request arrival distribution (e.g., `BimodalArrival(l1=0.16,l2=0.1,p=0.7,max=888)`).
-- **vocab**: Array of integers, vocabulary range for token generation.
+- **vocab**: (You may ignore this one). Array of integers, vocabulary range for token generation.
 - **peak_batch_blocks**: Integer, maximum GPU blocks needed for the batch.
 - **requests**: Object mapping request IDs to details:
    - **category**: String, request type (e.g., `C2_IN3680-4496_OUT4-32`).
