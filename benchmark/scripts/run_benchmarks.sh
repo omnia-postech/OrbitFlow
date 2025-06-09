@@ -27,14 +27,13 @@ ROOT="/home/heelim/vllm"               # project root
 
 FIGURE_ONLY="${1:-0}"                  # default = 0 (run + plot)
 
-EXP_LIST=(paper_main_exp)              # high-level experiment names
+EXP_LIST=(TestBestAndWorst)              # high-level experiment names
 METHOD_LIST=(Flexgen)                  # see supported_methods.json for keys
-TRACE_LIST=(both_dyn_veryhigh_bs2)     # trace JSONs (basename only)
+TRACE_LIST=(test_shortshort_enough)     # trace JSONs (basename only)
 
-TRACE_CFG_DIR="${ROOT}/benchmark/selected_traces"
+TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/test_best_worst"
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"
-PLOTTER="${ROOT}/benchmark/data_analysis/metrics_plot.py"
 
 SLO_RATIO_LIST=(1.5)                   # e.g. 1.5 2.0 2.5 …
 
@@ -73,19 +72,6 @@ make_logging_cfg() {
     -e '15s#"level": *"INFO"#"level\": \"'"${LOGGING_LEVEL}"'"#' \
     -e '16s#"filename":.*#"filename\": \"'"${run_log}"'"#' \
     "$BASE_LOG" > "$dest"
-}
-
-# ---------------------------------------------------------------------------
-# plot_results <csv_path>
-#   Generates five standard plots for given CSV (stats & TBT)
-# ---------------------------------------------------------------------------
-plot_results() {
-  local csv="$1"
-  python "$PLOTTER" stats      "$csv"
-  python "$PLOTTER" tbt_wc     "$csv"
-  python "$PLOTTER" tbt        "$csv"
-  python "$PLOTTER" tbt_err    "$csv"
-  python "$PLOTTER" tbt_err_wc "$csv"
 }
 
 ###############################################################################
@@ -130,15 +116,6 @@ for SLO in "${SLO_RATIO_LIST[@]}"; do
             "${EXP_ARGS[@]}" \
             --slo-ratio "$SLO" \
             --output-log "${RUN_DIR}/outputs.log"
-        fi
-
-        # 3-e) post-processing (plots)
-        CSV="${RUN_DIR}/outputs.csv"
-        if [[ -f "$CSV" ]]; then
-          echo "    ↳ plotting figures for $(basename "$CSV")"
-          plot_results "$CSV"
-        else
-          echo "    ⚠️  $(basename "$CSV") not found – skipping plots" >&2
         fi
       done
     done

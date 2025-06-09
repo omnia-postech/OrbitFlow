@@ -1,104 +1,144 @@
 #!/usr/bin/env bash
-# set -euo pipefail
+###############################################################################
+# run_benchmarks.sh
+#
+# One-stop script for vLLM benchmark execution **and** figure generation.
+#
+# USAGE
+#   ./run_benchmarks.sh [FIGURE_ONLY]
+#     FIGURE_ONLY = 0 (default) → run + plot
+#     FIGURE_ONLY = 1           → *skip* execution, **only** plot existing CSVs
+#
+# To tweak what gets run (methods, traces, SLOs…), simply edit the CONSTANTS
+# section below – **no other code changes are needed.**
+###############################################################################
+
+set -euo pipefail              # fail fast on any error
+IFS=$'\n\t'                    # safer word-splitting
 
 ###############################################################################
-# CONSTANTS (edit these lists only)                                           #
+# 1. CONSTANTS – edit freely ✏️                                                #
 ###############################################################################
-export CUDA_VISIBLE_DEVICES=3
-export VLLM_CONFIGURE_LOGGING=1
+export CUDA_VISIBLE_DEVICES=0
+export VLLM_CONFIGURE_LOGGING=1        # 0 → minimal, 1 → user-configurable
 
-# LOGGING_LEVEL=DEBUG
-LOGGING_LEVEL=CRITICAL
+LOGGING_LEVEL=CRITICAL                 # CRITICAL│ERROR│WARNING│INFO│DEBUG
+ROOT="/home/heelim/vllm"               # project root
 
-ROOT="/home/heelim/vllm"
+FIGURE_ONLY="${1:-0}"                  # default = 0 (run + plot)
 
-FIGURE_ONLY=$1                      # 0 → 실행 + 그림, 1 → 그림만
-EXP_LIST=(paper_main_exp)
-# METHOD_LIST=(SelectN)
-METHOD_LIST=(Ours)
-TRACE_CFG_DIR="${ROOT}/benchmark/selected_traces/"
-# TRACE_LIST=(bim50_hi_ov78_scaled_debugging)
-# TRACE_LIST=(both_static_low both_static_mid both_static_high both_static_veryhigh)
-TRACE_LIST=(both_dyn_veryhigh_128k)
-# TRACE_LIST=(batch_dyn_low both_static_low batch_dyn_mid both_static_mid batch_dyn_high both_static_high batch_dyn_veryhigh both_static_veryhigh)
-# TRACE_LIST=(token_dyn_low token_dyn_mid token_dyn_high token_dyn_veryhigh)
-# TRACE_LIST=(token_dyn_veryhigh)
+EXP_LIST=(paper_main_exp)              # high-level experiment names
+METHOD_LIST=(Flexgen)                  # see supported_methods.json for keys
+TRACE_LIST=(both_dyn_veryhigh_bs2)     # trace JSONs (basename only)
 
+TRACE_CFG_DIR="${ROOT}/benchmark/selected_traces"
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"
 PLOTTER="${ROOT}/benchmark/data_analysis/metrics_plot.py"
 
-# ★ 실험할 slo_ratio 값들만 여기에 나열하면 됩니다.
-# SLO_RATIO_LIST=(1.5 2.0 2.5 3.0)
-SLO_RATIO_LIST=(2.5)
+SLO_RATIO_LIST=(1.5)                   # e.g. 1.5 2.0 2.5 …
+
 ###############################################################################
-# MAIN LOOP: SLO ➔ EXP ➔ METHOD ➔ TRACE                                      #
+# 2. UTILITY FUNCTIONS                                                         #
 ###############################################################################
-for SLO in "${SLO_RATIO_LIST[@]}"; do
-  echo -e "\n========== SLO_RATIO = ${SLO} =========="
 
-  for EXP in "${EXP_LIST[@]}"; do
-    EXP_OUT="${ROOT}/outputs/benchmark/${EXP}/slo${SLO}"
-    mkdir -p "${EXP_OUT}"
-
-    for METHOD in "${METHOD_LIST[@]}"; do
-      METHOD_OUT="${EXP_OUT}/${METHOD}"
-      mkdir -p "${METHOD_OUT}"
-
-      # ── 1) JSON → EXP_ARGS 배열로 읽어오기 ────────────────────────────────
-      if ! mapfile -t EXP_ARGS < <(
-          python - "$METHOD_CFG_FILE" "$METHOD" <<'PY'
-import json, sys
+# ---------------------------------------------------------------------------
+# load_method_args <method_key>
+#   Reads CLI argument list for <method_key> from supported_methods.json
+#   -> prints an *array* usable in "${array[@]}"
+# ---------------------------------------------------------------------------
+load_method_args() {
+  local key="$1"
+  mapfile -t args < <(
+    python - "$METHOD_CFG_FILE" "$key" <<'PY'
+import json, sys, pathlib, textwrap
 cfg_path, key = sys.argv[1:]
 cfg = json.load(open(cfg_path))
 vals = cfg.get(key)
 if vals is None:
-    print(f"[CFG ERROR] {key} not found", file=sys.stderr); sys.exit(1)
+    sys.exit(f"[CFG ERROR] '{key}' not found in {cfg_path}")
 print("\n".join(vals))
 PY
-      ); then
-          echo "Aborting: failed to obtain CLI args for METHOD=${METHOD}" >&2
-          exit 1
-      fi
+  )
+  echo "${args[@]}"
+}
 
-      # ── 2) SLO별 반복: TRACE마다 실행 ────────────────────────────────────
+# ---------------------------------------------------------------------------
+# make_logging_cfg <dest_json> <run_log_path>
+#   Creates a copy of BASE_LOG with level+filename patched in
+# ---------------------------------------------------------------------------
+make_logging_cfg() {
+  local dest="$1" run_log="$2"
+  sed \
+    -e '15s#"level": *"INFO"#"level\": \"'"${LOGGING_LEVEL}"'"#' \
+    -e '16s#"filename":.*#"filename\": \"'"${run_log}"'"#' \
+    "$BASE_LOG" > "$dest"
+}
+
+# ---------------------------------------------------------------------------
+# plot_results <csv_path>
+#   Generates five standard plots for given CSV (stats & TBT)
+# ---------------------------------------------------------------------------
+plot_results() {
+  local csv="$1"
+  python "$PLOTTER" stats      "$csv"
+  python "$PLOTTER" tbt_wc     "$csv"
+  python "$PLOTTER" tbt        "$csv"
+  python "$PLOTTER" tbt_err    "$csv"
+  python "$PLOTTER" tbt_err_wc "$csv"
+}
+
+###############################################################################
+# 3. MAIN LOOP                                                                 #
+###############################################################################
+for SLO in "${SLO_RATIO_LIST[@]}"; do
+  echo -e "\n================ SLO_RATIO = ${SLO} ================"
+
+  for EXP in "${EXP_LIST[@]}"; do
+    EXP_OUT="${ROOT}/outputs/benchmark/${EXP}/slo${SLO}"
+    mkdir -p "$EXP_OUT"
+
+    for METHOD in "${METHOD_LIST[@]}"; do
+      METHOD_OUT="${EXP_OUT}/${METHOD}"
+      mkdir -p "$METHOD_OUT"
+
+      # 3-a) CLI arguments for this METHOD
+      IFS=$' ' read -r -a EXP_ARGS <<<"$(load_method_args "$METHOD")"
+
       for TRACE in "${TRACE_LIST[@]}"; do
         RUN_DIR="${METHOD_OUT}/${TRACE}"
-        mkdir -p "${RUN_DIR}"
-        : > "${RUN_DIR}/vllm_msg.log"          # fresh per-run log
+        mkdir -p "$RUN_DIR"
+        : > "${RUN_DIR}/vllm_msg.log"      # truncate per-run log
 
-        # ---------- logging JSON **per TRACE** ------------------------------
+        # 3-b) generate per-run logging config
         NEW_LOG="${RUN_DIR}/logging_cfg.json"
-        sed -e '15s#"level": *"INFO"#"level\": \"'"${LOGGING_LEVEL}"'"#' \
-            -e '16s#"filename":.*#"filename\": \"'"${RUN_DIR}/vllm_msg.log"'"#' \
-            "$BASE_LOG" > "$NEW_LOG"
+        make_logging_cfg "$NEW_LOG" "${RUN_DIR}/vllm_msg.log"
         export VLLM_LOGGING_CONFIG_PATH="$NEW_LOG"
 
-        echo ">>> SLO=${SLO}  EXP=${EXP}  METHOD=${METHOD}  TRACE=${TRACE}"
-        printf 'CLI for %s:\n  ' "$METHOD"
-        printf '%q ' "${EXP_ARGS[@]}"; echo -n " --slo-ratio $SLO"; echo
+        # 3-c) pretty banner
+        echo -e ">>> SLO=${SLO} | EXP=${EXP} | METHOD=${METHOD} | TRACE=${TRACE}"
+        printf '    CLI: %q %q --slo-ratio %s\n' \
+               "${EXP_ARGS[@]}" "${TRACE}" "$SLO"
 
-        if ((FIGURE_ONLY)); then
-          echo "  ↳ Skipping execution (FIGURE_ONLY)"
+        # 3-d) run vLLM (unless figure-only)
+        if (( FIGURE_ONLY )); then
+          echo "    ↳ FIGURE_ONLY=1 → skipping execution"
         else
-          echo "  ↳ Running ${METHOD} on ${TRACE} (slo_ratio=${SLO})"
+          echo "    ↳ running..."
           python "${ROOT}/examples/test_distN.py" \
-              --config-file "${TRACE_CFG_DIR}/${TRACE}.json" \
-              "${EXP_ARGS[@]}" \
-              --slo-ratio "$SLO" \
-              --output-log "${RUN_DIR}/outputs.log"
+            --config-file "${TRACE_CFG_DIR}/${TRACE}.json" \
+            "${EXP_ARGS[@]}" \
+            --slo-ratio "$SLO" \
+            --output-log "${RUN_DIR}/outputs.log"
         fi
 
+        # 3-e) post-processing (plots)
         CSV="${RUN_DIR}/outputs.csv"
         if [[ -f "$CSV" ]]; then
-            echo "  ↳ Plotting stats and TBT for $(basename "$CSV")"
-            python "$PLOTTER" stats      "$CSV"
-            python "$PLOTTER" tbt_wc     "$CSV"
-            python "$PLOTTER" tbt        "$CSV"
-            python "$PLOTTER" tbt_err    "$CSV"
-            python "$PLOTTER" tbt_err_wc "$CSV"
+          echo "    ↳ plotting figures for $(basename "$CSV")"
+          plot_results "$CSV"
         else
-            echo "  [WARN] $CSV not found -- skipping plots" >&2
+          echo "    ⚠️  $(basename "$CSV") not found – skipping plots" >&2
         fi
       done
     done
