@@ -13,7 +13,7 @@
         "class": "logging.FileHandler",
         "formatter": "vllm",
         "level": "CRITICAL",
-        "filename": "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1.5/Flexgen/both_dyn_veryhigh_bs2/vllm_msg.log"
+        "filename": "/home/heelim/vllm/outputs/benchmark/TestBestAndWorst/slo1.5/Flexgen/test_shortshort_enough/vllm_msg.log"
       }
     },
     "loggers": {
