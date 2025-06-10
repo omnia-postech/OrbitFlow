@@ -19,7 +19,7 @@ IFS=$'\n\t'                    # safer word-splitting
 ###############################################################################
 # 1. CONSTANTS – edit freely ✏️                                                #
 ###############################################################################
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 export VLLM_CONFIGURE_LOGGING=1        # 0 → minimal, 1 → user-configurable
 
 LOGGING_LEVEL=CRITICAL                 # CRITICAL│ERROR│WARNING│INFO│DEBUG
@@ -28,15 +28,15 @@ ROOT="/home/heelim/vllm"               # project root
 FIGURE_ONLY="${1:-0}"                  # default = 0 (run + plot)
 
 EXP_LIST=(paper_main_exp)              # high-level experiment names
-METHOD_LIST=(Flexgen)                  # see supported_methods.json for keys
-TRACE_LIST=(both_dyn_veryhigh_bs2)     # trace JSONs (basename only)
+METHOD_LIST=(Ours)                  # see supported_methods.json for keys
+TRACE_LIST=(lambda2.0x_cv1)     # trace JSONs (basename only)
 
 TRACE_CFG_DIR="${ROOT}/benchmark/selected_traces"
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"
 PLOTTER="${ROOT}/benchmark/data_analysis/metrics_plot.py"
 
-SLO_RATIO_LIST=(1.5)                   # e.g. 1.5 2.0 2.5 …
+SLO_RATIO_LIST=(2.5 1.5 1)                   # e.g. 1.5 2.0 2.5 …
 
 ###############################################################################
 # 2. UTILITY FUNCTIONS                                                         #
