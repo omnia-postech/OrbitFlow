@@ -849,5 +849,5 @@ fig.legend(
     columnspacing=0.7,
 )
 
-fig.savefig(f"/home/heelim/vllm/benchmark/data_analysis/figures/deposit_combined2.png", dpi=150, bbox_inches="tight")
-fig.savefig(f"/home/heelim/vllm/benchmark/data_analysis/figures/deposit_combined2.pdf", dpi=150, bbox_inches="tight")
+fig.savefig(f"/home/sychoy/vllm/benchmark/data_analysis/figures/deposit_combined2.png", dpi=150, bbox_inches="tight")
+# fig.savefig(f"/home/syco/vllm/benchmark/data_analysis/figures/deposit_combined2.pdf", dpi=150, bbox_inches="tight")
