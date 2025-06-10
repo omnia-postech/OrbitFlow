@@ -576,7 +576,7 @@ def build_sched_save(
     req_dict = {f"request_{i}": dict(input_length=r[1], output_length=r[2]) 
                 for i, r in enumerate(base_reqs)}
     worst_case_blocks = peak_batch_blocks(req_dict, req_data["batch_size"], blk_size)
-    gamma = 0.70  # 70 %
+    gamma = 0.23  # 23 %
     fixed_blocks = max(1, math.ceil(gamma * worst_case_blocks))
     print(f"[capacity] peak={worst_case_blocks}  gamma={gamma}  GPU fixed_blocks={fixed_blocks}")
     # fixed_blocks = 4000  # Fixed GPU block budget (e.g., ~8 GB)
