@@ -1,0 +1,28 @@
+{
+    "version": 1,
+    "disable_existing_loggers": false,
+    "formatters": {
+      "vllm": {
+        "class": "vllm.logging_utils.NewLineFormatter",
+        "format": "%(levelname)s %(asctime)s %(filename)s:%(lineno)d] %(message)s",
+        "datefmt": "%m-%d %H:%M:%S"
+      }
+    },
+    "handlers": {
+      "vllm": {
+        "class": "logging.FileHandler",
+        "formatter": "vllm",
+        "level": "CRITICAL",
+        "filename": "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/Ours/lambda4.0x_cv1/vllm_msg.log"
+      }
+    },
+    "loggers": {
+      "vllm": {
+        "handlers": ["vllm"],
+        "level": "DEBUG",
+        "propagate": false
+      }
+    }
+  }
+
+  
