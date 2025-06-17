@@ -364,7 +364,7 @@ def plot_time_between_tokens_wallclock_proxy(df: pd.DataFrame, csv_path: Path) -
     ax.set_ylabel("Per-token latency Δt (s)")
     ax.set_title("TBT w/o solver (colored by request)")
     ax.grid(True, linewidth=0.3)
-    ax.set_ylim(0, 0.5)
+    ax.set_ylim(0, 0.1)
 
     # Place legend outside plot if up to ten entries; otherwise inside upper right
     if df.shape[0] <= 10:
@@ -379,6 +379,239 @@ def plot_time_between_tokens_wallclock_proxy(df: pd.DataFrame, csv_path: Path) -
     plt.close(fig)
     return out_file
 
+def figure_4_2(df: pd.DataFrame, csv_path: Path) -> Path:
+    """
+    Latency-fit view (top) + token-deposit simulation (bottom).
+
+    Coloured regions in latency panel
+    ---------------------------------
+    • green   – fit is below / on SLO (within budget)
+    • orange  – fit exceeds SLO **but** deposit > 0 (masked stall)
+    • red     – fit exceeds SLO **and** deposit == 0 (visible stall)
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    # ── central font-size definitions ──────────────────────────────────
+    FS_LABEL = 15      # axis-label text
+    FS_TICK  = 15      # axis-tick text
+    FS_NOTE  = 15      # in-figure annotations
+    # ───────────────────────────────────────────────────────────────────
+
+    req_cols = (
+        "arrival_time", "finished_time",
+        "time_to_first_token", "time_between_tokens",
+        "slo_threshold",
+    )
+    missing = [c for c in req_cols if c not in df.columns]
+    if missing:
+        raise KeyError(f"Missing column(s): {missing}")
+
+    t0      = df["arrival_time"].min()           # reference zero (s)
+    palette = list(plt.cm.tab10.colors)
+
+    # -------- figure with three stacked axes -------------------------- #
+    fig, (ax_lat, ax_dep, ax_perc) = plt.subplots(
+        3, 1, figsize=(8, 6),
+        gridspec_kw={"height_ratios": [1, 1, 1], "hspace": 0.25},
+    )
+    ax_dep.sharex(ax_lat)        # share x for the top two only
+
+    ymax_lat, ymax_dep, ymax_perc = 0.0, 0, 0.0
+
+    # ------------------------------------------------------------------ #
+    for idx, (_, row) in enumerate(df.iterrows()):
+        rid        = row["request_id"]
+        color      = palette[idx % 10]
+
+        arrival    = row["arrival_time"]
+        ttf        = row["time_to_first_token"]
+        tbt_list   = row["time_between_tokens"]
+        solver_ts  = eval(row["solver_time"])
+        slo_thr    = row["slo_threshold"]               # s / token
+
+        # ---- gather latency samples ---------------------------------- #
+        xs_req, ys_req = [], []
+        first_tok_wall = arrival + ttf
+        xs_req.append(first_tok_wall - t0)
+        ys_req.append(0.0)                              # ms proxy
+
+        if isinstance(tbt_list, (list, tuple)):
+            cum = first_tok_wall
+            for st, dt in zip(solver_ts, tbt_list):
+                step_time = dt - st if dt - st >= 0.035 else dt
+                cum += step_time
+                xs_req.append(cum - t0)
+                ys_req.append(step_time * 1000)         # s → ms
+
+        if len(xs_req) < 2:
+            continue
+
+        # ---- linear fit --------------------------------------------- #
+        m, b = np.polyfit(xs_req, ys_req, 1)
+        x_min, x_max = xs_req[0], xs_req[-1]
+        xs_fit = np.linspace(x_min, x_max, 300)
+        xs_rel  = xs_fit
+        ys_fit = m * xs_fit + b
+        ax_lat.plot(xs_fit, ys_fit, color=color, lw=1.5,
+                    label=rid if df.shape[0] <= 10 else None)
+
+        # ---- token-deposit simulation (step curve) ------------------- #
+        tok_times = [x_min]                # first token at x_min (fit origin)
+        t_cur = x_min
+        while True:
+            lat_ms = m * t_cur + b
+            lat_s  = max(lat_ms / 1000.0, 1e-9)
+            t_cur += lat_s
+            if t_cur > x_max:
+                break
+            tok_times.append(t_cur)
+        deposit_curve_x, deposit_curve_y = [], []
+
+        def rec(t, d):
+            deposit_curve_x.append(t)
+            deposit_curve_y.append(d)
+        green_cnt  = 0   # latency ≤ SLO
+        orange_cnt = 0   # latency > SLO  and deposit>0   (masked)
+        red_cnt    = 0   # latency > SLO  and deposit==0  (visible)
+
+        deposit = 0
+        emit_t  = tok_times[0] + slo_thr
+        rec(tok_times[0] - 1e-6, 0)
+
+        ti = 0
+        while ti < len(tok_times) or deposit > 0:
+            next_tok  = tok_times[ti] if ti < len(tok_times) else np.inf
+            next_emit = emit_t if deposit > 0 else np.inf
+            deposit_before = deposit
+            lat_ms  = m * next_tok + b
+            if lat_ms <= slo_thr * 1000:
+                green_cnt += 1
+            elif deposit_before > 0:
+                orange_cnt += 1
+            else:
+                red_cnt += 1
+
+            if next_tok <= next_emit:
+                deposit += 1
+                rec(next_tok, deposit_curve_y[-1])
+                rec(next_tok, deposit)
+                ti += 1
+                if deposit == 1:
+                    emit_t = next_tok + slo_thr
+            else:
+                deposit = max(deposit - 1, 0)
+                rec(next_emit, deposit_curve_y[-1])
+                rec(next_emit, deposit)
+                emit_t += slo_thr
+
+        ax_dep.step(deposit_curve_x, deposit_curve_y,
+                    where="post", color=color, lw=1.5)
+        dep_vals = np.interp(xs_rel, deposit_curve_x, deposit_curve_y)
+
+        # ----------- find first deposit depletion time ---------------- #
+        x_depleted = np.inf
+        for j in range(100, len(deposit_curve_y)):
+            if deposit_curve_y[j - 1] > 0 and deposit_curve_y[j] == 0:
+                x_depleted = deposit_curve_x[j]
+                break
+
+        # ---- colour regions in latency panel ------------------------ #
+        y_slo = slo_thr * 1000
+        ax_lat.hlines(y=y_slo, xmin=x_min, xmax=x_max,
+                      colors="black", lw=1.2, ls="--")
+        ax_lat.text(
+            x_min + 1, y_slo + 2, f"SLO = {int(slo_thr*1000)} ms",
+            color="black", fontsize=FS_NOTE, ha="left", va="bottom"
+        )
+
+        if np.isfinite(x_depleted) and x_min <= x_depleted <= x_max:
+            # depletion marker
+            for ax in (ax_lat, ax_dep, ax_perc):
+                ax.axvline(x_depleted, color="red", lw=1.0, ls=":", alpha=0.8)
+            ax_perc.text(
+                x_depleted + 3, 75, "300 Perceived \nViolations",
+                color="red", fontsize=FS_NOTE, ha="left", va="bottom"
+            )
+            ax_lat.text(
+                x_depleted, 75, "1600 Real \nViolations",
+                color="red", fontsize=FS_NOTE, ha="center", va="bottom"
+            )
+        if m != 0:
+            x_cross = (y_slo - b) / m
+            if x_min <= x_cross <= x_max:
+                for axv in (ax_lat, ax_dep):
+                    axv.axvline(x_cross, color="orange",
+                                lw=1.0, ls="--", alpha=0.6)
+                ax_perc.axvline(x_cross - x_min, color="orange",
+                                lw=1.0, ls="--", alpha=0.6)
+                # ax_dep.text(
+                #     x_cross + 1, 10, "1300 Masked \nViolations",
+                #     color="red", fontsize=FS_NOTE, ha="left", va="bottom"
+                # )
+                ax_perc.text(
+                    x_cross + 3, 75, "1300 Masked \nViolations",
+                    color="red", fontsize=FS_NOTE, ha="left", va="bottom")
+        dep_vals   = np.interp(xs_fit, deposit_curve_x, deposit_curve_y)
+        mask_above = ys_fit > y_slo
+        mask_orange = mask_above & (xs_fit < x_depleted)
+        mask_red    = mask_above & (xs_fit >= x_depleted)
+        mask_green  = ~mask_above
+
+        ax_dep.fill_between(xs_fit, 0, dep_vals,
+                            where=(mask_green & (dep_vals > 0)),
+                            step="post", color="green",  alpha=0.15)
+        ax_dep.fill_between(xs_fit, 0, dep_vals,
+                            where=(mask_orange & (dep_vals > 0)),
+                            step="post", color="orange", alpha=0.25)
+        ax_lat.fill_between(xs_fit, ys_fit, y_slo,
+                            where=mask_green, interpolate=True,
+                            color="green", alpha=0.15)
+        ax_lat.fill_between(xs_fit, ys_fit, y_slo,
+                            where=mask_orange, interpolate=True,
+                            color="orange", alpha=0.25)
+        ax_lat.fill_between(xs_fit, ys_fit, y_slo,
+                            where=mask_red, interpolate=True,
+                            color="red", alpha=0.25)
+        ax_perc.fill_between(xs_fit, ys_fit, y_slo,
+                             where=mask_red, interpolate=True,
+                             color="red", alpha=0.25)
+
+        # ---- perceived-latency curve (bottom) ----------------------- #
+        ys_perc = np.where(xs_fit < x_depleted, y_slo, ys_fit)
+        xs_rel  = xs_fit               # first token at 0
+        ax_perc.plot(xs_rel, ys_perc, color="black", lw=1.5)
+
+        # track maxima for axis scaling
+        ymax_lat  = max(ymax_lat,  ys_fit.max())
+        ymax_dep  = max(ymax_dep,  max(deposit_curve_y))
+        ymax_perc = max(ymax_perc, ys_perc.max())
+
+    # ----------- cosmetics -------------------------------------------- #
+    ax_lat.set_ylabel("Real\nLatency (ms)", fontsize=FS_LABEL)
+    ax_lat.set_ylim(50, 90)
+
+    ax_dep.set_ylabel("Deposited\nTokens", fontsize=FS_LABEL)
+    ax_dep.set_ylim(0, ymax_dep + 1)
+
+    ax_perc.set_xlabel("Time (s)", fontsize=FS_LABEL)
+    ax_perc.set_ylabel("User Perceived\nLatency (ms)", fontsize=FS_LABEL)
+    ax_perc.set_ylim(50, 90)
+
+    # apply tick-label size to every axis
+    for ax in (ax_lat, ax_dep, ax_perc):
+        ax.tick_params(labelsize=FS_TICK)
+
+    fig.tight_layout()
+
+    out_path_png = csv_path.with_name(f"{csv_path.stem}_fig_4_2.png")
+    fig.savefig(out_path_png, dpi=150, bbox_inches="tight")
+    out_path_pdf = csv_path.with_name(f"{csv_path.stem}_fig_4_2.pdf")
+    fig.savefig(out_path_pdf, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"green_cnt: {green_cnt}, orange_cnt: {orange_cnt}, red_cnt: {red_cnt}")
+    # return the PDF path (change if you prefer PNG)
+    return out_path_pdf
 
 def plot_tbt_relerr(df: pd.DataFrame, csv_path: Path) -> Path:
     """
@@ -482,7 +715,7 @@ def main(argv: List[str] | None = None) -> None:
     argv = argv or sys.argv[1:]
     valid = {
         "stats", "tbt", "tbt_wc",
-        "tbt_err", "tbt_err_wc"          # NEW
+        "tbt_err", "tbt_err_wc", "fig_4_2"          # NEW
     }
     if len(argv) != 2 or argv[0] not in valid:
         _usage()
@@ -513,6 +746,8 @@ def main(argv: List[str] | None = None) -> None:
         out_path = plot_tbt_relerr(df, csv_path)
     elif mode == "tbt_err_wc":
         out_path = plot_tbt_relerr_wallclock(df, csv_path)
+    elif mode == "fig_4_2":
+        out_path = figure_4_2(df, csv_path)
     else: 
         raise ValueError(f"Unknown mode: {mode}")
 
@@ -521,3 +756,4 @@ def main(argv: List[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
+    

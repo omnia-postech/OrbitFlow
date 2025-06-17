@@ -565,6 +565,34 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                     metrics_data.append(row)
                     csv_writer.writerow(row)
                     csv_fh.flush()  
+                else: 
+                    decode_length = 0
+                    row = {
+                        "request_id": rid,
+                        "arrival_time": -1,
+                        "first_scheduled_time": 0,                 # not available locally
+                        "finished_time": -1,
+                        "stall_times": [-1],
+                        "time_to_first_token": -1,
+                        "slo_threshold": 1/sim.v[rid],
+                        "slo_violations": -1,
+                        "stall_duration": -1,
+                        "decode_length": 0,
+                        "end_to_end_time": -1,
+                        "decode_time": -1,
+                        "time_per_output_token": [-1],
+                        "finish_reason": "length_capped",
+                        # "time_between_tokens": json.dumps(per_token_latencies),
+                        "solver_time": [-1],
+                        "solver_estimated_time": [-1],
+                        "time_between_tokens":[-1],
+                        "profiled_tbt": [-1],
+                        "expected_output_length": request_metadata[rid]["expected_output_length"],
+                        "stall_durations":[-1],
+                    }
+                    metrics_data.append(row)
+                    csv_writer.writerow(row)
+                    csv_fh.flush()  
                 finished_rids.append(rid)
                 logger.info(f"Finished request {rid} with {decode_length} decode tokens")
                 sim.finish(rid)
