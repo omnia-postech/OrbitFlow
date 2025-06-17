@@ -18,7 +18,7 @@ from vllm.sequence import (Sequence, SequenceData, SequenceGroup,
 from vllm.utils import Device, PyObjectCache
 from gurobipy import GRB
 from vllm.worker.distn.solver import Request
-from vllm.worker.distn.solver import Solver_updated as Solver
+from vllm.worker.distn.solver import Solver_updated, Solver_uniform
 from vllm.logger import init_logger
 logger = init_logger(__name__)
 
@@ -369,7 +369,8 @@ class Scheduler:
         
         self.is_distnsingle_fallback: bool = False
 
-        self.solver = Solver()
+        self.solver = Solver_uniform() if self.cache_config.uniform_solver else Solver_updated()
+        
         version = "selfattn"
         if (self.scheduler_config.runner_type == "pooling"
                 or self.cache_config.is_attention_free):

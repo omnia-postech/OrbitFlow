@@ -61,6 +61,15 @@
         "--pause-and-resume",
         "--enable-deposit"
     ],
+    "OursUniformSolver": [
+        "--prefetch-mode",        "solver",
+        "--prefetch-distance",    "1",
+        "--flattened-cache",      "true",
+        "--merge-prefetch-buffer", "true",
+        "--pause-and-resume",
+        "--enable-deposit",
+        "--uniform-solver"
+    ],
     "OursMinusRC": [
         "--prefetch-mode",        "solver",
         "--prefetch-distance",    "1",

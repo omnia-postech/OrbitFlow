@@ -205,6 +205,7 @@ class EngineArgs:
     flattened_cache: bool = False
     merge_prefetch_buffer: bool = True
     pause_and_resume: bool = False
+    uniform_solver: bool = False
     static_batching: bool = False
     removable_cache: bool = False
     
@@ -1084,6 +1085,7 @@ class EngineArgs:
             flattened_cache=self.flattened_cache,   
             merge_prefetch_buffer=self.merge_prefetch_buffer,
             pause_and_resume=self.pause_and_resume,
+            uniform_solver=self.uniform_solver,
             static_batching=self.static_batching,
             removable_cache=self.removable_cache,
         )

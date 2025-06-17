@@ -4,25 +4,29 @@ import numpy as np
 import ast
 
 # 설정값들 정의
-old_sc = 2.5         # 원본 slo 폴더 이름 (예: slo5)
-new_sc_list = [0.5, 1.5, 3.5, 4.5, 5.5]        # 새로 만들 slo 폴더 이름 (예: slo10)
+old_sc = 1.5         # 원본 slo 폴더 이름 (예: slo5)
+new_sc_list = [
+    # 1, 1.5, 2, 3, 3.5, 4, 4.5
+      1, 2.5, 3.5
+      ]        # 새로 만들 slo 폴더 이름 (예: slo10)
 base_path = "/home/heelim/vllm/outputs/benchmark/paper_main_exp"
 # test_path = "/home/sychoy/vllm/outputs/benchmark/paper_main_exp"
 
 metrics = [
-    "low",
+    # "low",
     # "mid",
     # "high", 
-    # "veryhigh"
+    "veryhigh_bs2"
 ]
 traces = [
-    # "both_static", "batch_dyn", 
-        # "token_dyn", 
-        "both_dyn"
+    # "both_static", 
+    # "batch_dyn", 
+    # "token_dyn", 
+    "both_dyn"
     ]
-# methods = ["Flexgen"]
+methods = ["Flexgen"]
 # methods = ["NoPrefetch"]
-methods = ["SelectN"]
+# methods = ["SelectN"]
 
 
 def update_slo_values(new_sc_list, method, trace, metric):

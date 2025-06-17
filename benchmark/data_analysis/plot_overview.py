@@ -90,8 +90,8 @@ def get_result(metric, log_dict, df):
             num_list = eval(row["time_between_tokens"])
             row["tbt_sorted"] = sorted(num_list, reverse=True)
             i99 = int(len(row) * 0.99)
+            df["99p"] = result
             result.append(row["tbt_sorted"][i99])
-        df["99p"] = result
         return (df["99p"]).mean()
     elif metric == "slo_95":
         for idx,row in df.iterrows():

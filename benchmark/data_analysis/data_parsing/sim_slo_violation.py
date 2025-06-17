@@ -12,6 +12,8 @@ import argparse
 ROOT_DIR = Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp")
 REFERENCE_ROOT = Path("/home/heelim/vllm/benchmark/selected_traces")
 
+Fix = True
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(levelname)s: %(message)s",
@@ -67,6 +69,8 @@ def compute_slo_violation(req_id, times, solver, slo_thr):
 
     deposit, violations, dup = 0, 0, False
     for _t, typ in events:
+        # if (req_id == 8):
+        #     print(f"{typ} {violations}")
         if typ == "gen":
             deposit += 1
             dup = False
@@ -101,39 +105,108 @@ def process_experiment(exp_dir: Path):
     slo_thr = float(df["slo_threshold"].mean())
     results = []
 
-    for req_id, (tbt, solver, dl) in enumerate(
-        zip(df["time_between_tokens"],
-            df["solver_time"],
-            df["decode_length"])
-    ):
+    total_req_len = len(ref_reqs)
+    
+    if Fix:
+        total_req_len = max(int(str(rid).split("_")[-1]) for rid in df["request_id"].unique()) + 1
+        log.warning(f"Fixing total_req_len: (from {len(ref_reqs)})")
+
+    for id in range(total_req_len):
+        ref_len = ref_reqs[f"request_{id}"]["output_length"]
         try:
-            ref_len = ref_reqs[f"request_{req_id}"]["output_length"]
-        except KeyError:
-            OVERVIEW_PNG = "outputs_overview.png"
-            # 아직 시뮬레이션이 끝나지 않은 상태로 간주
-            if not (exp_dir / OVERVIEW_PNG).exists():
-                log.info(f"⏳  {exp_dir.relative_to(ROOT_DIR)} "
-                         f"still running – skipped")
-                return          # ★ 실험 전체를 건너뜀
-            # 개요 PNG가 있는데도 KeyError면 진짜 오류
-            log.error(f"Inconsistent reference JSON for {exp_dir} "
-                      f"(missing request_{req_id})")
-            return
+            req_row = df[df["request_id"] == f"request_{id}"].iloc[0]
+        except:
+            # print(f"not {id}")
+            results.append(
+                {
+                    "request_id": f"request_{id}",
+                    "slo_violation": ref_len-1,
+                    "exceptions":   True, 
+                    "failed": True,
+                }
+            ) 
+            continue
         
-        
-        vio, exc = compute_slo_violation(req_id, tbt, solver, slo_thr)
-        ref_len  = reference["requests"][f"request_{req_id}"]["output_length"]
-        vio     += max(ref_len - dl - 1, 0)       # 미생성 토큰 보정
-        results.append(
-            {"request_id": f"request_{req_id}",
-             "slo_violation": vio,
-             "exceptions":   exc}
+        vio, exc = compute_slo_violation(
+            id, 
+            req_row["time_between_tokens"], 
+            req_row["solver_time"], 
+            slo_thr
         )
+
+        dl = req_row["decode_length"]
+
+        # print(f"{req_id} {vio}")
+        ref_len  = reference["requests"][f"request_{id}"]["output_length"]
+        vio     += max(ref_len - dl - 1, 0)       # 미생성 토큰 보정
+        # print(f"{req_id} {vio}")
+        failed = False
+        if ref_len -1 != dl:
+            failed = True   
+        results.append(
+            {"request_id": f"request_{id}",
+             "slo_violation": vio,
+             "exceptions":   exc, 
+             "failed": failed,
+             }
+        )        
 
     out_csv = exp_dir / "slo_violation.csv"
     pd.DataFrame(results).to_csv(out_csv, index=False, encoding="utf-8-sig")
     log.info(f"✔  {exp_dir.relative_to(ROOT_DIR)} → slo_violation.csv "
              f"(SLO={slo_thr:.3f})")
+
+
+        
+    # for req_id, (tbt, solver, dl) in enumerate(
+    #     zip(df["time_between_tokens"],
+    #         df["solver_time"],
+    #         df["decode_length"])
+    # ):
+    #     try:
+    #         ref_len = ref_reqs[f"request_{req_id}"]["output_length"]
+    #     except KeyError:
+    #         # OVERVIEW_PNG = "outputs_overview.png"
+    #         # # 아직 시뮬레이션이 끝나지 않은 상태로 간주
+    #         # if not (exp_dir / OVERVIEW_PNG).exists():
+    #         #     log.info(f"⏳  {exp_dir.relative_to(ROOT_DIR)} "
+    #         #              f"still running – skipped")
+    #         #     return          # ★ 실험 전체를 건너뜀
+    #         # # 개요 PNG가 있는데도 KeyError면 진짜 오류
+    #         # log.error(f"Inconsistent reference JSON for {exp_dir} "
+    #         #           f"(missing request_{req_id})")
+
+    #         results.append(
+    #             {
+    #                 "request_id": f"request_{req_id}",
+    #                 "slo_violation": ref_len-1,
+    #                 "exceptions":   True, 
+    #                 "failed": True,
+    #             }
+    #         )   
+    #         return
+        
+        
+    #     vio, exc = compute_slo_violation(req_id, tbt, solver, slo_thr)
+    #     # print(f"{req_id} {vio}")
+    #     ref_len  = reference["requests"][f"request_{req_id}"]["output_length"]
+    #     vio     += max(ref_len - dl - 1, 0)       # 미생성 토큰 보정
+    #     # print(f"{req_id} {vio}")
+    #     failed = False
+    #     if ref_len -1 != dl:
+    #         failed = True   
+    #     results.append(
+    #         {"request_id": f"request_{req_id}",
+    #          "slo_violation": vio,
+    #          "exceptions":   exc, 
+    #          "failed": failed,
+    #          }
+    #     )        
+
+    # out_csv = exp_dir / "slo_violation.csv"
+    # pd.DataFrame(results).to_csv(out_csv, index=False, encoding="utf-8-sig")
+    # log.info(f"✔  {exp_dir.relative_to(ROOT_DIR)} → slo_violation.csv "
+    #          f"(SLO={slo_thr:.3f})")
 
 # ───────────────────────────────────────────────
 # 3. 루트 전체 순회
@@ -178,8 +251,20 @@ def main():
         # ③ 기본: 전체 순회
         scan = ROOT_DIR.rglob("outputs.csv")
 
+    skip_paths = [
+        # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/NoPrefetch/both_dyn_mid"),
+        # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/NoPrefetch/token_dyn_low"),
+        # 추가하고 싶은 경로들...
+    ]
+
     for csv_path in sorted(scan):
-        process_experiment(csv_path.parent)
+        if csv_path.parent in skip_paths:
+            print(f"Skipping {csv_path}")
+            continue  # 이 경로는 넘김
+        try:
+            process_experiment(csv_path.parent)
+        except Exception as e:
+            log.error(f"{csv_path} ")
 
 if __name__ == "__main__":
     main()
