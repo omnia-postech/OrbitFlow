@@ -206,6 +206,22 @@ class Solver_updated:
         print(f"floor_val: {floor_val}")
         print(f"best_d_for_n: {best_d_for_n}")  # e.g. {1: 31, 2: 15, 3: 9, 4: 7, 5: 5, 6: 4, 7: 3, 8: 2, 9: 1}
         print(f"valid_dist: {valid_dist}")  # e.g. [1, 2, 3, 4, 5, 7, 9, 15, 31] for L=32
+        
+        # ------------------------------------------------------------------
+        # 1.b  Prefetch window mask  win[d][j]  (1 ≤ j ≤ L)
+        #      1 if layer j is within d-layer look-ahead of *any* offloaded layer
+        # ------------------------------------------------------------------
+        win = {
+            d: {j: 0 for j in range(1, L + 1)}
+            for d in valid_dist
+        }
+        for d in valid_dist:                         # stride = d+1
+            for l in range(d + 1, L + 1, d + 1):     # offloaded layers: (d+1), 2(d+1), …
+                begin = max(1, l - d)                # earliest legal copy layer
+                for j in range(begin, l + 1):        # inclusive window [l-d , l]
+                    win[d][j] = 1
+        
+
         # ----------------------------------------------------------------------------------
         # 2.  Pre-compute “is-offloaded” flag  a[r][d][j]  (1 ≤ j ≤ L)
         # ----------------------------------------------------------------------------------
@@ -253,6 +269,10 @@ class Solver_updated:
         # ratio         = model.addVars(requests, lb=0.0, name="ratio")
         # slo_fail_per_decode = model.addVars(requests, lb=0.0, name="slo_fail_per_decode")
         slo_violate = model.addVars(requests, vtype=GRB.BINARY, name="slo_violate")
+        # NEW ------------- continuous (#blocks transferred during layer j)
+        trans = model.addVars(
+                [(r, j) for r in requests for j in range(1, L + 1)],
+                lb=0.0, vtype=GRB.CONTINUOUS, name="trans")
         # ----------------------------------------------------------------------------------
         # 4.  Fixed compute time per layer  (profiled “no-prefetch” curve)
         # ----------------------------------------------------------------------------------
@@ -295,25 +315,82 @@ class Solver_updated:
             name="offload_num_def"
         )
 
-        # 6.3 layer-wise communication time  t_comm_expr[j] --------------------------------
-        t_comm_expr = {
-            j: (
-                gp.quicksum(
-                    onc[r, d] * a[r][d][j] * blocks_per_layer[r]
-                    for r in requests for d in valid_dist
-                ) / block_bandwidth          # seconds
-            )
-            for j in range(1, L + 1)
-        }
+        # # 6.3 layer-wise communication time  t_comm_expr[j] --------------------------------
+        # t_comm_expr = {
+        #     j: (
+        #         gp.quicksum(
+        #             onc[r, d] * a[r][d][j] * blocks_per_layer[r]
+        #             for r in requests for d in valid_dist
+        #         ) / block_bandwidth          # seconds
+        #     )
+        #     for j in range(1, L + 1)
+        # }
 
-        # 6.4 stall overlap:  s₁ ≥ comm₁ ;  s_j ≥ comm_j − compute_{j-1}  -------------------
-        model.addConstr(stall[1] >= t_comm_expr[1], name="stall_first")
-        for j in range(2, L + 1):
-            model.addConstr(stall[j] >= t_comm_expr[j] - batch_layer,
-                            name=f"stall_{j}")
+        # 6.3  Bandwidth capacity for each layer  (linear)
         for j in range(1, L + 1):
-            model.addConstr(stall[j] <= t_comm_expr[j],
-                            name=f"stall_ub_{j}")
+            model.addConstr(
+                gp.quicksum(trans[r, j] for r in requests)
+                <= block_bandwidth * (batch_layer + stall[j]),
+                name=f"bw_cap_{j}"
+            )
+        blocks_needed = {
+            (r, j): gp.quicksum(
+                        onc[r, d] * a[r][d][j] * blocks_per_layer[r]
+                        for d in valid_dist
+                    )
+            for r in requests for j in range(1, L + 1)
+        }
+        # 6.4 stall overlap:  s₁ ≥ comm₁ ;  s_j ≥ comm_j − compute_{j-1}  -------------------
+        # model.addConstr(stall[1] >= t_comm_expr[1], name="stall_first")
+        # for j in range(2, L + 1):
+        #     model.addConstr(stall[j] >= t_comm_expr[j] - batch_layer,
+        #                     name=f"stall_{j}")
+        # for j in range(1, L + 1):
+        #     model.addConstr(stall[j] <= t_comm_expr[j],
+        #                     name=f"stall_ub_{j}")
+        
+        # 6.4  Prefix-supply meets prefix-demand
+        for r in requests:
+            for j in range(1, L + 1):
+                model.addConstr(
+                    gp.quicksum(trans[r, k] for k in range(1, j + 1))
+                    >= gp.quicksum(blocks_needed[r, t] for t in range(1, j + 1)),
+                    name=f"flow_{r}_{j}"
+                )
+        # --- NEW: forbid sending blocks earlier than needed (upper bound) ---
+        for r in requests:
+            for j in range(1, L + 1):
+                model.addConstr(
+                    gp.quicksum(trans[r, k] for k in range(1, j + 1))
+                    <= gp.quicksum(blocks_needed[r, t] for t in range(1, j + 1)),
+                    name=f"flowUB_{r}_{j}"
+                )
+        for r in requests:
+            model.addConstr(
+                gp.quicksum(trans[r, j] for j in range(1, L + 1))
+                == offload_num[r] * blocks_per_layer[r],
+                name=f"flow_total_{r}"
+            )
+        for j in range(1, L + 1):
+            comm_j = gp.quicksum(trans[r, j] for r in requests) / block_bandwidth
+            if j == 1:
+                model.addConstr(stall[1] >= comm_j, name="stall_first")
+            else:
+                model.addConstr(stall[j] >= comm_j - batch_layer, name=f"stall_{j}")
+            model.addConstr(stall[j] <= comm_j,                name=f"stall_ub_{j}")
+            
+        # 6.x  Prefetch-window filter  (one live DMA stream per request)
+        for r in requests:
+            for j in range(1, L + 1):
+                model.addConstr(
+                    trans[r, j] <= gp.quicksum(
+                        onc[r, d] * win[d][j] * blocks_per_layer[r]
+                        for d in valid_dist
+                    ),
+                    name=f"win_{r}_{j}"
+                )
+
+
         # 6.5 define batch latency  token_time = Σ compute + Σ stall ------------------------
         model.addConstr(
             token_time == L * batch_layer + gp.quicksum(stall[j] for j in range(1, L + 1)),
@@ -437,141 +514,6 @@ class Solver_updated:
 
         print(f"batch_time (token_time) : {results.batch_time:.4f}s")
         return results   
-    def solve_minimal(
-        requests_list: List["Request"],
-        *,
-        # --- system-level parameters (usually fixed for a given cluster/model)
-        layer_num          : int   = 32,        # transformer depth  (L)
-        gpu_block_capacity : int   = 614,       # KV-block budget on GPU
-        # profiled curves injected by caller (avoid hard-coding in algorithm)
-        sec_per_layer_on_gpu : float,           # compute time when all KV in GPU
-        blocks_per_sec_comm : float,            # PCIe/NVLink throughput
-        # --- tuning knob
-        window_ub          : int   = 1000,      # max decode window
-    ) -> Optional["ResultList"]:
-
-        # ---- 1.1 Extract per-request constants ------------------------------
-        R = [r.id for r in requests_list]
-
-        C_block = {r.id: r.context_len_in_blocks for r in requests_list}  # KV blocks / layer
-        SLO     = {r.id: r.slo                     for r in requests_list}
-        deposit = {r.id: r.deposit_count           for r in requests_list}
-
-        L  = layer_num
-        B  = blocks_per_sec_comm                  # rename for brevity
-        Tc = sec_per_layer_on_gpu                 # compute time of one layer
-
-        # ========= 2. DECISION VARIABLES =====================================
-        m = gp.Model("kv_solver_min")
-        # m.Params.NonConvex = 2
-
-        # 2.1 One-hot stride selector -----------------------------------------
-        #    Valid strides = divisors of L **minus 1**  (1,2,3,4,5,7,9,15,31 for L=32)
-        valid_stride = [d for d in range(1, L) if L % (d + 1) == 0]
-        onc = m.addVars([(r, d) for r in R for d in valid_stride],
-                        vtype=GRB.BINARY, name="onc")
-
-        # Derivatives: stride (prefetch_dist) and # offloaded layers -----------
-        # ------- NEW (continuous) ------------------------------
-        stride       = m.addVars(R, lb=1,  ub=L, vtype=GRB.CONTINUOUS, name="stride")
-        n_off        = m.addVars(R, lb=0,  ub=L, vtype=GRB.CONTINUOUS, name="n_off")
-
-
-        m.addConstrs((gp.quicksum(onc[r, d] for d in valid_stride) == 1 for r in R),
-                    name="one_stride")
-        m.addConstrs((gp.quicksum(onc[r, d] * (d + 1)   for d in valid_stride) == stride[r]
-                    for r in R), name="stride_def")
-        m.addConstrs((gp.quicksum(onc[r, d] * (L // (d + 1)) for d in valid_stride) == n_off[r]
-                    for r in R), name="n_off_def")
-
-        # 2.2 Latency-model vars ----------------------------------------------
-        stall = m.addVars(range(1, L + 1), lb=0.0, name="stall")
-        token_time = m.addVar(lb=0.0, name="token_time")
-
-        # ========= 3. COMMUNICATION & STALL ==================================
-        #
-        #  pre-compute a_rdj  (1 if layer j is *off-GPU* under stride d)
-        #
-        a = {
-            r: {d: {j: int(j % (d + 1) == 0) for j in range(1, L + 1)}
-                for d in valid_stride}
-            for r in R
-        }
-
-        # 3.1 per-layer communication time  (sum over active requests) --------
-        t_comm = {}
-        for j in range(1, L + 1):
-            # blocks transferred at layer j, divided by bandwidth B
-            t_comm[j] = (
-                gp.quicksum(onc[r, d] * a[r][d][j] * C_block[r]
-                            for r in R for d in valid_stride) / B
-            )
-
-        # 3.2 stall >= comm – overlap -----------------------------------------
-        m.addConstr(stall[1] >= t_comm[1], name="stall_first")
-        for j in range(2, L + 1):
-            # single-layer look-ahead overlap (may refine later)
-            m.addConstr(stall[j] >= t_comm[j] - Tc * 1, name=f"stall_{j}")
-
-        # 3.3 batch latency ----------------------------------------------------
-        m.addConstr(token_time == L * Tc + gp.quicksum(stall[j] for j in range(1, L + 1)),
-                    name="token_time_def")
-
-        # ========= 4. CAPACITY CONSTRAINT ====================================
-        m.addConstr(
-            gp.quicksum((L - n_off[r]) * C_block[r] for r in R) <= gpu_block_capacity,
-            name="gpu_mem"
-        )
-
-        # ========= 5. SLO / WINDOW LOGIC (minimal) ===========================
-        decode_steps = m.addVar (          lb=32, ub=window_ub,
-                                        vtype=GRB.CONTINUOUS,      name="decode_steps")
-
-        # ratio_r = actual_time / (decode_steps * SLO_r)
-        ratio = m.addVars(R, lb=0.0, name="ratio")
-        m.addConstrs((ratio[r] * token_time == decode_steps * SLO[r] for r in R),
-                    name="ratio_qc")
-
-        # slo_fail_r = max(0, 1 – ratio – deposit/decode_steps)
-        slo_fail = m.addVars(R, lb=0.0, name="slo_fail")
-        m.addConstrs(
-            (slo_fail[r] * decode_steps >= decode_steps - ratio[r] - deposit[r]
-            for r in R), name="slo_fail_def"
-        )
-
-        # ========= 6. OBJECTIVE =============================================
-        # minimise per-token latency  (commented line shows good-put alt.)
-        m.setObjective(token_time, GRB.MINIMIZE)
-        # m.setObjective(gp.quicksum(1 - slo_fail[r] for r in R) / token_time,
-        #                GRB.MAXIMIZE)
-
-        # ========= 7. SOLVE ==================================================
-        m.Params.OutputFlag = 1
-        # m.Params.PoolSearchMode = 2        # systematic breadth search
-        # m.Params.PoolSolutions  = 387 #len(valid_stride)**len(R)   # 25 here
-        # m.Params.PoolGap        = 1e-4    # (keeps *all* feasible sols)  # all combinations, for debug
-        # m.Params.Presolve       = 0        # keep all binaries
-        # m.Params.Aggregate  = 0      # stop row/column aggregation that can merge binaries
-        # m.Params.CutPasses  = 0      # (optional) no presolve cutting rounds
-        m.optimize()
-
-
-        if m.Status != GRB.OPTIMAL:
-            return None
-
-        # ========= 8. RETURN PARSED RESULTS =================================
-        results = ResultList()
-        for r in R:
-            results.append(Result(
-                id=r,
-                resume=True,
-                n=stride[r].X - 1,
-                offload_num=int(n_off[r].X),
-                slo_fail=slo_fail[r].X * decode_steps.X,
-                actual_time=token_time.X,
-                window=decode_steps.X,
-            ))
-        return results
 
     def compute_T_batch(
         self,                                        # <-- “self” so you can call it as a Solver method
