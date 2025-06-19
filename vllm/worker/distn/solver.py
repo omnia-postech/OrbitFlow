@@ -169,315 +169,374 @@ class Solver_updated:
         requests_list: list[Request],
         *,
         layer_num: int = 32,
-        block_bandwidth: float = 103_178.0 / 1_000,     # blocks / second (16 tokens per block)
-        gpu_block_capacity: int = 49_152 // 80,         # total blocks the GPU can hold
-        window_ub: int = 64,                         # upper bound on decode-window length
+        block_bandwidth: float = 103_178.0 / 1_000,   # blocks / second (16 tokens per block)
+        gpu_block_capacity: int = 49_152 // 80,       # total blocks the GPU can hold
+        window_ub: int = 1000,                          # upper bound on decode-window length
     ) -> Optional[list[Result]]:
         """Optimise KV-placement and pre-fetch distance for the current micro-batch.
 
-        The latency model is pipeline-accurate:
-        • per-layer communication is counted in **blocks** (not bytes);
-        • a non-negative stall variable s_j captures comm > compute overlap;
-        • batch latency = Σ compute + Σ stall; feeds all SLO logic unchanged.
+        Latency model v2  (layer-budget):
+        • per-layer communication is a decision var  trans[r,j]  (blocks);
+        • stall[j] captures residual comm > compute after overlap;
+        • bw_cap_j couples trans, stall and compute to link bandwidth;
+        • prefix LB+UB pins cumulative transfers exactly to cumulative demand;
+        • optional prefetch-window filter ⇒ ≤ 1 live DMA stream / request.
         """
 
-        # ----------------------------------------------------------------------------------
-        # 0.  Gather per-request constants
-        # ----------------------------------------------------------------------------------
+        # --------------------------------------------------------------------------
+        # 0. Gather per-request constants
+        # --------------------------------------------------------------------------
         requests          = [r.id for r in requests_list]
-        context_blocks    = {r.id: r.context_len_in_blocks for r in requests_list}   # blocks/layer
+        context_blocks    = {r.id: r.context_len_in_blocks for r in requests_list}  # blocks/layer
         deposit_count     = {r.id: r.deposit_count          for r in requests_list}
         SLO               = {r.id: r.slo                   for r in requests_list}
-        blocks_per_layer  = context_blocks                                                     # alias
+        blocks_per_layer  = context_blocks                           # alias
 
         L      = layer_num
-        BIG_M  = 1_000_000.0                              # large number for indicator fallback
+        BIG_M  = 1_000_000.0
 
-        # ----------------------------------------------------------------------------------
-        # 1.  Enumerate admissible pre-fetch strides  (one best stride for each n_off)
-        # ----------------------------------------------------------------------------------
-        # NOTE(HONG): allowing distance 0
-        # floor_val     = {d: L // (d + 1) for d in range(L)}          # d = 0 … 31
-        # NOTE(HONG): distance 0 is not allowed, so we start from 1
-        floor_val    = {d: L // (d + 1) for d in range(1, L)}           # 1 ≤ d < L - > distance ∈ {1,2,3,4,5,7,9,15,31}
-        best_d_for_n  = {n_off: max(d for d, n in floor_val.items() if n == n_off)
-                        for n_off in floor_val.values()}
-        valid_dist    = sorted(best_d_for_n.values())                # final stride set
-        print(f"floor_val: {floor_val}")
-        print(f"best_d_for_n: {best_d_for_n}")  # e.g. {1: 31, 2: 15, 3: 9, 4: 7, 5: 5, 6: 4, 7: 3, 8: 2, 9: 1}
-        print(f"valid_dist: {valid_dist}")  # e.g. [1, 2, 3, 4, 5, 7, 9, 15, 31] for L=32
-        
-        # ------------------------------------------------------------------
-        # 1.b  Prefetch window mask  win[d][j]  (1 ≤ j ≤ L)
-        #      1 if layer j is within d-layer look-ahead of *any* offloaded layer
-        # ------------------------------------------------------------------
-        win = {
-            d: {j: 0 for j in range(1, L + 1)}
-            for d in valid_dist
-        }
-        for d in valid_dist:                         # stride = d+1
-            for l in range(d + 1, L + 1, d + 1):     # offloaded layers: (d+1), 2(d+1), …
-                begin = max(1, l - d)                # earliest legal copy layer
-                for j in range(begin, l + 1):        # inclusive window [l-d , l]
+        # --------------------------------------------------------------------------
+        # 1. Enumerate admissible pre-fetch strides  (one best stride per n_off)
+        # --------------------------------------------------------------------------
+        # floor_val[d] = # CPU layers when stride = d+1
+        floor_val = {d: layer_num // (d + 1) for d in range(1, layer_num)}   # 1 … 31
+        floor_val[layer_num] = 0                                             # d = 32 ⇒ no off-load
+
+        best_d_for_n = {n_off: max(d for d, n in floor_val.items() if n == n_off)
+                        for n_off in floor_val.values()}                      # pick widest stride
+        valid_dist    = sorted(best_d_for_n.values())                        # includes 32 now
+        print(f"valid_dist: {valid_dist}")    # e.g. [1,2,3,4,5,7,9,15,31,32]
+
+        # --------------------------------------------------------------------------
+        # 1.b Prefetch-window mask  win[d][j]
+        #     1 ⇔ layer j is inside the (d+1)-layer look-ahead window of some
+        #         offloaded layer when stride = d+1.
+        # --------------------------------------------------------------------------
+        win = {d: {j: 0 for j in range(1, L + 1)} for d in valid_dist}
+        for d in valid_dist:
+            for l in range(d + 1, L + 1, d + 1):        # offloaded layers
+                begin = max(1, l - d)                   # earliest legal copy layer
+                for j in range(begin, l + 1):           # inclusive window [l-d, l]
                     win[d][j] = 1
-        
 
-        # ----------------------------------------------------------------------------------
-        # 2.  Pre-compute “is-offloaded” flag  a[r][d][j]  (1 ≤ j ≤ L)
-        # ----------------------------------------------------------------------------------
+        # --------------------------------------------------------------------------
+        # 2. Pre-compute “is-offloaded” flag  a[r][d][j]
+        #    a[r][d][j] = 1 if layer j of request r lives on CPU when stride = d+1.
+        # --------------------------------------------------------------------------
         a = {
             r: {
-                d: {j: int(j % (d + 1) == 0) for j in range(1, L + 1)}   # layers (d+1), 2(d+1), …
+                d: {j: int(j % (d + 1) == 0) for j in range(1, L + 1)}
                 for d in valid_dist
             }
             for r in requests
         }
 
-        # ----------------------------------------------------------------------------------
-        # 3.  Gurobi model, variables
-        # ----------------------------------------------------------------------------------
+        # ---- outside the model: compute constants ----
+        bucket_cnt   = (window_ub + 15) // 16          # number of 16-token buckets
+        extra_comm_per16 = len(requests) / block_bandwidth        # sec
+        tokens0 = 16 * sum(context_blocks.values())
+        comp0 = self.profiled_estimator.estimate_by_profiled_results(
+                    tokens0, "NoPrefetch", "upper_quad") / 32.0
+        comp16 = self.profiled_estimator.estimate_by_profiled_results(
+                    tokens0 + 16, "NoPrefetch", "upper_quad") / 32.0
+        extra_comp_per16 = L * (comp16 - comp0)
+
+        DELTA = extra_comm_per16 + extra_comp_per16                # sec / 16 tokens
+        BASE_LAT = L * comp0                                       # baseline latency
+        pos_slack = [SLO[r] - BASE_LAT for r in requests if SLO[r] - BASE_LAT > 0]
+        M_val = min(pos_slack) if pos_slack else 1e3               # avoid 0 or neg
+
+        PHI     = [1 + (k * DELTA) / M_val for k in range(bucket_cnt)]
+        inv_PHI = [2.0 / v for v in PHI]
+
+        # --------------------------------------------------------------------------
+        # 3. Gurobi model & variables
+        # --------------------------------------------------------------------------
         model = gp.Model("block_solver")
-        # model.Params.NonConvex = 2                    # allow bilinear equalities
+        # model.Params.NonConvex = 2              # (legacy) allow bilinear equalities
 
-        # -- binary “keep in batch” (fixed to 1 for now) -----------------------------------
-        resume        = model.addVars(requests, lb=1, ub=1, vtype=GRB.BINARY,   name="resume")
+        # binary “keep in batch” (fixed 1 for all requests)
+        resume = model.addVars(requests, lb=1, ub=1, vtype=GRB.BINARY, name="resume")
 
-        # -- stride selection (one-hot) -----------------------------------------------------
-        onc = model.addVars(
-            [(r, d) for r in requests for d in valid_dist],
-            vtype=GRB.BINARY, name="onc"
-        )
+        # one-hot stride selector
+        onc = model.addVars([(r, d) for r in requests for d in valid_dist],
+                            vtype=GRB.BINARY, name="onc")
 
-        prefetch_dist = model.addVars(requests, lb=1,  ub=L + 1, vtype=GRB.INTEGER, name="prefetch_dist")
-        offload_num   = model.addVars(requests, lb=0,  ub=L,     vtype=GRB.INTEGER, name="offload_num")
+        prefetch_dist = model.addVars(requests, lb=1,  ub=L + 1, vtype=GRB.INTEGER,
+                                    name="prefetch_dist")
+        offload_num   = model.addVars(requests, lb=0,  ub=L,     vtype=GRB.INTEGER,
+                                    name="offload_num")
 
-        # decode_steps  = model.addVar(lb=32, ub=window_ub, vtype=GRB.INTEGER, name="decode_steps")
-        decode_steps  = model.addVar(lb=32, ub=window_ub,
-                                    vtype=GRB.INTEGER, name="decode_steps")
+        # decode-window length (secondary objective)
+        decode_steps = model.addVar(lb=32, ub=window_ub, vtype=GRB.INTEGER,
+                                    name="decode_steps")
+        STEP   = 32
+        k_mult = model.addVar(lb=1, ub=window_ub // STEP, vtype=GRB.INTEGER,
+                            name="k_mult")
+        #### !!!! ####
+        extra_blocks = model.addVar(lb=0, ub=(window_ub + 15) // 16,
+                                    vtype=GRB.INTEGER, name="extra_blocks")
+        # ceil( decode_steps / 16 )
+        model.addConstr(extra_blocks * 16 >= decode_steps,                       # lower
+                        name="ceil_lb")
+        model.addConstr(decode_steps >= 16 * (extra_blocks - 1) + 1,             # upper
+                        name="ceil_ub")
+        #### !!!! ####
 
-        # tie decode_steps to multiples of 32 to test for degeneracy
-        STEP = 32
-        k_mult = model.addVar(lb=1, ub=window_ub // STEP,
-                            vtype=GRB.INTEGER, name="k_mult")
-        model.addConstr(decode_steps == STEP * k_mult,
-                        name="decode_steps_multiple")
+        #### !!!! #### 
+        # ---- inside the model (after extra_blocks link) ----
+        seg = model.addVars(bucket_cnt, vtype=GRB.BINARY, name="seg")
+        model.addConstr(seg.sum() == 1, name="seg_onehot")
+        for k in range(bucket_cnt):
+            model.addConstr(decode_steps >= 16*k      - window_ub * (1 - seg[k]))
+            model.addConstr(decode_steps <= 16*(k+1)-1 + window_ub * (1 - seg[k]))
 
-        # -- latency-and-SLO variables ------------------------------------------------------
-        stall         = model.addVars(range(1, L + 1), lb=0.0, name="stall")      # s_j  (1-based)
-        token_time    = model.addVar(lb=0.0, name="token_time")
-        actual_time   = model.addVars(requests, lb=0.0, ub=BIG_M, name="actual_time")
-        # ratio         = model.addVars(requests, lb=0.0, name="ratio")
-        # slo_fail_per_decode = model.addVars(requests, lb=0.0, name="slo_fail_per_decode")
-        slo_violate = model.addVars(requests, vtype=GRB.BINARY, name="slo_violate")
-        # NEW ------------- continuous (#blocks transferred during layer j)
-        trans = model.addVars(
-                [(r, j) for r in requests for j in range(1, L + 1)],
-                lb=0.0, vtype=GRB.CONTINUOUS, name="trans")
-        # ----------------------------------------------------------------------------------
-        # 4.  Fixed compute time per layer  (profiled “no-prefetch” curve)
-        # ----------------------------------------------------------------------------------
-        total_tokens = 16 * sum(context_blocks[r] for r in requests)              # rough estimate
-        batch_layer  = (
-            self.profiled_estimator
-            .estimate_by_profiled_results(total_tokens, which="NoPrefetch", mode="upper_quad")
-            / 32.0
-        )  # seconds per layer when every layer is GPU-resident
+        inv_phi_factor = model.addVar(lb=min(inv_PHI), ub=max(inv_PHI),
+                                    name="inv_phi_factor")
+        model.addConstr(inv_phi_factor ==
+                        gp.quicksum(inv_PHI[k] * seg[k] for k in range(bucket_cnt)),
+                        name="invphi_def")
+        #### !!!! #### 
 
-        # ----------------------------------------------------------------------------------
-        # 5.  Communication bandwidth (blocks / second)
-        # ----------------------------------------------------------------------------------
-        per_block_time  = (
-            self.profiled_estimator
-            .estimate_by_profiled_results(total_tokens, which="Communication", mode="linear")
-            / (32 * 16)                                       # 32 layers, 16 tokens per block
-        )
-        block_bandwidth = 1.0 / per_block_time                # blocks / second
-        print(f"[solve] profiled PCIe/NVLink bandwidth  : {block_bandwidth:.2f} blocks/s")
+        model.addConstr(decode_steps == STEP * k_mult, name="decode_steps_multiple")
 
-        # ----------------------------------------------------------------------------------
-        # 6.  Constraints ───────────────────────────────────────────────────────────────────
-        # ----------------------------------------------------------------------------------
-        
-        # 6.1 one stride per request --------------------------------------------------------
-        model.addConstrs(
-            (gp.quicksum(onc[r, d] for d in valid_dist) == 1
-            for r in requests),
-            name="one_stride")
-        # 6.2 derive stride (prefetch_dist) and CPU-layer count (offload_num) ---------------
-        model.addConstrs(
-            (gp.quicksum(onc[r, d] * (d + 1)   for d in valid_dist) == prefetch_dist[r]
-            for r in requests),
-            name="prefetch_dist_def"
-        )
-        model.addConstrs(
-            (gp.quicksum(onc[r, d] * floor_val[d] for d in valid_dist) == offload_num[r]
-            for r in requests),
-            name="offload_num_def"
-        )
+        # latency & SLO vars
+        stall        = model.addVars(range(1, L + 1), lb=0.0, name="stall")   # s_j
+        token_time   = model.addVar(lb=0.0, name="token_time")
+        actual_time  = model.addVars(requests, lb=0.0, ub=BIG_M, name="actual_time")
+        slo_violate  = model.addVars(requests, vtype=GRB.BINARY, name="slo_violate")
 
-        # # 6.3 layer-wise communication time  t_comm_expr[j] --------------------------------
+        # NEW: layer-wise transfer amount (blocks)
+        trans = model.addVars([(r, j) for r in requests for j in range(1, L + 1)],
+                            lb=0.0, vtype=GRB.CONTINUOUS, name="trans")
+
+        # --------------------------------------------------------------------------
+        # 4. Fixed compute time per layer  (profiled “no-prefetch” curve)
+        # --------------------------------------------------------------------------
+        total_tokens = 16 * sum(context_blocks[r] for r in requests)   # rough estimate
+        batch_layer  = (self.profiled_estimator
+                        .estimate_by_profiled_results(total_tokens,
+                                                    which="NoPrefetch",
+                                                    mode="upper_quad") / 32.0)
+
+        # --------------------------------------------------------------------------
+        # 5. Communication bandwidth  (blocks / second)
+        # --------------------------------------------------------------------------
+        per_block_time = (self.profiled_estimator
+                        .estimate_by_profiled_results(total_tokens,
+                                                        which="Communication",
+                                                        mode="linear")
+                        / (32 * 16))
+        block_bandwidth = 1.0 / per_block_time
+        print(f"[solve] profiled PCIe/NVLink bandwidth : {block_bandwidth:.2f} blocks/s")
+
+        # --------------------------------------------------------------------------
+        # 6. Constraints
+        # --------------------------------------------------------------------------
+
+        # 6.1 one stride per request (one-hot)
+        model.addConstrs((gp.quicksum(onc[r, d] for d in valid_dist) == 1
+                        for r in requests),
+                        name="one_stride")
+
+        # 6.2 derive stride length & #offloaded layers
+        model.addConstrs((gp.quicksum(onc[r, d] * (d + 1) for d in valid_dist)
+                        == prefetch_dist[r] for r in requests),
+                        name="prefetch_dist_def")
+        model.addConstrs((gp.quicksum(onc[r, d] * floor_val[d] for d in valid_dist)
+                        == offload_num[r] for r in requests),
+                        name="offload_num_def")
+
+        # 6.3 Bandwidth capacity per layer  (layer-budget model)
+        for j in range(1, L + 1):
+            model.addConstr(gp.quicksum(trans[r, j] for r in requests)
+                            <= block_bandwidth * (batch_layer + stall[j]),
+                            name=f"bw_cap_{j}")
+
+        # demand expression  blocks_needed[r,j]
+        blocks_needed = {
+            (r, j): gp.quicksum(onc[r, d] * a[r][d][j] * blocks_per_layer[r]
+                                for d in valid_dist)
+            for r in requests for j in range(1, L + 1)
+        }
+
+        # (legacy) spike-based comm time kept for reference -----------------------
         # t_comm_expr = {
         #     j: (
         #         gp.quicksum(
         #             onc[r, d] * a[r][d][j] * blocks_per_layer[r]
         #             for r in requests for d in valid_dist
-        #         ) / block_bandwidth          # seconds
+        #         ) / block_bandwidth      # seconds
         #     )
         #     for j in range(1, L + 1)
         # }
 
-        # 6.3  Bandwidth capacity for each layer  (linear)
-        for j in range(1, L + 1):
-            model.addConstr(
-                gp.quicksum(trans[r, j] for r in requests)
-                <= block_bandwidth * (batch_layer + stall[j]),
-                name=f"bw_cap_{j}"
-            )
-        blocks_needed = {
-            (r, j): gp.quicksum(
-                        onc[r, d] * a[r][d][j] * blocks_per_layer[r]
-                        for d in valid_dist
-                    )
-            for r in requests for j in range(1, L + 1)
-        }
-        # 6.4 stall overlap:  s₁ ≥ comm₁ ;  s_j ≥ comm_j − compute_{j-1}  -------------------
-        # model.addConstr(stall[1] >= t_comm_expr[1], name="stall_first")
-        # for j in range(2, L + 1):
-        #     model.addConstr(stall[j] >= t_comm_expr[j] - batch_layer,
-        #                     name=f"stall_{j}")
-        # for j in range(1, L + 1):
-        #     model.addConstr(stall[j] <= t_comm_expr[j],
-        #                     name=f"stall_ub_{j}")
-        
-        # 6.4  Prefix-supply meets prefix-demand
+        # 6.4 prefix-flow constraints  (LB + UB = exact)
         for r in requests:
             for j in range(1, L + 1):
+                # lower bound – must have transferred required data so far
                 model.addConstr(
                     gp.quicksum(trans[r, k] for k in range(1, j + 1))
                     >= gp.quicksum(blocks_needed[r, t] for t in range(1, j + 1)),
-                    name=f"flow_{r}_{j}"
+                    name=f"flowLB_{r}_{j}"
                 )
-        # --- NEW: forbid sending blocks earlier than needed (upper bound) ---
+        # --- NEW window-scoped upper bound  (kills dead slack, allows early prefetch) ---
         for r in requests:
             for j in range(1, L + 1):
+                # how many off-load windows are already “open” at layer j
+                windows_open = gp.quicksum(
+                    onc[r, d] * win[d][j]          # 1 if window of stride d is open
+                    for d in valid_dist
+                )
                 model.addConstr(
                     gp.quicksum(trans[r, k] for k in range(1, j + 1))
-                    <= gp.quicksum(blocks_needed[r, t] for t in range(1, j + 1)),
+                    <= windows_open * blocks_per_layer[r],
                     name=f"flowUB_{r}_{j}"
                 )
+
+        # total transferred blocks = offloaded blocks
+        # for r in requests:
+        #     model.addConstr(gp.quicksum(trans[r, j] for j in range(1, L + 1))
+        #                     == offload_num[r] * blocks_per_layer[r],
+        #                     name=f"flow_total_{r}")
         for r in requests:
             model.addConstr(
                 gp.quicksum(trans[r, j] for j in range(1, L + 1))
-                == offload_num[r] * blocks_per_layer[r],
-                name=f"flow_total_{r}"
-            )
+                == offload_num[r] * context_blocks[r],          # baseline block size
+                name=f"flow_total_{r}")
+        # 6.5 Stall definition (based on NEW comm_j)
         for j in range(1, L + 1):
             comm_j = gp.quicksum(trans[r, j] for r in requests) / block_bandwidth
             if j == 1:
                 model.addConstr(stall[1] >= comm_j, name="stall_first")
             else:
                 model.addConstr(stall[j] >= comm_j - batch_layer, name=f"stall_{j}")
-            model.addConstr(stall[j] <= comm_j,                name=f"stall_ub_{j}")
-            
-        # 6.x  Prefetch-window filter  (one live DMA stream per request)
+            model.addConstr(stall[j] <= comm_j, name=f"stall_ub_{j}")
+
+        # 6.6 Prefetch-window filter  (≤1 live DMA stream / request)
         for r in requests:
             for j in range(1, L + 1):
                 model.addConstr(
-                    trans[r, j] <= gp.quicksum(
-                        onc[r, d] * win[d][j] * blocks_per_layer[r]
-                        for d in valid_dist
-                    ),
+                    trans[r, j]
+                    <= gp.quicksum(onc[r, d] * win[d][j] * blocks_per_layer[r]
+                                for d in valid_dist),
                     name=f"win_{r}_{j}"
                 )
 
+        # 6.7 batch latency definition
+        model.addConstr(token_time == L * batch_layer
+                        + gp.quicksum(stall[j] for j in range(1, L + 1)),
+                        name="token_time_def")
 
-        # 6.5 define batch latency  token_time = Σ compute + Σ stall ------------------------
-        model.addConstr(
-            token_time == L * batch_layer + gp.quicksum(stall[j] for j in range(1, L + 1)),
-            name="token_time_def"
-        )
+        # 6.8 bind per-request actual_time
+        model.addConstrs((actual_time[r] == token_time for r in requests),
+                        name="actual_time_def")
 
-        # 6.6 bind per-request actual_time via indicators -----------------------------------
-        model.addConstrs(
-            (actual_time[r] == token_time for r in requests),
-            name="actual_time_def")
+        # 6.9 SLO logic -----------------------------------------------------------
+        M_slo = window_ub * max(SLO.values())            # tight big-M
+        model.addConstrs((actual_time[r] - SLO[r]
+                        <= M_slo * slo_violate[r] for r in requests),
+                        name="slo_violate_def")
+        EPS = 1e-5
+        model.addConstrs((actual_time[r] - SLO[r]
+                        >= EPS - M_slo * (1 - slo_violate[r])
+                        for r in requests),
+                        name="slo_violate_eq")
+        model.addConstr(gp.quicksum(slo_violate[r] for r in requests) <= 2,
+                        name="slo_violate_total")
+        # 6.9 SLO indicator logic ----------------------------------------------------
+        M_slo = window_ub * max(SLO.values())          # tight big-M
 
-        # 6.7 SLO ratio and failure budget --------------------------------------------------
-        # --- SLO check:  if actual_time exceeds SLO, set slo_violate = 1 -----------
-        M_slo = window_ub * max(SLO.values())        # tight big-M, seconds/token
+        # slo_violate[r] = 1  ⇔  actual_time[r] > SLO[r]
         model.addConstrs(
             (actual_time[r] - SLO[r] <= M_slo * slo_violate[r]   for r in requests),
             name="slo_violate_def"
         )
-        # # new tight direction – makes the binary deterministic
-        EPS = 1e-5          # tiny positive slack to avoid equality ambiguity
+        EPS = 1e-5
         model.addConstrs(
             (actual_time[r] - SLO[r] >= EPS - M_slo * (1 - slo_violate[r])
             for r in requests),
             name="slo_violate_eq"
         )
-        # --- global budget: at most 2 offenders -----------------------------------
-        model.addConstr(
-            gp.quicksum(slo_violate[r] for r in requests) <= 2,
-            name="slo_violate_total"
-        )
-        # model.addConstrs(
-        #     (ratio[r] * actual_time[r] == decode_steps * SLO[r] for r in requests),
-        #     name="ratio_qc"
-        # )
-        # model.addConstrs(
-        #     (slo_fail_per_decode[r] * decode_steps
-        #     >= decode_steps - ratio[r] - deposit_count[r]     for r in requests),
-        #     name="slo_fail_def"
-        # )
-        # # adjust infeasible SLO failures here
-        # model.addConstr(gp.quicksum(slo_fail_per_decode[r] for r in requests) <= 2,
-                        # name="slo_fail_total")
 
-        # 6.8 GPU memory capacity -----------------------------------------------------------
-        model.addConstr(
-            gp.quicksum(
-                (L - offload_num[r]) * context_blocks[r] for r in requests
-            ) <= gpu_block_capacity,
-            name="gpu_memory_cap"
+        # (legacy) global “≤ 2 offenders” cap — delete or comment out
+        # model.addConstr(
+        #     gp.quicksum(slo_violate[r] for r in requests) <= 2,
+        #     name="slo_violate_total"
+        # )
+
+        # ---------------------------------------------------------------------------
+        # 6.y  Average SLO-failure budget (MILP, no bilinear)
+        # ---------------------------------------------------------------------------
+        viol_tokens = model.addVars(requests, lb=0.0, ub=window_ub, name="viol_tokens")
+
+        # C1: if slo_violate == 0  ⇒  viol_tokens = 0
+        model.addConstrs(
+            (viol_tokens[r] <= decode_steps * slo_violate[r]   for r in requests),
+            name="viol_tok_ub"
         )
 
-        # model.setObjective(token_time, GRB.MINIMIZE)
-        # EPS_DS = 1e-4                    # tiny bias favouring larger windows
-        # model.setObjective(token_time - EPS_DS * decode_steps,
-        #                 GRB.MINIMIZE)
-        model.setObjectiveN(token_time,0,1,1,GRB.MINIMIZE)  # primary objective: minimize latency
-        model.setObjectiveN(-decode_steps,1,2,1,GRB.MINIMIZE)  # secondary objective: minimize decode window
-        model.Params.OutputFlag = 1
-        model.Params.PoolSearchMode = 2        # systematic breadth search
-        model.Params.PoolSolutions  = 5000 #len(valid_stride)**len(R)   # 25 here
-        # model.Params.PoolGap        = 1e-4    # (keeps *all* feasible sols)  # all combinations, for debug
-        model.Params.Presolve       = 0        # keep all binaries
-        model.Params.Aggregate  = 0      # stop row/column aggregation that can merge binaries
-        model.Params.CutPasses  = 0      # (optional) no presolve cutting rounds
-        # ----------------------------------------------------------------------------------
-        # 8.  Solve
-        # ----------------------------------------------------------------------------------
+        # C2: if slo_violate == 1  ⇒  ≥ (decode_steps - deposit_count) late tokens
+        M_tok = window_ub
+        model.addConstrs(
+            (viol_tokens[r] >= decode_steps - deposit_count[r] - M_tok * (1 - slo_violate[r])
+            for r in requests),
+            name="viol_tok_lb"
+        )
+
+        # C3: global average-failure budget  ≤ 2 tokens per decode window
+        # model.addConstr(
+        #     gp.quicksum(viol_tokens[r] for r in requests) <= 2,
+        #     name="viol_tok_total"
+        # )
+        model.addConstr(
+            gp.quicksum(viol_tokens[r] for r in requests) <= inv_phi_factor,
+            name="viol_tok_total")
+        # 6.10 GPU memory capacity
+        # model.addConstr(gp.quicksum((L - offload_num[r]) * context_blocks[r]
+        #                             for r in requests)
+        #                 <= gpu_block_capacity,
+        #                 name="gpu_memory_cap")
+        # replace the old gpu_memory_cap block
+        grow_blocks = {r: context_blocks[r] + extra_blocks for r in requests}
+
+        model.addConstr(
+            gp.quicksum((L - offload_num[r]) * grow_blocks[r] for r in requests)
+            <= gpu_block_capacity,
+            name="gpu_memory_cap")
+
+        # --------------------------------------------------------------------------
+        # 7. Objectives
+        # --------------------------------------------------------------------------
+        model.setObjectiveN(token_time, 0, 1, 1, GRB.MINIMIZE)   # primary – latency
+        # model.setObjectiveN(-decode_steps, 1, 2, 1, GRB.MINIMIZE)  # secondary – window
+
+        # Gurobi parameters --------------------------------------------------------
+        model.Params.OutputFlag    = 1
+        model.Params.PoolSearchMode = 2
+        model.Params.PoolSolutions  = 5000
+        model.Params.Presolve       = 0
+        model.Params.Aggregate      = 0
+        model.Params.CutPasses      = 0
+
+        # --------------------------------------------------------------------------
+        # 8. Solve
+        # --------------------------------------------------------------------------
         try:
             model.optimize()
         except gp.GurobiError as e:
             print(f"[solve] Gurobi Error: {e}")
             return None
 
-        print(f"\n--- solution pool ---")
-        for k in range(model.SolCount):
-            model.Params.SolutionNumber = k
-            latency = token_time.Xn
-            print(f"sol #{k:2d}: latency={latency:.5f}s decode_steps={decode_steps.Xn:.2f} "
-                f"stride={[offload_num[r].Xn for r in requests]} ")
-        # ----------------------------------------------------------------------------------
-        # 9.  Extract & print results
-        # ----------------------------------------------------------------------------------
+        # --------------------------------------------------------------------------
+        # 9. Extract results  (unchanged from previous version)
+        # --------------------------------------------------------------------------
         if model.Status not in (GRB.OPTIMAL, GRB.TIME_LIMIT, GRB.SUBOPTIMAL):
             return None
-        # ---- real good-put =   (# tokens that satisfy SLO) / latency
-        tokens_ok = sum((1.0 - slo_violate[r].X) for r in requests)
+
+        tokens_ok = sum(1.0 - slo_violate[r].X for r in requests)
         goodput   = tokens_ok / token_time.X
+
         print("\n--- Optimal solution (or best found) ---")
         print(" id | offload | SLO-fail | actual_time")
         print("----|---------|----------|------------")
@@ -494,7 +553,7 @@ class Solver_updated:
             f"/ {gpu_block_capacity} blocks")
         print(f"decode_window size : {decode_steps.X}")
 
-        # Build ResultList for caller -------------------------------------------------------
+        # Build ResultList ---------------------------------------------------------
         results = ResultList()
         for r in requests:
             stride    = int(prefetch_dist[r].X)
@@ -506,15 +565,14 @@ class Solver_updated:
                     n=distance,
                     offload_num=int(offload_num[r].X),
                     slo_fail=slo_violate[r].X * decode_steps.X,
-                    slo_fail_r= slo_violate[r].X,
+                    slo_fail_r=slo_violate[r].X,
                     actual_time=actual_time[r].X,
                     window=decode_steps.X,
                 )
             )
 
         print(f"batch_time (token_time) : {results.batch_time:.4f}s")
-        return results   
-
+        return results
     def compute_T_batch(
         self,                                        # <-- “self” so you can call it as a Solver method
         requests_list: List[Request],
@@ -618,16 +676,20 @@ class LatencySolver:
 
 # === 2. floor/ceil 값 미리 계산 ===
         # floor_val = {d: L // (d + 1) for d in range(1, L+2)}
-        floor_val = {d: L // (d + 1) for d in range(L)} 
-        best_d_for_n = {}                                   # n_off ➜ best distance
+        floor_val = {d: L // (d + 1) for d in range(L)}          # d = 0 … 31
+        # --- APPEND: enable the “no-offload” option ---------------------------------------
+        floor_val[layer_num] = 0                                 # d = 32  →  n_off = 0
+
+        best_d_for_n = {}                                        # n_off ➜ best (widest) distance
         for d, n_off in floor_val.items():
             if n_off not in best_d_for_n or d > best_d_for_n[n_off]:
                 best_d_for_n[n_off] = d
 
-        valid_dist = sorted(best_d_for_n.values())  
-        valid_dist = valid_dist[1:]  # remove 0 
-        print(floor_val)
-        print(valid_dist)  # valid strides
+        valid_dist = sorted(best_d_for_n.values())               # includes 0 and 32
+        valid_dist = valid_dist[1:]                              # drop 0-distance entry only
+
+        print(floor_val)      # debugging – now shows key 32 : 0
+        print(valid_dist)     # e.g. [1, 2, 3, 4, 5, 7, 9, 15, 31, 32]
 # === 3. 모델 생성 및 설정 ===
         model = gp.Model('block_solver')
         model.Params.NonConvex = 2    # 비선형 곱 제약 허용
