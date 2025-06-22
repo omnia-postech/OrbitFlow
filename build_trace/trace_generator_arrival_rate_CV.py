@@ -1203,6 +1203,6 @@ if __name__ == "__main__":
             blk_size=BLOCK_SIZE_TOK,
             static=False,
             skip_token_ids=True,
-            arrival_rate_scales=[1.0, 2.0, 3.0, 4.0, 5.0],  # req/s
-            cvs=[1, 2, 3, 4, 5, 6, 7]
+            arrival_rate_scales=[1.5, 2.5, 3.5],  # req/s
+            cvs=[1]
         )
