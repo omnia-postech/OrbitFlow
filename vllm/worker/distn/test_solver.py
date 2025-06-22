@@ -71,43 +71,62 @@ for step in steps:
     if len(request_list) == 0: 
         # make a dummy request\
         request_list.append(Request(
-            id="dummy1", context_len_in_blocks=10, layer_time=0.05, deposit_count=1, slo=0.02, gpu_layers_on_gpu=3
+            id="dummy1", context_len_in_blocks=10, layer_time=0.00125, deposit_count=0, slo=100, gpu_layers_on_gpu=3
         ))
         request_list.append(Request(
-            id="dummy2", context_len_in_blocks=30, layer_time=0.05, deposit_count=1, slo=0.02, gpu_layers_on_gpu=2
+            id="dummy2", context_len_in_blocks=30, layer_time=0.00125, deposit_count=0, slo=100, gpu_layers_on_gpu=2
         ))        
     # request_list[0].layer_time = 0.10
     print("request_list", request_list)
     print("block_bandwidth", block_bandwidth)
     print("gpu_block_capacity", gpu_block_capacity)
-    start = time.time()
     import time 
+    print('---------solver original-----------')
     start = time.time() 
     output = solver.solve(
         request_list, 
-        layer_num=6,
-        block_bandwidth=block_bandwidth, 
-        gpu_block_capacity=30*6)
+        layer_num=32,
+        gpu_block_capacity=30*32)
     end = time.time()
     print("time", end-start)
     end = time.time()
     print(output)
     solver_dists = {s.id: s.n for s in output}  
     print(solver_dists)
-    latency = solver.compute_T_batch(
-        requests_list=request_list,
-        offload_decision=solver_dists,
-        layer_num=6,
-    )
-    uni_dist = {r.id: 2 for r in request_list}
-    print(latency)
-    latency = solver.compute_T_batch(
-        requests_list=request_list,
-        offload_decision=uni_dist,
-        layer_num=6,
-    )
-    print(latency)
     print("solver time", end-start)
+    print('-----------solver original end-------------')
+
+    # print('----------solver minimal--------------')
+    # start = time.time() 
+    # output = solver.solve_minimal(
+    #     request_list, 
+    #     layer_num=32,
+    #     gpu_block_capacity=30*32,
+    #     )
+    # end = time.time()
+    # print("time", end-start)
+    # end = time.time()
+    # print(output)
+    # solver_dists = {s.id: s.n for s in output}  
+    # print(solver_dists)
+    # print("solver time", end-start)
+    
+    # print('---------solver minimal end---------------')
+
     
     # offload_num = {r.id: list(range(31)) for r in request_list}
     # compute_batch_latency(request_list, offload_num=offload_num, block_bandwidth=block_bandwidth)
+    
+    # latency = solver.compute_T_batch(
+    #     requests_list=request_list,
+    #     offload_decision=solver_dists,
+    #     layer_num=32,
+    # )
+    # uni_dist = {r.id: 2 for r in request_list}
+    # print(latency)
+    # latency = solver.compute_T_batch(
+    #     requests_list=request_list,
+    #     offload_decision=uni_dist,
+    #     layer_num=32,
+    # )
+    # print(latency)

@@ -3,7 +3,7 @@ from typing import Set, Any, Dict, List, Optional, Tuple, OrderedDict
 from collections import defaultdict
 import torch
 from gurobipy import GRB
-from vllm.worker.distn.solver import Solver, Result, Request
+# from vllm.worker.distn.solver import Result, Request
 import os
 import psutil    
 
@@ -958,8 +958,8 @@ class FlattenedCacheEngine(CacheEngineBase):
             dist_dict, _ = self._select_prefetch_distance(snap, self.prefetch_distance, total_context_lens, is_decoding, custom_prefetch_mode=prefetch_mode,cur_blocks = cur_blocks)
             logger.critical(f"fall back dist:{dist_dict}")
             plan,cur_blocks = self._plan_cache_delta(snap, dist_dict, pause_and_resume)
-            if plan.feasible == False and  self.prefetch_mode == "solver":
-                self.cache_config.need_solver = True
+            # if plan.feasible == False and  self.prefetch_mode == "solver": # (xinyue) already checked by upper if
+            self.cache_config.need_solver = True
         return plan, dist_dict
     def execute_pause_resume(
             self,

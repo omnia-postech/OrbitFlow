@@ -10,11 +10,11 @@ LOGGING_LEVEL=CRITICAL
 ROOT="/home/xinyuema/vllm"
 
 FIGURE_ONLY=$1
-EXP_LIST=(figure_4_2_token_deposit)                         # ← your “experiments”
+EXP_LIST=(debug)                         # ← your “experiments”
 # METHOD_LIST=(Ours NoPrefetch Flexgen NextLayer Static8 SelectN DistNSingle Ours_TP)      # ← indexes into JSON above
-METHOD_LIST=(Static1)      # ← indexes into JSON above
-TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/figure_4_2/"
-TRACE_LIST=(figure_4_2_token_deposit)
+METHOD_LIST=(NoPrefetch)      # ← indexes into JSON above
+TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/debug/"
+TRACE_LIST=(debug)
 # PPR250_TPI05 PPR394_TPI099)
 
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
