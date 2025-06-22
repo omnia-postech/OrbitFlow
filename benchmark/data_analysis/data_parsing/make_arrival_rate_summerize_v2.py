@@ -77,19 +77,9 @@ def _extract_request_tpot_attainment(
     tpot_mean_res = (attain_cnt / valid_mask.sum() * 100
             if valid_mask.sum() else 0.0)
 
-    # ---------------------------------------------------
+    return tpot_mean_res
 
-    tpot_median = np.asarray(tpot_median_list, dtype=float)
-
-    valid_mask_median = ~np.isnan(tpot_median)          # 실패 요청 포함
-    attain_cnt_median = (tpot_median[valid_mask_median] <= thr).sum()
-
-    tpot_median_res = (attain_cnt_median / valid_mask_median.sum() * 100
-            if valid_mask_median.sum() else 0.0)
-
-    return tpot_mean_res, tpot_median_res
-
-def _extract_token_slo_attainment(
+def _extract_token_slo_attainment_with_TD(
         output_df: pd.DataFrame, 
         slo_df: pd.DataFrame,
         total_decoded: int
@@ -98,7 +88,7 @@ def _extract_token_slo_attainment(
     viol = int(slo_df.get("slo_violation_with_TD", pd.Series(0)).sum())
     return ((total_decoded - viol) / total_decoded * 100 if total_decoded else 0.0)
 
-def tbt_no_Td(
+def _extract_token_slo_attainment_no_TD(
         output_df: pd.DataFrame, 
         slo_df: pd.DataFrame,
         total_decoded: int
@@ -167,11 +157,11 @@ def _extract_percentile_ratio_lists(
 
 def extract_metrics(input_base_path, total_decode):
     output_df = load_output_metrics(Path(input_base_path, "outputs.csv"))
-    slo_df = pd.read_csv(Path(input_base_path, "slo_violation.csv"))
+    slo_df = pd.read_csv(Path(input_base_path, "slo_violationv2.csv"))
 
-    tpot_slo, tpot_median_slo = _extract_request_tpot_attainment(output_df, slo_df, total_decode)
-    tbt_slo_with_TD = _extract_token_slo_attainment(output_df, slo_df, total_decode)
-    tbt_slo_no_TD = tbt_no_Td(output_df, slo_df, total_decode)
+    tpot_slo = _extract_request_tpot_attainment(output_df, slo_df, total_decode)
+    tbt_slo_with_TD = _extract_token_slo_attainment_with_TD(output_df, slo_df, total_decode)
+    tbt_slo_no_TD = _extract_token_slo_attainment_no_TD(output_df, slo_df, total_decode)
     throughput = compute_throughput(output_df)
 
     slo_thr = pd.to_numeric(output_df["slo_threshold"], errors="coerce").to_numpy().mean()
@@ -180,7 +170,7 @@ def extract_metrics(input_base_path, total_decode):
     ratio_means = [np.mean(lst) if lst else 0.0 for lst in pct_lists]
     p90_ratio, p95_ratio, p99_ratio = ratio_means
 
-    return tpot_slo, tbt_slo_with_TD, throughput, slo_thr, p90_ratio, p95_ratio, p99_ratio, tpot_median_slo
+    return tpot_slo, tbt_slo_with_TD, tbt_slo_no_TD, throughput, slo_thr, p90_ratio, p95_ratio, p99_ratio
 
 
 REFERENCE_ROOT = Path("/home/heelim/vllm/benchmark/selected_traces")
@@ -215,20 +205,20 @@ def make_summerize(input_paths: list):
         # print(f"{trace} {metric}")
 
         # extract_metrics(path) -> (tpot_slo, tbt_slo, throughput, slo_thr, p90, p95, p99)
-        tpot_slo, tbt_slo, throughput, slo_thr, p90_ratio, p95_ratio, p99_ratio, tpot_median_slo = extract_metrics(path, total_decode)
+        tpot_slo, tbt_slo_with_TD, tbt_slo_no_TD, throughput, slo_thr, p90_ratio, p95_ratio, p99_ratio = extract_metrics(path, total_decode)
         results.append({
             'slo': slo,
             'method': method,
             'arrival_rate': rate,
             'cv_num': cv_num,
             'tpot_attainment': tpot_slo,
-            'tbt_attainment': tbt_slo,
+            'tbt_attainment_with_TD': tbt_slo_with_TD,
+            'tbt_attainment_no_TD': tbt_slo_no_TD,
             'throughput_tokens_per_sec': throughput,
             'slo_threshold_mean': slo_thr,
             'p90_ratio': p90_ratio,
             'p95_ratio': p95_ratio,
-            'p99_ratio': p99_ratio,
-            'tpot_median_slo': tpot_median_slo,
+            'p99_ratio': p99_ratio
         })
 
     # DataFrame 생성 및 저장
@@ -248,9 +238,9 @@ from pathlib import Path
 BASE_DIR = Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp")
 
 input_base_paths = [
-    Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1/Ours"),
-    Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1.5/Ours"),
-    Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/Ours"),
+    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1/Ours"),
+    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1.5/Ours"),
+    # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/Ours"),
     # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/Ours"),
     # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Ours"),
     # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1.5/Ours")
@@ -264,7 +254,7 @@ if len(input_base_paths) > 0:
     
     for method_dir in input_base_paths:
         input_paths = []    
-        OUTPUT_CSV = method_dir / "arrival_summerize.csv"
+        OUTPUT_CSV = method_dir / "arrival_summerizev2.csv"
 
         # 각 trace_metric 디렉터리
         for trace_dir in sorted(method_dir.iterdir(), key=lambda p: p.name):
@@ -277,7 +267,7 @@ if len(input_base_paths) > 0:
             print(f"start: {trace_dir}")
 
             outputs_csv = trace_dir / 'outputs.csv'
-            slo_violation = trace_dir / 'slo_violation.csv'
+            slo_violation = trace_dir / 'slo_violationv2.csv'
             if outputs_csv.exists() and slo_violation.exists():
                 input_paths.append(trace_dir)
         
@@ -295,7 +285,7 @@ for slo_dir in BASE_DIR.glob('slo*'):
         continue
     for method_dir in slo_dir.iterdir():
         input_paths = []    
-        OUTPUT_CSV = method_dir / "arrival_summerize.csv"
+        OUTPUT_CSV = method_dir / "arrival_summerizev2.csv"
 
         if not method_dir.is_dir():
             continue
@@ -316,7 +306,7 @@ for slo_dir in BASE_DIR.glob('slo*'):
             print(f"start: {trace_dir}")
 
             outputs_csv = trace_dir / 'outputs.csv'
-            slo_violation = trace_dir / 'slo_violation.csv'
+            slo_violation = trace_dir / 'slo_violationv2.csv'
             if outputs_csv.exists() and slo_violation.exists():
                 if outputs_csv.parent in skip_paths:
                     continue

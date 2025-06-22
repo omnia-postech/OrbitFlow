@@ -57,31 +57,50 @@ def compute_slo_violation(req_id, times, solver, slo_thr):
     valid_tbt  = times_np[valid]
     if valid_tbt.size == 0:
         return 0, exceptions
+    
+    deposit = 0
+    prev_out = 0
+    prev_gen = 0
 
-    gen_times  = np.cumsum(valid_tbt)
-    start      = gen_times[0]
-    end        = gen_times[-1] + slo_thr
-    out_times  = start + slo_thr * np.arange(
-                    int(np.floor((end - start) / slo_thr)) + 1, dtype=float)
+    violations = 0
 
-    events = [(t, "gen") for t in gen_times] + \
-             [(t, "out") for t in out_times]
-    events.sort(key=lambda x: (x[0], 0 if x[1] == "gen" else 1))
-
-    deposit, violations, dup = 0, 0, False
-    for _t, typ in events:
-        # if (req_id == 8):
-            # print(f"{typ} {violations}")
-        if typ == "gen":
+    for tbt in valid_tbt:
+        # slo 보다 먼저 token 생성
+        if prev_gen + tbt < prev_out + slo_thr:
             deposit += 1
-            dup = False
-        else:  # out
-            if deposit > 0:
+            prev_gen += tbt
+            if req_id == to_see:
+                print(f"generate at {prev_gen} , deposit : {deposit} tbt : {tbt}")
+        # 생성 시 바로 나감
+        elif prev_gen + tbt == prev_out + slo_thr:
+            prev_gen += tbt
+            prev_out += slo_thr
+            if req_id == to_see: 
+                print(f"generate at {prev_gen} , out at {prev_out} , deposit : {deposit} tbt : {tbt}")
+        # deposit에 있는 것 쓰거나, violation 
+        else:
+            # 다음 생성까지 deposit에 있는 것을 계속 꺼내써야함
+            while(deposit > 0 and prev_out + slo_thr < prev_gen + tbt):
+                # deposit에 있는 것 꺼내쓰기
                 deposit -= 1
-                dup = False
-            elif not dup:
+                prev_out += slo_thr
+                if req_id == to_see: 
+                    print(f"use deposite at {prev_out} deposit : {deposit} tbt : {tbt}")
+            
+            # 새 토큰 생성 전에 token 나가야 하면, violation 발생 후 생성 직후 out
+            if (prev_out + slo_thr < prev_gen + tbt):
                 violations += 1
-                dup = True
+                prev_gen += tbt
+                prev_out = prev_gen
+                if req_id == to_see:
+                    print(f"violation at {prev_out} tbt : {tbt}")
+            # 토큰 생성
+            else :
+                deposit += 1
+                prev_gen += tbt
+                if req_id == to_see:
+                    print(f"generate at {prev_gen} , deposit : {deposit} tbt : {tbt}")
+
     return violations, exceptions
 
 # ───────────────────────────────────────────────
@@ -107,8 +126,6 @@ def process_experiment(exp_dir: Path):
     results = []
 
     total_req_len = len(ref_reqs)
-
-    print(slo_thr)
     
     if Fix:
         total_req_len = max(int(str(rid).split("_")[-1]) for rid in df["request_id"].unique()) + 1
@@ -150,7 +167,7 @@ def process_experiment(exp_dir: Path):
         # slo_thr 보다 작은 tbt 값만 모아서 no_TD 리스트로
         no_td = [
             tbt for tbt in req_row["time_between_tokens"]
-            if tbt < slo_thr
+            if tbt >= slo_thr
         ]
 
         results.append(
@@ -162,61 +179,10 @@ def process_experiment(exp_dir: Path):
              }
         )        
 
-    out_csv = exp_dir / "slo_violation.csv"
+    out_csv = exp_dir / "slo_violationv2.csv"
     pd.DataFrame(results).to_csv(out_csv, index=False, encoding="utf-8-sig")
-    log.info(f"✔  {exp_dir.relative_to(ROOT_DIR)} → slo_violation.csv "
+    log.info(f"✔  {exp_dir.relative_to(ROOT_DIR)} → slo_violationv2.csv "
              f"(SLO={slo_thr:.3f})")
-
-        
-    # for req_id, (tbt, solver, dl) in enumerate(
-    #     zip(df["time_between_tokens"],
-    #         df["solver_time"],
-    #         df["decode_length"])
-    # ):
-    #     try:
-    #         ref_len = ref_reqs[f"request_{req_id}"]["output_length"]
-    #     except KeyError:
-    #         # OVERVIEW_PNG = "outputs_overview.png"
-    #         # # 아직 시뮬레이션이 끝나지 않은 상태로 간주
-    #         # if not (exp_dir / OVERVIEW_PNG).exists():
-    #         #     log.info(f"⏳  {exp_dir.relative_to(ROOT_DIR)} "
-    #         #              f"still running – skipped")
-    #         #     return          # ★ 실험 전체를 건너뜀
-    #         # # 개요 PNG가 있는데도 KeyError면 진짜 오류
-    #         # log.error(f"Inconsistent reference JSON for {exp_dir} "
-    #         #           f"(missing request_{req_id})")
-
-    #         results.append(
-    #             {
-    #                 "request_id": f"request_{req_id}",
-    #                 "slo_violation": ref_len-1,
-    #                 "exceptions":   True, 
-    #                 "failed": True,
-    #             }
-    #         )   
-    #         return
-        
-        
-    #     vio, exc = compute_slo_violation(req_id, tbt, solver, slo_thr)
-    #     # print(f"{req_id} {vio}")
-    #     ref_len  = reference["requests"][f"request_{req_id}"]["output_length"]
-    #     vio     += max(ref_len - dl - 1, 0)       # 미생성 토큰 보정
-    #     # print(f"{req_id} {vio}")
-    #     failed = False
-    #     if ref_len -1 != dl:
-    #         failed = True   
-    #     results.append(
-    #         {"request_id": f"request_{req_id}",
-    #          "slo_violation": vio,
-    #          "exceptions":   exc, 
-    #          "failed": failed,
-    #          }
-    #     )        
-
-    # out_csv = exp_dir / "slo_violation.csv"
-    # pd.DataFrame(results).to_csv(out_csv, index=False, encoding="utf-8-sig")
-    # log.info(f"✔  {exp_dir.relative_to(ROOT_DIR)} → slo_violation.csv "
-    #          f"(SLO={slo_thr:.3f})")
 
 # ───────────────────────────────────────────────
 # 3. 루트 전체 순회
@@ -244,7 +210,7 @@ def main():
         help="Experiment directories (absolute or relative to ROOT_DIR). "
              "If omitted, run on all experiments.")
     parser.add_argument("--missing", action="store_true",
-        help="Only run on experiments that lack slo_violation.csv")
+        help="Only run on experiments that lack slo_violationv2.csv")
     args = parser.parse_args()
 
     # ① 특정 디렉터리 지정
@@ -256,7 +222,7 @@ def main():
     # ② --missing 플래그
     if args.missing:
         scan = [d for d in ROOT_DIR.rglob("outputs.csv")
-                if not (d.parent / "slo_violation.csv").exists()]
+                if not (d.parent / "slo_violationv2.csv").exists()]
     else:
         # ③ 기본: 전체 순회
         scan = ROOT_DIR.rglob("outputs.csv")
