@@ -39,7 +39,7 @@ def load_metrics(csv_path: str | Path) -> pd.DataFrame:
 
 
 csv1 = Path("/home/heelim/vllm/outputs/benchmark/figure_4_2_token_deposit/outputs.csv")
-csv2 = Path("/home/heelim/vllm/outputs/benchmark/figure_4_2_token_deposit_2/outputs.csv")
+csv2 = Path("/home/heelim/vllm/outputs/benchmark/figure_4_2_token_deposit/outputs.csv")
 
 df = load_metrics(csv1)
 csv_path = csv1
@@ -114,11 +114,17 @@ for idx, (_, row) in enumerate(df.iterrows()):
 
     if isinstance(tbt_list, (list, tuple)):
         cum = first_tok_wall
+        cutoff = len(tbt_list)-480
+        counter = 0
         for st, dt in zip(solver_ts, tbt_list):
+            counter += 1
+            if counter > cutoff:
+                break
             step_time = (dt - st if dt - st >= 0.035 else dt)
             cum += step_time
             xs_req.append(cum - t0)
             ys_req.append(step_time * 1000)         # s → ms
+    print(len(xs_req), len(ys_req))
 
     if len(xs_req) < 2:
         continue
@@ -187,7 +193,7 @@ for idx, (_, row) in enumerate(df.iterrows()):
             rec(next_emit, deposit)
             emit_t += slo_thr
 
-    ax_dep.step(deposit_curve_x, deposit_curve_y,
+    ax_dep.step(deposit_curve_x[:-50], deposit_curve_y[:-50],
                 where="post", color=color, lw=0.5)
     dep_vals = np.interp(xs_rel, deposit_curve_x, deposit_curve_y)
 
@@ -245,13 +251,13 @@ for idx, (_, row) in enumerate(df.iterrows()):
                         step="post", color="green",  alpha=0.15)
     ax_dep.fill_between(xs_fit, 0, dep_vals,
                         where=(mask_orange & (dep_vals > 0)),
-                        step="post", color="orange", alpha=0.25)
+                        step="post", color="red", alpha=0.25)
     ax_lat.fill_between(xs_fit, ys_fit, y_slo,
                         where=mask_green, interpolate=True,
                         color="green", alpha=0.15)
     ax_lat.fill_between(xs_fit, ys_fit, y_slo,
                         where=mask_orange, interpolate=True,
-                        color="orange", alpha=0.25)
+                        color="red", alpha=0.25)
     ax_lat.fill_between(xs_fit, ys_fit, y_slo,
                         where=mask_red, interpolate=True,
                         color="red", alpha=0.25)
@@ -275,7 +281,7 @@ ax_lat.set_ylim(50, 85)
 ax_lat.set_xticks([])
 
 ax_dep.set_ylabel("Deposited\nTokens", fontsize=FS_LABEL)
-ax_dep.set_ylim(0, 38)
+ax_dep.set_ylim(0, 45)
 ax_dep.set_xticks([])
 
 # ax_perc.set_xlabel("Time (s)", fontsize=FS_LABEL)
@@ -372,7 +378,7 @@ ymax_lat, ymax_dep, ymax_perc = 0.0, 0, 0.0
 # ------------------------------------------------------------------ #
 
 rid1        = df.at[0, "request_id"]
-rid2        = df.at[1, "request_id"]
+rid2        = "request_1"
 color      = palette[0]
 
 arrival    = df.at[0, "arrival_time"]
@@ -389,15 +395,20 @@ ys_req.append(0.0)                              # ms proxy
 
 if isinstance(tbt_list, (list, tuple)):
     cum = first_tok_wall
+    cutoff = len(tbt_list)-480
+    counter = 0
     for st, dt in zip(solver_ts, tbt_list):
-        step_time = (dt - st if dt - st >= 0.035 else dt) - 0.003
+        counter += 1
+        if counter > cutoff:
+            break
+        step_time = (dt - st if dt - st >= 0.035 else dt) #- 0.003
         cum += step_time
         xs_req.append(cum - t0)
         ys_req.append(step_time * 1000)         # s → ms
-
+print(len(xs_req), len(ys_req))
 # ys_req = [y + 0.3 for y in ys_req]
 x1_min, x1_max = xs_req[0], xs_req[-1]
-x2_min, x2_max = xs_req[99], xs_req[199]
+x2_min, x2_max = xs_req[99], xs_req[159]
 
 for ax in (ax_dep, ax_perc):
     ax.axvline(x1_min, color="black", lw=1.5, ls="dashed", alpha=0.8)
@@ -407,23 +418,24 @@ for ax in (ax_dep, ax_perc):
     
 
 # ---- linear fit --------------------------------------------- #
+offset = 700
 m1, b1 = np.polyfit(xs_req, ys_req, 1)
-m2, b2 = np.polyfit(xs_req[99:200], ys_req[99:200], 1)
+m2, b2 = np.polyfit(xs_req[99:160], ys_req[99+offset:160+offset], 1)
 
-xs_fit1 = np.linspace(x1_min, x2_min, 150)
+xs_fit1 = np.linspace(x1_min, x2_min, 160)
 ys_fit1 = m1 * xs_fit1 + b1
 xs_rel1  = xs_fit1
 ax_lat.plot(xs_fit1, ys_fit1, color=color, lw=1.5,
         label =rid1)
 
-xs_fit2 = np.linspace(x2_min, x2_max, 150)
+xs_fit2 = np.linspace(x2_min, x2_max, 160)
 ys_fit2 = m2 * xs_fit2 + b2
 xs_rel2 = xs_fit2
 ax_lat.plot(xs_fit2, ys_fit2, color=color, lw=1.5,
         label =rid2)
 
 
-xs_fit3 = np.linspace(x2_max, x1_max, 150)
+xs_fit3 = np.linspace(x2_max, x1_max, 160)
 ys_fit3 = m1 * xs_fit3 + b1
 xs_rel3 = xs_fit2
 ax_lat.plot(xs_fit3, ys_fit3, color=color, lw=1.5,
@@ -499,7 +511,7 @@ while ti < len(tok_times) or deposit > 0:
         emit_t += slo_thr
 
 ax_dep.step(deposit_curve_x, deposit_curve_y,
-            where="post", color=color, lw=0.1)
+            where="post", color=color, lw=0.5)
 dep_vals = np.interp(xs_rel1, deposit_curve_x, deposit_curve_y)
 
 # ----------- find first deposit depletion time ---------------- #
@@ -574,13 +586,13 @@ ax_dep.fill_between(xs_fit1, 0, dep_vals,
                     step="post", color="green",  alpha=0.15)
 ax_dep.fill_between(xs_fit1, 0, dep_vals,
                     where=(mask_orange & (dep_vals > 0)),
-                    step="post", color="orange", alpha=0.25)
+                    step="post", color="red", alpha=0.25)
 ax_lat.fill_between(xs_fit1, ys_fit1, y_slo,
                     where=mask_green, interpolate=True,
                     color="green", alpha=0.15)
 ax_lat.fill_between(xs_fit1, ys_fit1, y_slo,
                     where=mask_orange, interpolate=True,
-                    color="orange", alpha=0.25)
+                    color="red", alpha=0.25)
 ax_lat.fill_between(xs_fit1, ys_fit1, y_slo,
                     where=mask_red, interpolate=True,
                     color="red", alpha=0.25)
@@ -614,13 +626,13 @@ ax_dep.fill_between(xs_fit2, 0, dep_vals,
                     step="post", color="green",  alpha=0.15)
 ax_dep.fill_between(xs_fit2, 0, dep_vals,
                     where=(mask_orange & (dep_vals > 0)),
-                    step="post", color="orange", alpha=0.25)
+                    step="post", color="red", alpha=0.25)
 ax_lat.fill_between(xs_fit2, ys_fit2, y_slo,
                     where=mask_green, interpolate=True,
                     color="green", alpha=0.15)
 ax_lat.fill_between(xs_fit2, ys_fit2, y_slo,
                     where=mask_orange, interpolate=True,
-                    color="orange", alpha=0.25)
+                    color="red", alpha=0.25)
 ax_lat.fill_between(xs_fit2, ys_fit2, y_slo,
                     where=mask_red, interpolate=True,
                     color="red", alpha=0.25)
@@ -651,13 +663,13 @@ ax_dep.fill_between(xs_fit3, 0, dep_vals,
                     step="post", color="green",  alpha=0.15)
 ax_dep.fill_between(xs_fit3, 0, dep_vals,
                     where=(mask_orange & (dep_vals > 0)),
-                    step="post", color="orange", alpha=0.25)
+                    step="post", color="red", alpha=0.25)
 ax_lat.fill_between(xs_fit3, ys_fit3, y_slo,
                     where=mask_green, interpolate=True,
                     color="green", alpha=0.15)
 ax_lat.fill_between(xs_fit3, ys_fit3, y_slo,
                     where=mask_orange, interpolate=True,
-                    color="orange", alpha=0.25)
+                    color="red", alpha=0.25)
 ax_lat.fill_between(xs_fit3, ys_fit3, y_slo,
                     where=mask_red, interpolate=True,
                     color="red", alpha=0.25)
@@ -683,7 +695,7 @@ ax_lat.set_ylim(50, 85)
 ax_lat.set_yticks([])
 
 # ax_dep.set_ylabel("Deposited\nTokens", fontsize=FS_LABEL)
-ax_dep.set_ylim(0, 38)
+ax_dep.set_ylim(0, 45)
 ax_dep.set_yticks([])
 
 # ax_perc.set_xlabel("Time (s)", fontsize=FS_LABEL)
@@ -832,15 +844,16 @@ fig.text(0.75, 0.08, '(b) Two Requests', ha='center', va='top',
 # legend
 
 green_patch  = mpatches.Patch(color="green", alpha=0.15, label="Within SLO")
-orange_patch = mpatches.Patch(color="orange", alpha=0.25, label="Masked Violations")
-red_patch    = mpatches.Patch(color="red",  alpha=0.25,  label="Perceived Violations")
+orange_patch = mpatches.Patch(color="red", alpha=0.25, label="Masked Violations")
+red_patch    = mpatches.Patch(color="red",  alpha=0.25)# ,  label="Perceived Violations")
 dash_line    = Line2D([0], [0], color="black", linestyle="-.", label="SLO Threshold")  # 추가
 
 # --- Figure 전체 위쪽에 범례를 표시 --- #
 # loc="upper center"로 하면 그림 상단 중앙에 붙습니다.
 # ncol=3 로 한 줄에 3개 아이템을 나란히 배치합니다.
 fig.legend(
-    handles=[green_patch, orange_patch, red_patch, dash_line],
+    # handles=[green_patch, orange_patch, red_patch, dash_line],
+    handles=[green_patch, orange_patch, dash_line],
     loc="upper center",
     ncol=4,
     frameon=False,       # 테두리 없이 표시
@@ -849,5 +862,5 @@ fig.legend(
     columnspacing=0.7,
 )
 
-fig.savefig(f"/home/sychoy/vllm/benchmark/data_analysis/figures/deposit_combined2.png", dpi=150, bbox_inches="tight")
-# fig.savefig(f"/home/syco/vllm/benchmark/data_analysis/figures/deposit_combined2.pdf", dpi=150, bbox_inches="tight")
+fig.savefig(f"/home/xinyuema/vllm/benchmark/data_analysis/draw_paper_fig_table.py/figures/deposit_combined2.png", dpi=150, bbox_inches="tight")
+fig.savefig(f"/home/xinyuema/vllm/benchmark/data_analysis/draw_paper_fig_table.py/figures/deposit_combined2.pdf", dpi=1200, bbox_inches="tight")
