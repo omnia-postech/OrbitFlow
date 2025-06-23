@@ -41,6 +41,7 @@ def _extract_request_tpot_attainment(
 
     # 2) 요청별 TPOT 배열 생성
     tpot_list = []
+    tpot_median_list = []
     req_ids   = (
         slo_df["request_id"]
         if "request_id" in slo_df.columns
@@ -53,6 +54,7 @@ def _extract_request_tpot_attainment(
         else :
             vals = output_df.loc[output_df["request_id"] == rid, "time_between_tokens"]
             tpot_list.append(np.mean(vals.iloc[0]))
+            tpot_median_list.append(np.median(vals.iloc[0]))
 
 
     # for rid, tbt_series in zip(req_ids, output_df["time_between_tokens"]):
@@ -70,8 +72,21 @@ def _extract_request_tpot_attainment(
     valid_mask = ~np.isnan(tpot)          # 실패 요청 포함
     attain_cnt = (tpot[valid_mask] <= thr).sum()
 
-    return (attain_cnt / valid_mask.sum() * 100
+    tpot_mean_res = (attain_cnt / valid_mask.sum() * 100
             if valid_mask.sum() else 0.0)
+
+    # ---------------------------------------------------
+
+    tpot_median = np.asarray(tpot_median_list, dtype=float)
+
+    valid_mask_median = ~np.isnan(tpot_median)          # 실패 요청 포함
+    attain_cnt_median = (tpot_median[valid_mask_median] <= thr).sum()
+
+    tpot_median_res = (attain_cnt_median / valid_mask_median.sum() * 100
+            if valid_mask_median.sum() else 0.0)
+
+    return tpot_mean_res, tpot_median_res
+
 
 def _extract_token_slo_attainment(
         output_df: pd.DataFrame, 
@@ -144,7 +159,7 @@ def extract_metrics(input_base_path, total_decode):
     output_df = load_output_metrics(Path(input_base_path, "outputs.csv"))
     slo_df = pd.read_csv(Path(input_base_path, "slo_violation.csv"))
 
-    tpot_slo = _extract_request_tpot_attainment(output_df, slo_df, total_decode)
+    tpot_slo, tpot_median_slo = _extract_request_tpot_attainment(output_df, slo_df, total_decode)
     tbt_slo = _extract_token_slo_attainment(output_df, slo_df, total_decode)
     throughput = compute_throughput(output_df)
 
@@ -154,7 +169,7 @@ def extract_metrics(input_base_path, total_decode):
     ratio_means = [np.mean(lst) if lst else 0.0 for lst in pct_lists]
     p90_ratio, p95_ratio, p99_ratio = ratio_means
 
-    return tpot_slo, tbt_slo, throughput, slo_thr, p90_ratio, p95_ratio, p99_ratio
+    return tpot_slo, tbt_slo, throughput, slo_thr, p90_ratio, p95_ratio, p99_ratio, tpot_median_slo
 
 
 REFERENCE_ROOT = Path("/home/heelim/vllm/benchmark/selected_traces")
@@ -184,7 +199,7 @@ def make_summerize(input_paths: list):
         # print(f"{trace} {metric}")
 
         # extract_metrics(path) -> (tpot_slo, tbt_slo, throughput, slo_thr, p90, p95, p99)
-        tpot_slo, tbt_slo, throughput, slo_thr, p90_ratio, p95_ratio, p99_ratio = extract_metrics(path, total_decode)
+        tpot_slo, tbt_slo, throughput, slo_thr, p90_ratio, p95_ratio, p99_ratio, tpot_median_slo = extract_metrics(path, total_decode)
         results.append({
             'slo': slo,
             'method': method,
@@ -197,6 +212,7 @@ def make_summerize(input_paths: list):
             'p90_ratio': p90_ratio,
             'p95_ratio': p95_ratio,
             'p99_ratio': p99_ratio,
+            'tpot_median_slo': tpot_median_slo
         })
 
     # DataFrame 생성 및 저장
@@ -277,7 +293,8 @@ for slo_dir in BASE_DIR.glob('slo*'):
                     continue
                 input_paths.append(trace_dir)
         
-        make_summerize(input_paths)
+        if len(input_paths) > 0:
+            make_summerize(input_paths)
 
         # ──────────────────────────────────────────────────────
         # 추출 함수가 정의된 모듈 import

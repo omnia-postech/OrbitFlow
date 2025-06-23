@@ -45,6 +45,7 @@ def load_metrics(path: Path) -> pd.DataFrame:
             )
     return df
 
+to_see = 10000
 
 def compute_slo_violation(req_id, times, solver, slo_thr):
     times_np   = np.asarray(times,  dtype=float)
@@ -70,7 +71,7 @@ def compute_slo_violation(req_id, times, solver, slo_thr):
     deposit, violations, dup = 0, 0, False
     for _t, typ in events:
         # if (req_id == 8):
-        #     print(f"{typ} {violations}")
+            # print(f"{typ} {violations}")
         if typ == "gen":
             deposit += 1
             dup = False
@@ -106,6 +107,8 @@ def process_experiment(exp_dir: Path):
     results = []
 
     total_req_len = len(ref_reqs)
+
+    print(slo_thr)
     
     if Fix:
         total_req_len = max(int(str(rid).split("_")[-1]) for rid in df["request_id"].unique()) + 1
@@ -143,9 +146,17 @@ def process_experiment(exp_dir: Path):
         failed = False
         if ref_len -1 != dl:
             failed = True   
+
+        # slo_thr 보다 작은 tbt 값만 모아서 no_TD 리스트로
+        no_td = [
+            tbt for tbt in req_row["time_between_tokens"]
+            if tbt < slo_thr
+        ]
+
         results.append(
             {"request_id": f"request_{id}",
-             "slo_violation": vio,
+             "slo_violation_with_TD": vio,
+             "slo_violation_no_TD": len(no_td),
              "exceptions":   exc, 
              "failed": failed,
              }
@@ -155,7 +166,6 @@ def process_experiment(exp_dir: Path):
     pd.DataFrame(results).to_csv(out_csv, index=False, encoding="utf-8-sig")
     log.info(f"✔  {exp_dir.relative_to(ROOT_DIR)} → slo_violation.csv "
              f"(SLO={slo_thr:.3f})")
-
 
         
     # for req_id, (tbt, solver, dl) in enumerate(

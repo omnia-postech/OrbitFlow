@@ -29,7 +29,7 @@ FIGURE_ONLY="${1:-0}"                  # default = 0 (run + plot)
 
 EXP_LIST=(paper_main_exp)              # high-level experiment names
 METHOD_LIST=(Ours)                  # see supported_methods.json for keys
-TRACE_LIST=(lambda1.0x_cv1)     # trace JSONs (basename only)
+TRACE_LIST=(lambda1.5x_cv1 lambda2.5x_cv1 lambda3.5x_cv1)     # trace JSONs (basename only)
 
 TRACE_CFG_DIR="${ROOT}/benchmark/selected_traces"
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"

@@ -28,15 +28,15 @@ ROOT="/home/heelim/vllm"               # project root
 FIGURE_ONLY="${1:-0}"                  # default = 0 (run + plot)
 
 EXP_LIST=(paper_main_exp)              # high-level experiment names
-METHOD_LIST=(Ours)                  # see supported_methods.json for keys
-TRACE_LIST=(lambda4.0x_cv1)     # trace JSONs (basename only)
+METHOD_LIST=(NextLayer)                  # see supported_methods.json for keys
+TRACE_LIST=(lambda1.5x_cv1 lambda2.5x_cv1 lambda3.5x_cv1)     # trace JSONs (basename only)
 
 TRACE_CFG_DIR="${ROOT}/benchmark/selected_traces"
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"
 PLOTTER="${ROOT}/benchmark/data_analysis/metrics_plot.py"
 
-SLO_RATIO_LIST=(2.5 1.5 1)                   # e.g. 1.5 2.0 2.5 …
+SLO_RATIO_LIST=(2.5)                   # e.g. 1.5 2.0 2.5 …
 
 ###############################################################################
 # 2. UTILITY FUNCTIONS                                                         #
