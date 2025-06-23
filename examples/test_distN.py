@@ -30,7 +30,8 @@ import torch
 from vllm.sampling_params import SamplingParams
 torch.set_printoptions(edgeitems=2, linewidth=120, sci_mode=True)
 # --- Config ---
-MODEL = "/home/jongseop/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"
+# MODEL = "/home/jongseop/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"
+MODEL = "/home/heelim/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"
 PROMPT_DIR = "./prompts"
 USE_DEFAULT_SAMPLES = True
 BATCH_SIZE = 4  # Serving batch size set to 4
@@ -339,7 +340,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
     token_limit = trace_obj.num_gpu_blocks_override * BLOCK_SIZE 
     max_comp_time = estimator.estimate_by_profiled_results(tokens=token_limit,
                                                                     which="NoPrefetch" ,
-                                                                    mode="upper_quad")
+                                                                    mode="linear")
     slo_scale = sim.slo_ratio 
     engine.model_executor.driver_worker.cache_engine[0].max_slo = max_comp_time * slo_scale
     engine.model_executor.driver_worker.cache_engine[0].max_comp_time = max_comp_time 
@@ -366,11 +367,11 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                     token_limit = trace_obj.num_gpu_blocks_override * BLOCK_SIZE 
                     max_slo = estimator.estimate_by_profiled_results(tokens=token_limit,
                                                                     which="NoPrefetch" ,
-                                                                    mode="upper_quad")
+                                                                    mode="linear")
 
                     # max_slo = estimator.estimate_by_profiled_results(tokens=req_obj.input_length + req_obj.output_length,
                     #                                                 which="NoPrefetch" ,
-                    #                                                 mode="upper_quad")
+                    #                                                 mode="linear")
                     slo = sim.register(req_id, max_slo)
                 logger.critical(f"Enqueued request {req_id} with max_slo {max_slo} and SLO {(1/sim.v[req_id]):.3f} ms per token")
             # Remove them from the queue
@@ -418,7 +419,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                 
                 profiled_res = estimator.estimate_by_profiled_results(tokens=step_tokens,
                                                 which="NoPrefetch",
-                                                mode="upper_quad")
+                                                mode="linear")
                 if not hasattr(step_outputs[0], "solver_time"):
                     solver_time = 0.0
                 else: 
@@ -432,7 +433,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                 prefill_wall += elapsed_time_step
                 profiled_res = estimator.estimate_by_profiled_results(tokens=step_tokens,
                                                 which="NoPrefetch",
-                                                mode="upper_quad")
+                                                mode="linear")
                 step_tokens = sum([request_metadata[rid]["prompt_length"] for rid in prefill_rids])
                 solver_time = 0.0
                 solver_estimated_time = 100
@@ -695,12 +696,12 @@ def main(configs):
     if configs.profiled_results:
         p_path = configs.profiled_results
     else:
-        p_path = "/home/heelim/vllm/benchmark/scripts/profiled_results.json"
+        p_path = "/home/heelim/vllm/benchmark/scripts/profiled_results_A6000.json"
     estimator = ProfileBasedEstimator(p_path)
     print("Available Profiled Fitters:", estimator.available_profiles())
     t_bt = estimator.estimate_by_profiled_results(tokens=2048,
                                             which="NoPrefetch",
-                                            mode="upper_quad")
+                                            mode="linear")
     print(f"Estimated Δt per token @2048 tokens ≈ {t_bt:.4f} s")
     # Retrieve goodness-of-fit if you wish
     print("R² for that fit:", estimator.r2("NoPrefetch", "linear"))

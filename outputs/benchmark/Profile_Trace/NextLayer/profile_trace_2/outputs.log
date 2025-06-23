@@ -1,0 +1,8 @@
+All requests completed. Now saving CSV...
+Metrics saved to /home/heelim/vllm/outputs/benchmark/Profile_Trace/NextLayer/profile_trace_2/outputs.csv
+------Wall-clock stats (non-overlapping)------
+Overall runtime  : 2495.182 s
+Prefill time     : 5000 tokens over 7.317 s ( 683.31 t/s)
+Decode  time     : 9999 tokens over 2487.865 s ( 4.02 t/s)
+Preemptions  time     : 0
+Overall solver time: 0.000 s
