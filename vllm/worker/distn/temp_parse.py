@@ -13,9 +13,9 @@ Parse a log produced by the solver and
 import re
 from pathlib import Path
 from statistics import median  
-# LOG_PATH          = Path("/home/xinyuema/vllm/vllm/worker/distn/token_dyn_mid_outputs.log")          # input
+LOG_PATH          = Path("/home/xinyuema/vllm/vllm/worker/distn/both_dyn_high_outputs.log")          # input
 # LOG_PATH          = Path("/home/xinyuema/vllm/outputs/benchmark/Test_0618_New_solver_latModelModified/Ours/both_dyn_low/outputs.log")          # input
-LOG_PATH          = Path("/home/xinyuema/vllm/outputs/benchmark/Test_0618_New_solver_latModelModified/Ours/token_dyn_low/outputs.log")          # input
+# LOG_PATH          = Path("/home/xinyuema/vllm/outputs/benchmark/Test_0618_New_solver_latModelModified/Ours/token_dyn_low/outputs.log")          # input
 # LOG_PATH          = Path("/home/xinyuema/vllm/outputs/benchmark/Test_0618_New_solver/Ours/both_dyn_low/outputs.log")          # input
 # LOG_PATH          = Path("/home/xinyuema/vllm/vllm/worker/distn/both_dyn_low_outputs.log")          # input
 UNIFORM_OUT_PATH  = Path("uniform_blocks.log")      # outputs
