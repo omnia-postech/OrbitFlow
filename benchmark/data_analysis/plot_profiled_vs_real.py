@@ -474,7 +474,7 @@ def main(argv) -> None:
         df = df[['time_between_tokens', "request_id"]]
         df3 = df2[['time_between_tokens', "request_id"]]
         df3['time_between_tokens'][0]= [x-y for x, y in zip(df2['time_between_tokens'][0], df['time_between_tokens'][0])]
-        csv3 = "/home/xinyuema/vllm/outputs/benchmark/Profile/NextLayer/profile_trace/outputs_diff.csv"
+        csv3 = "/home/xinyuema/vllm/outputs/benchmark/Profile_Trace/NextLayer/profile_trace/outputs_diff.csv"
         csv_path3 = Path(csv3).expanduser().resolve()
         out_path3 = write_all_tbt_figures(df3, csv_path3)
         print(f"Figure written ➜ {out_path3}")

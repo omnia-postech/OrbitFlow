@@ -171,7 +171,7 @@ class Solver_updated:
         layer_num: int = 32,
         block_bandwidth: float = 103_178.0 / 1_000,   # blocks / second (16 tokens per block)
         gpu_block_capacity: int = 49_152 // 80,       # total blocks the GPU can hold
-        window_ub: int = 1000,                          # upper bound on decode-window length
+        window_ub: int = 130,                          # upper bound on decode-window length
     ) -> Optional[list[Result]]:
         """Optimise KV-placement and pre-fetch distance for the current micro-batch.
 
@@ -471,10 +471,20 @@ class Solver_updated:
         viol_tokens = model.addVars(requests, lb=0.0, ub=window_ub, name="viol_tokens")
 
         # C1: if slo_violate == 0  ⇒  viol_tokens = 0
-        model.addConstrs(
-            (viol_tokens[r] <= decode_steps * slo_violate[r]   for r in requests),
-            name="viol_tok_ub"
-        )
+        # model.addConstrs(
+        #     (viol_tokens[r] <= decode_steps * slo_violate[r]   for r in requests),
+        #     name="viol_tok_ub"
+        # )
+        # --- C1 & C1'  (indicator form → no bilinear term) -----------------
+        for r in requests:
+            # slo_violate == 0  ⇒  viol_tokens = 0
+            model.addGenConstrIndicator(slo_violate[r], False,
+                                        viol_tokens[r] == 0,
+                                        name=f"viol_tok_zero_{r}")
+            # slo_violate == 1  ⇒  viol_tokens ≤ decode_steps
+            model.addGenConstrIndicator(slo_violate[r], True,
+                                        viol_tokens[r] <= decode_steps,
+                                        name=f"viol_tok_ub_{r}")
 
         # C2: if slo_violate == 1  ⇒  ≥ (decode_steps - deposit_count) late tokens
         M_tok = window_ub
@@ -498,18 +508,45 @@ class Solver_updated:
         #                 <= gpu_block_capacity,
         #                 name="gpu_memory_cap")
         # replace the old gpu_memory_cap block
-        grow_blocks = {r: context_blocks[r] + extra_blocks for r in requests}
+        # grow_blocks = {r: context_blocks[r] + extra_blocks for r in requests}
 
+        # model.addConstr(
+        #     gp.quicksum((L - offload_num[r]) * grow_blocks[r] for r in requests)
+        #     <= gpu_block_capacity,
+        #     name="gpu_memory_cap")
+        # --- helper: total #layers kept on-GPU across the batch --------------
+        undecode_total = model.addVar(lb=0, ub=L * len(requests),
+                                    vtype=GRB.INTEGER, name="undecode_total")
         model.addConstr(
-            gp.quicksum((L - offload_num[r]) * grow_blocks[r] for r in requests)
-            <= gpu_block_capacity,
+            undecode_total == gp.quicksum(L - offload_num[r] for r in requests),
+            name="undecode_total_def")
+        # --- linear surrogate for  extra_blocks × undecode_total -------------
+        mem_prod = model.addVar(lb=0, ub=gpu_block_capacity,
+                                vtype=GRB.CONTINUOUS, name="mem_prod")
+
+        # bounds for McCormick:  extra_blocks ∈ [2, bucket_cnt] ;
+        #                        undecode_total ∈ [0, L * |R|]
+        xL, xU = 2, bucket_cnt
+        yL, yU = 0, L * len(requests)
+
+        model.addConstr(mem_prod >= xL * undecode_total + yL * extra_blocks - xL * yL,
+                        name="mem_mcc1")
+        model.addConstr(mem_prod >= xU * undecode_total + yU * extra_blocks - xU * yU,
+                    name="mem_mcc2")
+        model.addConstr(mem_prod <= xU * undecode_total + yL * extra_blocks - xU * yL,
+                        name="mem_mcc3")
+        model.addConstr(mem_prod <= xL * undecode_total + yU * extra_blocks - xL * yU,
+                    name="mem_mcc4")
+        model.addConstr(
+            gp.quicksum((L - offload_num[r]) * context_blocks[r] for r in requests)
+            + mem_prod <= gpu_block_capacity,
             name="gpu_memory_cap")
 
         # --------------------------------------------------------------------------
         # 7. Objectives
         # --------------------------------------------------------------------------
         model.setObjectiveN(token_time, 0, 1, 1, GRB.MINIMIZE)   # primary – latency
-        # model.setObjectiveN(-decode_steps, 1, 2, 1, GRB.MINIMIZE)  # secondary – window
+        model.setObjectiveN(-decode_steps, 1, 2, 1, GRB.MINIMIZE)  # secondary – window
 
         # Gurobi parameters --------------------------------------------------------
         model.Params.OutputFlag    = 1

@@ -71,10 +71,10 @@ for step in steps:
     if len(request_list) == 0: 
         # make a dummy request\
         request_list.append(Request(
-            id="dummy1", context_len_in_blocks=10, layer_time=0.00125, deposit_count=0, slo=100, gpu_layers_on_gpu=3
+            id="dummy1", context_len_in_blocks=10, layer_time=0.0000125, deposit_count=1000, slo=100, gpu_layers_on_gpu=3
         ))
         request_list.append(Request(
-            id="dummy2", context_len_in_blocks=30, layer_time=0.00125, deposit_count=0, slo=100, gpu_layers_on_gpu=2
+            id="dummy2", context_len_in_blocks=30, layer_time=0.0000125, deposit_count=1000, slo=100, gpu_layers_on_gpu=2
         ))        
     # request_list[0].layer_time = 0.10
     print("request_list", request_list)
@@ -86,7 +86,7 @@ for step in steps:
     output = solver.solve(
         request_list, 
         layer_num=32,
-        gpu_block_capacity=30*32)
+        gpu_block_capacity=100*32)
     end = time.time()
     print("time", end-start)
     end = time.time()

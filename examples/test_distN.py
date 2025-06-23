@@ -716,6 +716,7 @@ def main(configs):
     print(f"static_batching: {static_batching}")
     print(f"removable_cache: {removable_cache}")
     print(f"uniform_solver: {uniform_solver}")
+    print(f"slo_ratio: {configs.slo_ratio}")
     
     if flattened_cache and num_gpu_blocks_override is not None:
         num_gpu_blocks_override *= 32 
