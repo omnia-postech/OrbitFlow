@@ -25,7 +25,7 @@ export VLLM_CONFIGURE_LOGGING=1        # 0 → minimal, 1 → user-configurable
 LOGGING_LEVEL=CRITICAL                 # CRITICAL│ERROR│WARNING│INFO│DEBUG
 ROOT="/home/heelim/vllm"               # project root
 
-profiled_path="${ROOT}/outputs/benchmark/profiled_results_A5000.json"
+profiled_path="/home/heelim/vllm/benchmark/scripts/profiled_results_A5000.json"
 FIGURE_ONLY="${1:-0}"                  # default = 0 (run + plot)
 
 EXP_LIST=(paper_main_exp_96k)              # high-level experiment names
