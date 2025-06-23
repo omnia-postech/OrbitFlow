@@ -369,7 +369,12 @@ class Scheduler:
         
         self.is_distnsingle_fallback: bool = False
 
-        self.solver = Solver_uniform() if self.cache_config.uniform_solver else Solver_updated()
+        if self.cache_config.uniform_solver:
+            logger.critical(f"Using uniform solver for scheduling. ")
+            self.solver = Solver_uniform()
+        else:
+            logger.critical(f"Using non-uniform  solver for scheduling. ")
+            self.solver = Solver_updated()
         
         version = "selfattn"
         if (self.scheduler_config.runner_type == "pooling"
