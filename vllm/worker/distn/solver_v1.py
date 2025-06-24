@@ -19,7 +19,7 @@ class ProfileBasedEstimator:
     {
         "NoPrefetch": {
             "linear":      { "A": 1.23e-6, "B": 3.54e-2, "R2": 0.989 },
-            "upper_quad":  { "A": 8.38e-12, "B": 8.06e-7, "C": 4.46e-2, "R2": 0.895 }
+            "linear":  { "A": 8.38e-12, "B": 8.06e-7, "C": 4.46e-2, "R2": 0.895 }
         },
         "Prefetch32": { ... }
     }
@@ -67,7 +67,7 @@ class ProfileBasedEstimator:
         which  : str
             Top-level profile key (e.g. "NoPrefetch").
         mode   : str
-            Fit name inside that profile (e.g. "upper_quad").
+            Fit name inside that profile (e.g. "linear").
 
         Returns
         -------
@@ -154,7 +154,7 @@ class Solver:
     def __init__(self):
         self.profiled_estimator = ProfileBasedEstimator(profiled_path)
         self.which = "NoPrefetch"
-        self.mode = "upper_quad"
+        self.mode = "linear"
     # @staticmethod
     def solve(self, requests_list: list[Request], layer_num = 32, block_bandwidth = 103178.0 / 1000, gpu_block_capacity = 49152 / 80, window_ub = 1000) -> Optional[list[Result]]:
         requests = [r.id for r in requests_list]
@@ -206,7 +206,7 @@ class Solver:
             # model.addConstr(move_blocks[r]ㄴ >= (L - offload_num[r]) - gpu_layers[r], name=f"mv_pos_{r}")
 
         num_tokens = sum(context_blocks[r] for r in requests)
-        batch_layer = self.profiled_estimator.estimate_by_profiled_results(num_tokens, which="NoPrefetch", mode="upper_quad")
+        batch_layer = self.profiled_estimator.estimate_by_profiled_results(num_tokens, which="NoPrefetch", mode="linear")
         batch_layer  /= 32
         comm_time    = model.addVar(lb=0, name='comm_time')
         comp_time    = model.addVar(lb=0, name='comp_time')
@@ -327,7 +327,7 @@ class Solver_updated:
     def __init__(self):
         self.profiled_estimator = ProfileBasedEstimator(profiled_path)
         self.which = "NoPrefetch"
-        self.mode = "upper_quad"
+        self.mode = "linear"
     # @staticmethod
     def solve(self, requests_list: list[Request], layer_num = 32, block_bandwidth = 103178.0 / 1000, gpu_block_capacity = 49152 / 80, window_ub = 1000) -> Optional[list[Result]]:
         requests = [r.id for r in requests_list]
@@ -396,7 +396,7 @@ class Solver_updated:
             name="offload_num_def"
         )
         num_tokens = sum(context_blocks[r] for r in requests)*16
-        batch_layer = self.profiled_estimator.estimate_by_profiled_results(num_tokens, which="NoPrefetch", mode="upper_quad")/32
+        batch_layer = self.profiled_estimator.estimate_by_profiled_results(num_tokens, which="NoPrefetch", mode="linear")/32
         # print(f"batch_layer: {batch_layer} for {num_tokens} tokens")
         
         # batch_layer  /= 32
@@ -538,7 +538,7 @@ class LatencySolver:
     def __init__(self):
         self.profiled_estimator = ProfileBasedEstimator(profiled_path)
         self.which = "NoPrefetch"
-        self.mode = "upper_quad"
+        self.mode = "linear"
     # @staticmethod
     def solve(self, requests_list: list[Request], layer_num = 32, block_bandwidth = 103178.0 / 1000, gpu_block_capacity = 49152 / 80, window_ub = 1000) -> Optional[list[Result]]:
         requests = [r.id for r in requests_list]
@@ -607,7 +607,7 @@ class LatencySolver:
             name="offload_num_def"
         )
         num_tokens = sum(context_blocks[r] for r in requests)*16
-        batch_layer = self.profiled_estimator.estimate_by_profiled_results(num_tokens, which="NoPrefetch", mode="upper_quad")/32
+        batch_layer = self.profiled_estimator.estimate_by_profiled_results(num_tokens, which="NoPrefetch", mode="linear")/32
         # print(f"batch_layer: {batch_layer} for {num_tokens} tokens")
         
         # batch_layer  /= 32
@@ -629,7 +629,7 @@ class LatencySolver:
 # 5.3 comm_time 정의: 필요한 블록 수 ÷ block_bandwidth
 
         # # temp (xinyue)
-        # per_block_time = self.profiled_estimator.estimate_by_profiled_results(num_tokens, which="Communication", mode="upper_quad") / (32*16) # 32 layer, 16 tokens per block
+        # per_block_time = self.profiled_estimator.estimate_by_profiled_results(num_tokens, which="Communication", mode="linear") / (32*16) # 32 layer, 16 tokens per block
         # block_bandwidth = 1 / per_block_time
         # print(f"block_bandwidth: {block_bandwidth} blks/s")
         # block_bandwidth = 1/per_block_time

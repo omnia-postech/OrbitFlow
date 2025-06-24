@@ -1246,7 +1246,7 @@ class FlattenedCacheEngine(CacheEngineBase):
                                                                         mode="linear")
                 comp_time = self.estimator.estimate_by_profiled_results(tot_ctx_len,
                                                                         which="NoPrefetch",
-                                                                        mode="upper_quad") 
+                                                                        mode="linear") 
                                 
                 self.prev_selectn_distance = self.prefetch_distance_for_seletcn(comm_time, comp_time)
                 if self.prev_selectn_distance == 32:

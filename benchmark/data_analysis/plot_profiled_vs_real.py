@@ -3,7 +3,7 @@ import numpy as np
 import ast
 import sys
 from pathlib import Path
-from typing import List
+from typing import List, Sequence, Tuple
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -67,7 +67,7 @@ def upper_hull(x: np.ndarray,
 def _quantile_fit(x: np.ndarray,
                   y: np.ndarray,
                   degree: int = 1,
-                  tau: float = 0.95):
+                  tau: float = 0.99):
     """
     Return (coeffs, y_hat, coverage, pseudo_R2) for a τ-quantile polynomial.
 
@@ -122,7 +122,8 @@ def _draw_four_fits(ax, x: np.ndarray, y: np.ndarray,
                     color_quad="green",
                     color_env="purple",
                     color_qr="orange",
-                    tau: float = 0.99):
+                    tau: float = 0.99,
+                    env_offset: float = 0.0):
     """
     Shows:
 
@@ -137,7 +138,7 @@ def _draw_four_fits(ax, x: np.ndarray, y: np.ndarray,
     m, b, r2_lin = stats_lin.slope, stats_lin.intercept, stats_lin.r2
 
     delta_lin = float(np.max(y - (m * x + b)))
-    b_up_lin  = b + delta_lin + 1e-12
+    b_up_lin  = b + delta_lin - env_offset + 1e-12   # manual downward shift
     r2_lup    = _r2_from_line(x, y, m, b_up_lin)
 
     a2, a1, a0 = np.polyfit(x, y, 2)
@@ -159,7 +160,7 @@ def _draw_four_fits(ax, x: np.ndarray, y: np.ndarray,
     else:                                                  # not enough points
         delta_q = float(pos_res.max()) if pos_res.size else 0.0
 
-    a0_up        = a0 + delta_q + 1e-12
+    a0_up        = a0 + delta_q - env_offset + 1e-12 # manual downward shift
     y_hat_qup    = a2 * x**2 + a1 * x + a0_up
     ss_res_qup   = np.sum((y - y_hat_qup) ** 2)
     r2_qup       = np.nan if ss_tot_q == 0 else 1.0 - ss_res_qup / ss_tot_q
@@ -206,6 +207,13 @@ def _draw_four_fits(ax, x: np.ndarray, y: np.ndarray,
             lw=1.2, color=color_qr,
             label=(f"{int(tau*100)}ᵗʰ-QR : y={mq:.2e}x+{bq:.2e}\n"
                    f"            pseudo-R²={pseudo_r2:.4f}, "
+                   f"cov={cov_qr:.2%}"))
+    ## temp ## 
+    temp_r2 = _r2_from_line(x, y, 1.23e-06, bq)
+    ax.plot(x_fit, 1.23e-06 * x_fit + bq,
+            lw=1.2, color="black",
+            label=(f"TEMP {int(tau*100)}ᵗʰ-QR : y={1.23e-06:.2e}x+{bq:.2e}\n"
+                   f"            pseudo-R²={temp_r2:.4f}, "
                    f"cov={cov_qr:.2%}"))
 
 def _draw_three_fits(ax,
@@ -310,7 +318,13 @@ def _mask_inliers(y: np.ndarray, z_threshold: float = 3.0) -> np.ndarray:
 # ──────────────────────────────────────────────────────────────────────────────
 # Main driver
 # ──────────────────────────────────────────────────────────────────────────────
-def write_all_tbt_figures(df: pd.DataFrame, csv_path: Path) -> List[Path]:
+def write_all_tbt_figures(
+        df: pd.DataFrame,
+        csv_path: Path,
+        *,
+        exclude_ranges: Sequence[Tuple[int, int]] | None = None,
+        env_offset: float = 0.0 
+    ) -> List[Path]:
     """
     Produce 4 per-segment figures (i = 0‥3) and 1 global figure.
     Each plot shows
@@ -325,9 +339,20 @@ def write_all_tbt_figures(df: pd.DataFrame, csv_path: Path) -> List[Path]:
         [seg_0, seg_1, seg_2, seg_3, global_all]
     """
     if "time_between_tokens" not in df.columns:
-        raise KeyError("Column 'time_between_tokens' missing!")
+         raise KeyError("Column 'time_between_tokens' missing!")
 
-    prompt_offsets: Dict[int, int] = {0: 10, 1: 1_000, 2: 10_000, 3: 100_000}
+    # ------------------------------------------------------------------+
+    # helper → boolean mask of points *outside* every [lo, hi] interval +
+    # ------------------------------------------------------------------+
+    def _keep_mask(x_arr: np.ndarray) -> np.ndarray:
+        if not exclude_ranges:
+            return np.ones_like(x_arr, dtype=bool)
+        mask = np.ones_like(x_arr, dtype=bool)
+        for lo, hi in exclude_ranges:
+            mask &= ~((x_arr >= lo) & (x_arr <= hi))
+        return mask
+    # prompt_offsets: Dict[int, int] = {0: 10, 1: 5000, 2: 15000, 3: 25000}
+    prompt_offsets: Dict[int, int] = {0: 10, 1: 5000, 2: 15000, 3: 25000}
     per_seg_xy: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
 
     # ── collect & clean each segment ─────────────────────────────────────────
@@ -342,7 +367,7 @@ def write_all_tbt_figures(df: pd.DataFrame, csv_path: Path) -> List[Path]:
         y_raw = np.asarray(tbt, dtype=float)
         x_raw = np.arange(len(y_raw)) + prompt_offsets[idx]
 
-        mask = _mask_inliers(y_raw)              # per-segment cleaning
+        mask = _mask_inliers(y_raw) & _keep_mask(x_raw)
         per_seg_xy[idx] = (x_raw[mask], y_raw[mask])
 
     stem, out_paths = csv_path.stem, []
@@ -377,7 +402,7 @@ def write_all_tbt_figures(df: pd.DataFrame, csv_path: Path) -> List[Path]:
         # _draw_two_fits(ax, x, y)
         # per-segment
         # _draw_three_fits(ax, x, y)
-        _draw_four_fits(ax, x, y) 
+        _draw_four_fits(ax, x, y, env_offset=env_offset)
         ax.set_xlabel("Output-token index")
         ax.set_ylabel("Δt (s)")
         ax.set_title(f"TBT scatter + fits  (segment {seg_idx})")
@@ -400,7 +425,7 @@ def write_all_tbt_figures(df: pd.DataFrame, csv_path: Path) -> List[Path]:
 
     # _draw_two_fits(ax, all_x, all_y)
     # _draw_three_fits(ax, all_x, all_y)
-    _draw_four_fits(ax, all_x, all_y) 
+    _draw_four_fits(ax, all_x, all_y, env_offset=env_offset)
     ax.set_xlabel("Output-token index")
     ax.set_ylabel("Δt (s)")
     ax.set_title("TBT scatter + global fits (all segments)")
@@ -457,7 +482,8 @@ def main(argv) -> None:
         sys.exit(f"CSV not found: {csv_path}")
 
     df = load_metrics(csv_path)
-    out_path1 = write_all_tbt_figures(df, csv_path)
+    # out_path1 = write_all_tbt_figures(df, csv_path, env_offset=0.009)
+    out_path1 = write_all_tbt_figures(df, csv_path, exclude_ranges=[(0, 9500)], env_offset=0.009)
     print(f"Figure written ➜ {out_path1}")
 
     csv2 = argv[1] if len(argv) > 1 else None 
@@ -468,15 +494,15 @@ def main(argv) -> None:
             sys.exit(f"CSV not found: {csv_path2}")
 
         df2 = load_metrics(csv_path2)
-        out_path2 = write_all_tbt_figures(df2, csv_path2)
+        out_path2 = write_all_tbt_figures(df2, csv_path2,exclude_ranges=[(12000, 18000)])
         print(f"Figure written ➜ {out_path2}")
         
         df = df[['time_between_tokens', "request_id"]]
         df3 = df2[['time_between_tokens', "request_id"]]
         df3['time_between_tokens'][0]= [x-y for x, y in zip(df2['time_between_tokens'][0], df['time_between_tokens'][0])]
-        csv3 = "/home/xinyuema/vllm/outputs/benchmark/Profile_Trace/NextLayer/profile_trace/outputs_diff.csv"
+        csv3 = "/home/heelim/vllm/outputs/benchmark/Profile_Trace/NextLayer/profile_trace/outputs_diff.csv"
         csv_path3 = Path(csv3).expanduser().resolve()
-        out_path3 = write_all_tbt_figures(df3, csv_path3)
+        out_path3 = write_all_tbt_figures(df3, csv_path3,exclude_ranges=[(12000, 18000)])
         print(f"Figure written ➜ {out_path3}")
 if __name__ == "__main__":
     import sys
