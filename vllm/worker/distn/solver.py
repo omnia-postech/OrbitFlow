@@ -9,7 +9,7 @@ from pathlib import Path
 import json
 from vllm.logger import init_logger
 logger = init_logger(__name__)
-profiled_path = "~/vllm/benchmark/scripts/profiled_results.json"
+profiled_path = "/home/heelim/vllm/benchmark/scripts/profiled_results_A5000.json"
 # ========= 1. INPUTS =====================================================
 
 TOKENS_PER_BLOCK = 16          # system constant
@@ -24,7 +24,7 @@ class ProfileBasedEstimator:
     {
         "NoPrefetch": {
             "linear":      { "A": 1.23e-6, "B": 3.54e-2, "R2": 0.989 },
-            "upper_quad":  { "A": 8.38e-12, "B": 8.06e-7, "C": 4.46e-2, "R2": 0.895 }
+            "linear":  { "A": 8.38e-12, "B": 8.06e-7, "C": 4.46e-2, "R2": 0.895 }
         },
         "Prefetch32": { ... }
     }
@@ -72,7 +72,7 @@ class ProfileBasedEstimator:
         which  : str
             Top-level profile key (e.g. "NoPrefetch").
         mode   : str
-            Fit name inside that profile (e.g. "upper_quad").
+            Fit name inside that profile (e.g. "linear").
 
         Returns
         -------
@@ -236,9 +236,9 @@ class Solver_updated:
         extra_comm_per16 = len(requests) / block_bandwidth        # sec
         tokens0 = 16 * sum(context_blocks.values())
         comp0 = self.profiled_estimator.estimate_by_profiled_results(
-                    tokens0, "NoPrefetch", "upper_quad") / 32.0
+                    tokens0, "NoPrefetch", "linear") / 32.0
         comp16 = self.profiled_estimator.estimate_by_profiled_results(
-                    tokens0 + 16, "NoPrefetch", "upper_quad") / 32.0
+                    tokens0 + 16, "NoPrefetch", "linear") / 32.0
         extra_comp_per16 = L * (comp16 - comp0)
 
         DELTA = extra_comm_per16 + extra_comp_per16                # sec / 16 tokens
