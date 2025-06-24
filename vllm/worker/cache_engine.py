@@ -111,7 +111,7 @@ class CacheEngine(CacheEngineBase):
             #                 device=device)
 
             kv_cache.append(new_layer_kv_cache)
-            byte_size = 2 * new_layer_kv_cache.numel()
+            byte_size = new_layer_kv_cache.numel()
             total_gpu_bytes += byte_size
         if self.num_attention_layers > self.gpu_cache_num:
             prefetch_layer_kv_cache = torch.zeros(kv_cache_shape,
@@ -121,7 +121,7 @@ class CacheEngine(CacheEngineBase):
         else:
             prefetch_layer_kv_cache = None
         kv_cache.append(prefetch_layer_kv_cache)
-        byte_size = 2 * prefetch_layer_kv_cache.numel() if prefetch_layer_kv_cache is not None else 0
+        byte_size = prefetch_layer_kv_cache.numel() if prefetch_layer_kv_cache is not None else 0
         total_gpu_bytes += byte_size
 
         total_gpu_bytes = total_gpu_bytes / 1024 / 1024
@@ -707,11 +707,11 @@ class FlattenedCacheEngine(CacheEngineBase):
         """
 
         # ---------- convenience ----------
-        elem_size = torch.tensor([], dtype=self.dtype).element_size() * 2 # 2 accooutns for key and value
+        elem_size = torch.tensor([], dtype=self.dtype).element_size() # 2 accooutns for key and value
         num_blocks_per_layer = (
             num_blocks // self.num_attention_layers if prefetch_enabled else 0
         )
-
+        # num_blocks_per_layer += 1000 # debug (xinyue)
         kv_cache: List[torch.Tensor] = []
         total_gpu_bytes = kv_cache_bytes = prefetch_cache_bytes = 0
 
@@ -1211,7 +1211,8 @@ class FlattenedCacheEngine(CacheEngineBase):
                     self.prev_flexgen_distance = -1
                 else:
                     self.prev_flexgen_distance = math.floor(self.block_manager.num_attention_layers // num_layers_to_offload ) - 1 
-                    self.prev_flexgen_distance = max(0, self.prev_flexgen_distance)
+                    self.prev_flexgen_distance = max(1, self.prev_flexgen_distance)
+                    
                 logger.info(f"[flexgen] prefill → distance set to {self.prev_flexgen_distance}")
                 self.flexgen_dist = self.prev_flexgen_distance
             dist = [self.flexgen_dist] * len(snapshot.candidates)
@@ -1805,27 +1806,45 @@ class FlattenedCacheEngine(CacheEngineBase):
             blocks += (tok + 15) // 16 + 1   # ceil + gap
         return blocks
 
+        
     # 3) shrink / grow prefetch area if needed
     def _maybe_resize_prefetch_window(self, need_blocks: int) -> None:
-        key_tensor   = self.gpu_cache[0][0]
-        cur_gpu_blk  = key_tensor.shape[0]
-        cur_prefetch = cur_gpu_blk - self.num_gpu_blocks
-        missing      = max(0, need_blocks - cur_prefetch)
-        grow_by      = (missing + PREFETCH_GROW_STEP - 1) // PREFETCH_GROW_STEP
-        grow_by     *= PREFETCH_GROW_STEP
+        BLOCK_DIM = 1
+        KV_DIM = 0
+        kv = self.gpu_cache[0]                          # shape (2, cur_blocks, …)
+        cur_blocks = kv.shape[BLOCK_DIM]
+        cur_prefetch = cur_blocks - self.num_gpu_blocks
+        missing = max(0, need_blocks - cur_prefetch)
+
+        grow_by = math.ceil(missing / PREFETCH_GROW_STEP) * PREFETCH_GROW_STEP
         if grow_by == 0:
-            return
+            return                                       # nothing to do
 
-        logger.debug(
-            "Prefetch resize: have=%d need=%d  → +%d blocks",
-            cur_prefetch, need_blocks, grow_by,
-        )
+        new_blocks = cur_blocks + grow_by
+        # Use backend helper to respect hidden strides/layouts
         new_shape = self.attn_backend.get_kv_cache_shape(
-            grow_by, self.block_size, self.num_kv_heads, self.head_size
+            new_blocks, self.block_size, self.num_kv_heads, self.head_size
         )
-        new_rows = torch.zeros(new_shape, dtype=self.dtype, device=key_tensor.device)
-        self.gpu_cache[0] = torch.cat([self.gpu_cache[0], new_rows], dim=1)
 
+        logger.critical(
+            "Prefetch resize: have=%d need=%d  → +%d blocks",
+            cur_prefetch, need_blocks, grow_by
+        )
+        free_mem, total_mem = torch.cuda.mem_get_info()
+        logger.info(f"BFree Memory: {free_mem / 1024 / 1024} MB")        
+        logger.info(f"BTotal Memory: {total_mem / 1024 / 1024} MB")
+        # -------- single allocation, single copy --------
+        new_kv = kv.new_empty(new_shape)                 # same dtype/device
+        new_kv[:, :cur_blocks].copy_(kv)                 # copy old K & V
+        new_kv[:, cur_blocks:].zero_()                   # init fresh rows
+
+        # Swap in and free old storage at once
+        self.gpu_cache[0] = new_kv
+        del kv
+        torch.cuda.empty_cache()                         # optional: return pages
+        free_mem, total_mem = torch.cuda.mem_get_info()
+        logger.info(f"AFree Memory: {free_mem / 1024 / 1024} MB")        
+        logger.info(f"ATotal Memory: {total_mem / 1024 / 1024} MB")
     # 4) build deallocate / allocate plans
     def _plan_cache_moves(
         self, candidates: list[int], dist_dict: dict[int, int]

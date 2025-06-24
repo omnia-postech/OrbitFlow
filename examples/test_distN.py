@@ -30,8 +30,8 @@ import torch
 from vllm.sampling_params import SamplingParams
 torch.set_printoptions(edgeitems=2, linewidth=120, sci_mode=True)
 # --- Config ---
-# MODEL = "/home/jongseop/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"
-MODEL = "/home/heelim/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"
+MODEL = "/home/jongseop/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"
+# MODEL = "/home/heelim/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"
 PROMPT_DIR = "./prompts"
 USE_DEFAULT_SAMPLES = True
 BATCH_SIZE = 4  # Serving batch size set to 4
@@ -337,7 +337,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
     trace_avg_token_count = trace_token_count / len(requests_sorted)
     engine.model_executor.driver_worker.cache_engine[0].flexgen_tok_estimate = trace_avg_token_count 
     # compute global slo 
-    token_limit = trace_obj.num_gpu_blocks_override * BLOCK_SIZE 
+    token_limit = trace_obj.num_gpu_blocks_override * BLOCK_SIZE if trace_obj.num_gpu_blocks_override is not None else 500 * BLOCK_SIZE # for debugging purpose only
     max_comp_time = estimator.estimate_by_profiled_results(tokens=token_limit,
                                                                     which="NoPrefetch" ,
                                                                     mode="linear")
@@ -364,7 +364,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                     max_slo = req_obj.slo
                     slo = sim.register(req_id, max_slo)
                 else: 
-                    token_limit = trace_obj.num_gpu_blocks_override * BLOCK_SIZE 
+                    # token_limit = trace_obj.num_gpu_blocks_override * BLOCK_SIZE 
                     max_slo = estimator.estimate_by_profiled_results(tokens=token_limit,
                                                                     which="NoPrefetch" ,
                                                                     mode="linear")
