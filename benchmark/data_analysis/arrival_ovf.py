@@ -9,7 +9,7 @@ style = {
     "line": {"linewidth": 4, "markersize": 15},
 }
 
-root = Path("/home/heelim/vllm/build_trace/traces/sy_requests/all_traces_arrival_rate_CV")
+root = Path("/home/heelim/vllm/build_trace/traces/requests_types_32k/all_traces_arrival_rate_CV")
 
 # root 바로 아래에 있는 디렉토리만
 immediate_subdirs = [p for p in root.iterdir() if p.is_dir()]
