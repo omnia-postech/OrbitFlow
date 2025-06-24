@@ -129,7 +129,7 @@ for SLO in "${SLO_RATIO_LIST[@]}"; do
           python "${ROOT}/examples/test_distN.py" \
             --config-file "${TRACE_CFG_DIR}/${TRACE}.json" \
             "${EXP_ARGS[@]}" \
-            --profiled_results $profiled_path \
+            --profiled-results $profiled_path \
             --slo-ratio "$SLO" \
             --output-log "${RUN_DIR}/outputs.log"
         fi
