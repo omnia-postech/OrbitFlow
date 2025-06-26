@@ -1,86 +1,86 @@
-# input_dir은 리스트 형태로 여러 경로를 받을 수 있음
-input_dirs=(
-    # "/path/to/dir1"
-    # "/path/to/dir2"
-    # "/path/to/dir3"
-    # "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1.5/Ours_TP"
-    # "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/Ours_TP"
-    # "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Ours_TP"
-    # "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo4.5/Ours_TP"
-    # "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1/Flexgen"
-    # "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1.5/Flexgen"
-    # "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/Flexgen"
-    # "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/Flexgen"
-    # "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1.5/SelectN_TP"
-    # "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/SelectN_TP"
-    # "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo3.5/SelectN_TP"
-    # "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo4.5/SelectN_TP"
-    "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1/Ours"
-    "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1.5/Ours"
-    "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/Ours"
+#!/usr/bin/env bash
 
-    "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1/Flexgen"
-    "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1.5/Flexgen"
-    "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/Flexgen"
+# 공통 경로
+base_path="/home/heelim/vllm/outputs/benchmark/paper_main_exp"  # change here
 
-    "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1/SelectN"
-    "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1.5/SelectN"
-    "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/SelectN"
+# echo "Running change_slo_scale.py ..."
+# python ./data_parsing/change_slo_scale.py \
+#   --old-sc 2.5 \
+#   --new-sc-list 2.0 1.5 1.0 \
+#   --base-path "${base_path}" \
+#   --is-arrival \
+#   --arrival-rate-list 1.0 1.5 2.0 2.5 3.0 3.5 4.0 \
+#   --cv-list 1 \
+#   --arrival-tpl "lambda{rate}x_cv{cv}" \  # change here
+#   --methods Flexgen SelectN DistNSingle NextLayer
 
-    "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1/NextLayer"
-    "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1.5/NextLayer"
-    "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/NextLayer"
+# if [ $? -ne 0 ]; then
+#     echo "❌ change_slo_scale.py 실행 실패"
+# fi
 
-    "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1/DistNSingle"
-    "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1.5/DistNSingle"
-    "/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/DistNSingle"
+
+# base_path 아래의 상대 경로만 나열 # change here
+subdirs=(
+  "slo1/Ours"
+  "slo1.5/Ours"
+  "slo2.5/Ours"
+
+  "slo1/Flexgen"
+  "slo1.5/Flexgen"
+  "slo2.5/Flexgen"
+
+  "slo1/SelectN"
+  "slo1.5/SelectN"
+  "slo2.5/SelectN"
+
+  "slo1/NextLayer"
+  "slo1.5/NextLayer"
+  "slo2.5/NextLayer"
+
+#   "slo1/DistNSingle"
+#   "slo1.5/DistNSingle"
+#   "slo2.5/DistNSingle"
 )
 
-# 리스트를 공백으로 이어붙여 하나의 문자열로 만듦
-args="${input_dirs[@]}"
+# 절대 경로 배열 생성
+all_roots=()
+for rel in "${subdirs[@]}"; do
+  dir="$base_path/$rel"
+  if [ -d "$dir" ]; then
+    all_roots+=("$dir")
+  else
+    echo "경로가 유효하지 않음: $dir" >&2
+  fi
+done
 
-# 디렉토리 패턴 매칭이 없을 때 그대로 문자열이 남지 않도록
-shopt -s nullglob
-
+# lambda로 시작하는 하위 디렉토리만 골라서 all_subdirs 에 모으기
 all_subdirs=()
-for root in "${input_dirs[@]}"; do
-    if [ -d "$root" ]; then
-        # lambda로 시작하는 하위 디렉토리만 순회
-        for subdir in "$root"/lambda*; do
-            [ -d "$subdir" ] || continue
-            all_subdirs+=("$subdir")
-        done
-    else
-        echo "경로가 유효하지 않음: $root"
-        exit 1
-    fi
+for root in "${all_roots[@]}"; do
+  for sub in "$root"/*lambda*; do
+    [ -d "$sub" ] || continue
+    all_subdirs+=("$sub")
+  done
 done
 
 
 # sim_slo_violation.py 실행
-echo "Running sim_slo_violation.py ..."
-python ./data_parsing/sim_slo_violation_v2.py "${all_subdirs[@]}"
-if [ $? -ne 0 ]; then
-    echo "❌ sim_slo_violation.py 실행 실패"
-fi
-
+# echo "Running sim_slo_violation.py ..."
+# python ./data_parsing/sim_slo_violation_v2.py "${all_subdirs[@]}"
+# if [ $? -ne 0 ]; then
+#     echo "❌ sim_slo_violation.py 실행 실패"
+# fi
 
 # make_arrival_rate_summerize.py 실행
 echo "Running make_arrival_rate_summerize.py ..."
-python ./data_parsing/make_arrival_rate_summerize_v2.py $args
+python ./data_parsing/make_arrival_rate_summerize_v2.py "${all_roots[@]}"
 if [ $? -ne 0 ]; then
     echo "❌ make_arrival_rate_summerize.py 실행 실패"
     exit 1
 fi
 
+# arrival_rate_tbt_tpot_v2.py 실행
 echo "Running arrival_rate_tbt_tpot_v2.py ..."
-python arrival_rate_tbt_tpot_v2.py 
+python arrival_rate_tbt_tpot_v2.py "${base_path}"
 if [ $? -ne 0 ]; then
     echo "❌ arrival_rate_tbt_tpot_v2.py 실행 실패"
-fi
-
-echo "Running arrival_rate_cv_tbt_tpot.py ..."
-python arrival_rate_cv_tbt_tpot.py 
-if [ $? -ne 0 ]; then
-    echo "❌ arrival_rate_cv_tbt_tpot.py 실행 실패"
 fi

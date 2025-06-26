@@ -155,6 +155,11 @@ def _extract_percentile_ratio_lists(
                 lists[idx] = [np.nan]
     return lists
 
+def get_req_per_sec(output_df: pd.DataFrame,):
+    last_arrival_time = output_df["arrival_time"].iloc[-1]
+
+    return last_arrival_time
+
 def extract_metrics(input_base_path, total_decode):
     output_df = load_output_metrics(Path(input_base_path, "outputs.csv"))
     slo_df = pd.read_csv(Path(input_base_path, "slo_violationv2.csv"))
@@ -170,11 +175,13 @@ def extract_metrics(input_base_path, total_decode):
     ratio_means = [np.mean(lst) if lst else 0.0 for lst in pct_lists]
     p90_ratio, p95_ratio, p99_ratio = ratio_means
 
-    return tpot_slo, tbt_slo_with_TD, tbt_slo_no_TD, throughput, slo_thr, p90_ratio, p95_ratio, p99_ratio
+    last_arrival_time = get_req_per_sec(output_df)
+
+    return tpot_slo, tbt_slo_with_TD, tbt_slo_no_TD, throughput, slo_thr, p90_ratio, p95_ratio, p99_ratio, last_arrival_time
 
 
 REFERENCE_ROOT = Path("/home/heelim/vllm/benchmark/selected_traces")
-pattern = re.compile(r"^lambda(?P<rate>\d+(?:\.\d+)?)x_cv(?P<cv_num>\d+)$")
+pattern = re.compile(r"^.*lambda(?P<rate>\d+(?:\.\d+)?)x_cv(?P<cv_num>\d+)$")
 
 
 def make_summerize(input_paths: list):
@@ -205,7 +212,7 @@ def make_summerize(input_paths: list):
         # print(f"{trace} {metric}")
 
         # extract_metrics(path) -> (tpot_slo, tbt_slo, throughput, slo_thr, p90, p95, p99)
-        tpot_slo, tbt_slo_with_TD, tbt_slo_no_TD, throughput, slo_thr, p90_ratio, p95_ratio, p99_ratio = extract_metrics(path, total_decode)
+        tpot_slo, tbt_slo_with_TD, tbt_slo_no_TD, throughput, slo_thr, p90_ratio, p95_ratio, p99_ratio, last_arrival_time = extract_metrics(path, total_decode)
         results.append({
             'slo': slo,
             'method': method,
@@ -218,7 +225,9 @@ def make_summerize(input_paths: list):
             'slo_threshold_mean': slo_thr,
             'p90_ratio': p90_ratio,
             'p95_ratio': p95_ratio,
-            'p99_ratio': p99_ratio
+            'p99_ratio': p99_ratio,
+            "last_arrival_time": last_arrival_time,
+            "req_per_sec": len(ref_reqs) / last_arrival_time
         })
 
     # DataFrame 생성 및 저장
@@ -235,7 +244,7 @@ from pathlib import Path
 
 # ──────────────────────────────────────────────────────
 # 설정: paper_main_exp 아래 모든 slo/<scale>/<method>/<trace_metric> 경로 자동 수집
-BASE_DIR = Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp")
+# BASE_DIR = Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp_32k")
 
 input_base_paths = [
     # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo1/Ours"),
@@ -273,52 +282,52 @@ if len(input_base_paths) > 0:
         
         make_summerize(input_paths)
     
-    sys.exit()  # 프로그램을 완전히 종료
+    # sys.exit()  # 프로그램을 완전히 종료
 
 # ──────────────────────────────────────────────────────
 # input_paths: slo 디렉터리 하위의 method별 trace_metric 디렉터리 필터링
     
-print("Run All Start")
-print()
-for slo_dir in BASE_DIR.glob('slo*'):
-    if not slo_dir.is_dir():
-        continue
-    for method_dir in slo_dir.iterdir():
-        input_paths = []    
-        OUTPUT_CSV = method_dir / "arrival_summerizev2.csv"
+# print("Run All Start")
+# print()
+# for slo_dir in BASE_DIR.glob('slo*'):
+#     if not slo_dir.is_dir():
+#         continue
+#     for method_dir in slo_dir.iterdir():
+#         input_paths = []    
+#         OUTPUT_CSV = method_dir / "arrival_summerizev2.csv"
 
-        if not method_dir.is_dir():
-            continue
+#         if not method_dir.is_dir():
+#             continue
 
-        skip_paths = [
-        # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/NoPrefetch/both_dyn_mid"),
-        # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/NoPrefetch/token_dyn_low"),
-        # 추가하고 싶은 경로들...
-        ]
-        # 각 trace_metric 디렉터리
-        for trace_dir in sorted(method_dir.iterdir(), key=lambda p: p.name):
-            if not trace_dir.is_dir():
-                continue
+#         skip_paths = [
+#         # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/NoPrefetch/both_dyn_mid"),
+#         # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/NoPrefetch/token_dyn_low"),
+#         # 추가하고 싶은 경로들...
+#         ]
+#         # 각 trace_metric 디렉터리
+#         for trace_dir in sorted(method_dir.iterdir(), key=lambda p: p.name):
+#             if not trace_dir.is_dir():
+#                 continue
 
-            if not pattern.match(trace_dir.name):
-                continue
+#             if not pattern.match(trace_dir.name):
+#                 continue
 
-            print(f"start: {trace_dir}")
+#             print(f"start: {trace_dir}")
 
-            outputs_csv = trace_dir / 'outputs.csv'
-            slo_violation = trace_dir / 'slo_violationv2.csv'
-            if outputs_csv.exists() and slo_violation.exists():
-                if outputs_csv.parent in skip_paths:
-                    continue
-                input_paths.append(trace_dir)
+#             outputs_csv = trace_dir / 'outputs.csv'
+#             slo_violation = trace_dir / 'slo_violationv2.csv'
+#             if outputs_csv.exists() and slo_violation.exists():
+#                 if outputs_csv.parent in skip_paths:
+#                     continue
+#                 input_paths.append(trace_dir)
         
-        make_summerize(input_paths)
+#         make_summerize(input_paths)
 
-        # ──────────────────────────────────────────────────────
-        # 추출 함수가 정의된 모듈 import
-        # from your_module import extract_metrics
+#         # ──────────────────────────────────────────────────────
+#         # 추출 함수가 정의된 모듈 import
+#         # from your_module import extract_metrics
 
-        # ──────────────────────────────────────────────────────
-        # 데이터 수집 및 저장
+#         # ──────────────────────────────────────────────────────
+#         # 데이터 수집 및 저장
         
 
