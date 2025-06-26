@@ -9,21 +9,21 @@ import argparse
 # ───────────────────────────────────────────────
 # 0. 전역 경로 & 로깅 설정
 # ───────────────────────────────────────────────
-ROOT_DIR = Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp")
+# ROOT_DIR = Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp_design_validation/")
 REFERENCE_ROOT = Path("/home/heelim/vllm/benchmark/selected_traces")
 
 Fix = True
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(levelname)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(),                                   # 콘솔
-        logging.FileHandler(ROOT_DIR / "slo_violation_batch.log",  # 파일
-                            mode="a", encoding="utf-8")
-    ],
-)
-log = logging.getLogger(__name__)
+# logging.basicConfig(
+#     level=logging.INFO,
+#     format="%(levelname)s: %(message)s",
+#     handlers=[
+#         logging.StreamHandler(),                                   # 콘솔
+#         logging.FileHandler(ROOT_DIR / "slo_violation_batch.log",  # 파일
+#                             mode="a", encoding="utf-8")
+#     ],
+# )
+# log = logging.getLogger(__name__)
 
 # ───────────────────────────────────────────────
 # 1. 기존 함수들 (수정 없음)
@@ -50,7 +50,8 @@ to_see = 10000
 def compute_slo_violation(req_id, times, solver, slo_thr):
     times_np   = np.asarray(times,  dtype=float)
     solver_np  = np.asarray(solver, dtype=float)
-    real_tbt   = times_np - solver_np
+    # real_tbt   = times_np - solver_np
+    real_tbt   = times_np
 
     valid      = real_tbt >= 0
     exceptions = int((~valid).sum())
@@ -109,12 +110,12 @@ def compute_slo_violation(req_id, times, solver, slo_thr):
 def process_experiment(exp_dir: Path):
     sim_path = exp_dir / "outputs.csv"
     if not sim_path.exists():
-        log.warning(f"outputs.csv not found: {exp_dir}")
+        print(f"outputs.csv not found: {exp_dir}")
         return
 
     ref_json = REFERENCE_ROOT / f"{exp_dir.name}.json"
     if not ref_json.exists():
-        log.warning(f"reference JSON missing: {ref_json}")
+        print(f"reference JSON missing: {ref_json}")
         return
 
     with open(ref_json, "r") as f:
@@ -129,7 +130,7 @@ def process_experiment(exp_dir: Path):
     
     if Fix:
         total_req_len = max(int(str(rid).split("_")[-1]) for rid in df["request_id"].unique()) + 1
-        log.warning(f"Fixing total_req_len: (from {len(ref_reqs)})")
+        print(f"Fixing total_req_len: (from {len(ref_reqs)})")
 
     for id in range(total_req_len):
         ref_len = ref_reqs[f"request_{id}"]["output_length"]
@@ -174,6 +175,8 @@ def process_experiment(exp_dir: Path):
             {"request_id": f"request_{id}",
              "slo_violation_with_TD": vio,
              "slo_violation_no_TD": len(no_td),
+             "reference_len": ref_len-1,
+             "sys_violation": req_row["slo_violations"],
              "exceptions":   exc, 
              "failed": failed,
              }
@@ -181,7 +184,7 @@ def process_experiment(exp_dir: Path):
 
     out_csv = exp_dir / "slo_violationv2.csv"
     pd.DataFrame(results).to_csv(out_csv, index=False, encoding="utf-8-sig")
-    log.info(f"✔  {exp_dir.relative_to(ROOT_DIR)} → slo_violationv2.csv "
+    print(f"✔  {exp_dir.relative_to(ROOT_DIR)} → slo_violationv2.csv "
              f"(SLO={slo_thr:.3f})")
 
 # ───────────────────────────────────────────────
@@ -219,28 +222,30 @@ def main():
             process_experiment(to_exp_path(arg))
         return
 
-    # ② --missing 플래그
-    if args.missing:
-        scan = [d for d in ROOT_DIR.rglob("outputs.csv")
-                if not (d.parent / "slo_violationv2.csv").exists()]
-    else:
-        # ③ 기본: 전체 순회
-        scan = ROOT_DIR.rglob("outputs.csv")
+    print("Give roots to scan for slo_violationv2.csv...")
 
-    skip_paths = [
-        # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/NoPrefetch/both_dyn_mid"),
-        # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp/slo2.5/NoPrefetch/token_dyn_low"),
-        # 추가하고 싶은 경로들...
-    ]
+    # # ② --missing 플래그
+    # if args.missing:
+    #     scan = [d for d in ROOT_DIR.rglob("outputs.csv")
+    #             if not (d.parent / "slo_violationv2.csv").exists()]
+    # else:
+    #     # ③ 기본: 전체 순회
+    #     scan = ROOT_DIR.rglob("outputs.csv")
 
-    for csv_path in sorted(scan):
-        if csv_path.parent in skip_paths:
-            print(f"Skipping {csv_path}")
-            continue  # 이 경로는 넘김
-        try:
-            process_experiment(csv_path.parent)
-        except Exception as e:
-            log.error(f"{csv_path} ")
+    # skip_paths = [
+    #     # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp_32k/slo2.5/NoPrefetch/both_dyn_mid"),
+    #     # Path("/home/heelim/vllm/outputs/benchmark/paper_main_exp_32k/slo2.5/NoPrefetch/token_dyn_low"),
+    #     # 추가하고 싶은 경로들...
+    # ]
+
+    # for csv_path in sorted(scan):
+    #     if csv_path.parent in skip_paths:
+    #         print(f"Skipping {csv_path}")
+    #         continue  # 이 경로는 넘김
+    #     try:
+    #         process_experiment(csv_path.parent)
+    #     except Exception as e:
+    #         log.error(f"{csv_path} ")
 
 if __name__ == "__main__":
     main()

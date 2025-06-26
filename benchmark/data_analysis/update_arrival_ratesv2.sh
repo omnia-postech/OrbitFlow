@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 
 # 공통 경로
-base_path="/home/heelim/vllm/outputs/benchmark/paper_main_exp"  # change here
+base_path="/home/heelim/vllm/outputs/benchmark/paper_main_exp_96k"  # change here
 
-# echo "Running change_slo_scale.py ..."
-# python ./data_parsing/change_slo_scale.py \
-#   --old-sc 2.5 \
-#   --new-sc-list 2.0 1.5 1.0 \
-#   --base-path "${base_path}" \
-#   --is-arrival \
-#   --arrival-rate-list 1.0 1.5 2.0 2.5 3.0 3.5 4.0 \
-#   --cv-list 1 \
-#   --arrival-tpl "lambda{rate}x_cv{cv}" \  # change here
-#   --methods Flexgen SelectN DistNSingle NextLayer
+echo "Running change_slo_scale.py ..."
+python ./data_parsing/change_slo_scale.py \
+  --old-sc 2.5 \
+  --new-sc-list 2.0 1.5 1.0 \
+  --base-path "${base_path}" \
+  --is-arrival \
+  --arrival-rate-list 1.0 1.5 2.0 2.5 3.0 3.5 4.0 \
+  --cv-list 1 \
+  --arrival-tpl "96k_lambda{rate}x_cv{cv}" \  # change here
+  --methods Flexgen SelectN DistNSingle NextLayer
 
-# if [ $? -ne 0 ]; then
-#     echo "❌ change_slo_scale.py 실행 실패"
-# fi
+if [ $? -ne 0 ]; then
+    echo "❌ change_slo_scale.py 실행 실패"
+fi
 
 
 # base_path 아래의 상대 경로만 나열 # change here
@@ -37,9 +37,9 @@ subdirs=(
   "slo1.5/NextLayer"
   "slo2.5/NextLayer"
 
-#   "slo1/DistNSingle"
-#   "slo1.5/DistNSingle"
-#   "slo2.5/DistNSingle"
+  "slo1/DistNSingle"
+  "slo1.5/DistNSingle"
+  "slo2.5/DistNSingle"
 )
 
 # 절대 경로 배열 생성
@@ -64,11 +64,11 @@ done
 
 
 # sim_slo_violation.py 실행
-# echo "Running sim_slo_violation.py ..."
-# python ./data_parsing/sim_slo_violation_v2.py "${all_subdirs[@]}"
-# if [ $? -ne 0 ]; then
-#     echo "❌ sim_slo_violation.py 실행 실패"
-# fi
+echo "Running sim_slo_violation.py ..."
+python ./data_parsing/sim_slo_violation_v2.py "${all_subdirs[@]}"
+if [ $? -ne 0 ]; then
+    echo "❌ sim_slo_violation.py 실행 실패"
+fi
 
 # make_arrival_rate_summerize.py 실행
 echo "Running make_arrival_rate_summerize.py ..."

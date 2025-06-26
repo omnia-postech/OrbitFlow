@@ -1,109 +1,110 @@
 import os
-import pandas as pd
-import numpy as np
+import argparse
 import ast
+import pandas as pd
 
-# 설정값들 정의
-old_sc = 2.5         # 원본 slo 폴더 이름 (예: slo5)
-new_sc_list = [
-    # 1, 1.5, 2, 3, 3.5, 4, 4.5
-      1.5, 1
-      ]        # 새로 만들 slo 폴더 이름 (예: slo10)
-base_path = "/home/heelim/vllm/outputs/benchmark/paper_main_exp"
-# test_path = "/home/sychoy/vllm/outputs/benchmark/paper_main_exp"
-
-is_arrival = True
-arrival_rate_list = [3.5]
-cv_list = [1]
-
-
-metrics = [
-    # "low",
-    # "mid",
-    # "high", 
-    "veryhigh_bs2"
-]
-traces = [
-    # "both_static", 
-    # "batch_dyn", 
-    # "token_dyn", 
-    "both_dyn"
-    ]
-methods = [
-    # "Flexgen", "SelectN", "DistNSingle"
-            "NextLayer",
-    ]
-# methods = ["DistNSingle"]
-# methods = ["SelectN"]
-
-
-def update_slo_values(old_path, new_path):
-    # 기존 파일 경로
+def update_slo_values(old_path: str, new_path: str, old_sc: float, new_sc: float):
     try:
-    # 새로운 파일 경로
-        # CSV 읽기
         df = pd.read_csv(old_path)
-
-        origin_threshold = float(df['slo_threshold'].iloc[0])        
-        
-        new_threshold = (origin_threshold / old_sc) * new_sc
+        origin_threshold = float(df['slo_threshold'].iloc[0])
+        new_threshold    = (origin_threshold / old_sc) * new_sc
         df['slo_threshold'] = new_threshold
 
         def count_violations(tbt_str):
             tbt_list = ast.literal_eval(tbt_str) if isinstance(tbt_str, str) else tbt_str
             return sum(t > new_threshold for t in tbt_list)
 
-        # slo_violation 계산
         df['slo_violations'] = df['time_between_tokens'].apply(count_violations)
 
-        # 디렉토리 생성
-        os.makedirs(new_dir, exist_ok=True)
-
-        # 저장
+        os.makedirs(os.path.dirname(new_path), exist_ok=True)
         df.to_csv(new_path, index=False)
         print(f"{origin_threshold} -> {new_threshold}")
         print(f"[완료] 저장됨: {new_path}")
     except Exception as e:
-        print(f"❌ Error: {old_path}")
-        print(e)
+        print(f"[ERROR] {old_path}: {e}")
 
 
-# 전체 반복 실행
-for method in methods:
-    if not is_arrival:
-        for trace in traces:
-            for metric in metrics:
-                old_path = os.path.join(base_path, f"slo{old_sc}", method, f"{trace}_{metric}", "outputs.csv")
-                if not os.path.isfile(old_path):
-                    print(f"[경고] 파일 없음: {old_path}")
-                    continue
+def main():
+    parser = argparse.ArgumentParser(
+        description="SLO threshold을 다른 slo scale로 복사해서 저장합니다."
+    )
+    parser.add_argument("--old-sc",      type=float, required=True,
+                        help="원본 slo scale (예: 2.5)")
+    parser.add_argument("--new-sc-list", type=float, nargs="+", required=True,
+                        help="새 slo scale 목록 (예: 1.5 1.0)")
+    parser.add_argument("--base-path",   type=str,   required=True,
+                        help="루트 디렉토리 (e.g. paper_main_exp_32k)")
+    parser.add_argument("--is-arrival",  action="store_true",
+                        help="arrival 모드로 실행하려면 지정")
+    parser.add_argument("--arrival-rate-list", type=float, nargs="+",
+                        help="(arrival 모드일 때 필수) arrival rate 목록")
+    parser.add_argument("--cv-list",     type=int, nargs="+",
+                        help="(arrival 모드일 때 필수) cv 목록")
+    parser.add_argument("--metrics",     type=str,   nargs="+",
+                        help="(arrival 모드가 아닐 때 필수) metrics 목록")
+    parser.add_argument("--traces",      type=str,   nargs="+",
+                        help="(arrival 모드가 아닐 때 필수) traces 목록")
+    parser.add_argument("--methods",     type=str,   nargs="+", required=True,
+                        help="처리할 method 목록")
+    parser.add_argument("--arrival-tpl",  type=str, required=True,
+                        default="32k_lambda{rate}x_cv{cv}",
+                        help="arrival 모드에서 사용하는 서브디렉토리 템플릿. "
+                             "{rate}와 {cv}가 반드시 포함되어야 합니다.")
 
-                for new_sc in new_sc_list:
-                    new_dir = os.path.join(base_path, f"slo{new_sc}", method, f"{trace}_{metric}")
-                    new_path = os.path.join(new_dir, "outputs.csv")
+    args = parser.parse_args()
 
-                    # 파일 존재 확인
-                    update_slo_values(
-                        old_path=old_path,
-                        new_path=new_path,
+    # 모드별 필수 인자 체크
+    if args.is_arrival:
+        if not args.arrival_rate_list or not args.cv_list:
+            parser.error("--is-arrival 모드일 때는 --arrival-rate-list 와 --cv-list 가 필요합니다.")
+    else:
+        if not args.metrics or not args.traces:
+            parser.error("arrival 모드가 아닐 때는 --metrics 와 --traces 가 필요합니다.")
+
+    old_sc      = args.old_sc
+    new_sc_list = args.new_sc_list
+    base_path   = args.base_path
+    methods     = args.methods
+
+    if args.is_arrival:
+        # arrival 모드
+        for method in methods:
+            for rate in args.arrival_rate_list:
+                for cv in args.cv_list:
+                    # 템플릿에 rate, cv를 넣어서 디렉토리 이름 생성
+                    dir_name = args.arrival_tpl.format(rate=rate, cv=cv)
+                    old_path = os.path.join(
+                        base_path, f"slo{old_sc}", method,
+                        dir_name, "outputs.csv"
                     )
-    else :
-        for arrival_rate in arrival_rate_list:
-            for cv in cv_list:
-                old_path = os.path.join(base_path, f"slo{old_sc}", method, f"lambda{arrival_rate}x_cv{cv}", "outputs.csv")
-                if not os.path.isfile(old_path):
-                    print(f"[경고] 파일 없음: {old_path}")
-                    continue
-
-                # print(f"old path: {old_path}")
-
-                for new_sc in new_sc_list:
-                    new_dir = os.path.join(base_path, f"slo{new_sc}", method, f"lambda{arrival_rate}x_cv{cv}")
-                    new_path = os.path.join(new_dir, "outputs.csv")
-
-                    # print(f"new path: {new_path}")
-                    # 파일 존재 확인
-                    update_slo_values(
-                        old_path=old_path,
-                        new_path=new_path,
+                    if not os.path.isfile(old_path):
+                        print(f"[WARN] 파일 없음: {old_path}")
+                        continue
+                    for new_sc in new_sc_list:
+                        new_dir_name = args.arrival_tpl.format(rate=rate, cv=cv)
+                        new_path = os.path.join(
+                            base_path, f"slo{new_sc}", method,
+                            new_dir_name, "outputs.csv"
+                        )
+                        update_slo_values(old_path, new_path, old_sc, new_sc)
+    else:
+        # non-arrival 모드
+        for method in methods:
+            for trace in args.traces:
+                for metric in args.metrics:
+                    old_path = os.path.join(
+                        base_path, f"slo{old_sc}", method,
+                        f"{trace}_{metric}", "outputs.csv"
                     )
+                    if not os.path.isfile(old_path):
+                        print(f"[WARN] 파일 없음: {old_path}")
+                        continue
+                    for new_sc in new_sc_list:
+                        new_path = os.path.join(
+                            base_path, f"slo{new_sc}", method,
+                            f"{trace}_{metric}", "outputs.csv"
+                        )
+                        update_slo_values(old_path, new_path, old_sc, new_sc)
+
+if __name__ == "__main__":
+    main()
