@@ -22,22 +22,22 @@ IFS=$'\n\t'                    # safer word-splitting
 export CUDA_VISIBLE_DEVICES=1
 export VLLM_CONFIGURE_LOGGING=1        # 0 → minimal, 1 → user-configurable
 
-LOGGING_LEVEL=INFO                 # CRITICAL│ERROR│WARNING│INFO│DEBUG
+LOGGING_LEVEL=CRITICAL                 # CRITICAL│ERROR│WARNING│INFO│DEBUG
 ROOT="/home/heelim/vllm"               # project root
 
 profiled_path="/home/heelim/vllm/benchmark/scripts/profiled_results_A5000.json"
 FIGURE_ONLY="${1:-0}"                  # default = 0 (run + plot)
 
-EXP_LIST=(paper_main_exp_48k)              # high-level experiment names
-METHOD_LIST=(Flexgen)                  # see supported_methods.json for keys
-TRACE_LIST=(test)     # trace JSONs (basename only)
-# TRACE_LIST=(48k_lambda4.0x_cv1 48k_lambda3.5x_cv1 48k_lambda3.0/x_cv1 48k_lambda2.5x_cv1 48k_lambda2.0x_cv1 48k_lambda1.5x_cv1 48k_lambda1.0x_cv1)     # trace JSONs (basename only)
+EXP_LIST=(paper_main_exp_32k)              # high-level experiment names
+METHOD_LIST=(SelectN)                  # see supported_methods.json for keys
+TRACE_LIST=(32k_lambda5.0x_cv1 32k_lambda4.0x_cv1 32k_lambda3.0x_cv1 32k_lambda2.0x_cv1 32k_lambda1.0x_cv1 32k_lambda4.5x_cv1 32k_lambda3.5x_cv1 32k_lambda2.5x_cv1 32k_lambda1.5x_cv1)
 
 TRACE_CFG_DIR="${ROOT}/benchmark/selected_traces"
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"
 PLOTTER="${ROOT}/benchmark/data_analysis/metrics_plot.py"
 
+# SLO_RATIO_LIST=(1 1.5 2 2.5 1.25)                   # e.g. 1.5 2.0 2.5 …
 SLO_RATIO_LIST=(2.5)                   # e.g. 1.5 2.0 2.5 …
 
 ###############################################################################
