@@ -1,14 +1,14 @@
 {
-  "PPR": 2.946564885496183,
-  "TPI": 0.41094937386278496,
-  "OV_block_step": 4608656,
-  "OV_frac": 0.23534049657946962,
-  "GE2_frac": 0.05191052124585251,
-  "peak_blocks": 1544,
-  "peak_step": 23907,
+  "PPR": 2.7290076335877864,
+  "TPI": 0.4032337357295024,
+  "OV_block_step": 3954324,
+  "OV_frac": 0.20610749569367576,
+  "GE2_frac": 0.06918118752389796,
+  "peak_blocks": 1430,
+  "peak_step": 27719,
   "gpu_blocks": 524,
-  "total_steps": 37372,
-  "type1_count": 52,
+  "total_steps": 36614,
+  "type1_count": 55,
   "type2_count": 29,
   "plot_path": "traces/requests_types_32k/all_traces_arrival_rate_CV/SS03_SM42_SL05_MS03_MM05_ML25_LS13_LM02_LL00/lognormal_lambda3.0x_cv1/lognormal_lambda3.0x_cv1.png"
 }

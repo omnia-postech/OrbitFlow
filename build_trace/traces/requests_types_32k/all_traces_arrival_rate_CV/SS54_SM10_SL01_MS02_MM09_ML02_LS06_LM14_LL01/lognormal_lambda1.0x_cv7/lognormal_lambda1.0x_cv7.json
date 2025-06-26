@@ -1,0 +1,21 @@
+{
+  "batch_size": 4,
+  "max_model_len": 32384,
+  "num_gpu_blocks_override": 543,
+  "arrival_pattern": "LognormalArrival(lambda=0.001084530836131562,cv=7,max=431523)",
+  "vocab": [200, 30000],
+  "peak_batch_blocks": 1443,
+  "requests": {
+    "request_0": {"category": "MSL_I1632-2448_O6544-9824", "input_length": 2414, "output_length": 9333, "arrival_time": 0, "sched_time": 0, "wait_time": 0},
+    "request_1": {"category": "LSS_I3264-4912_O400-608", "input_length": 4623, "output_length": 547, "arrival_time": 854, "sched_time": 854, "wait_time": 0},
+    "request_2": {"category": "SMS_I96-144_O816-1216", "input_length": 98, "output_length": 1036, "arrival_time": 1316, "sched_time": 1316, "wait_time": 0},
+    "request_3": {"category": "SSS_I192-304_O192-304", "input_length": 202, "output_length": 194, "arrival_time": 1324, "sched_time": 1324, "wait_time": 0},
+    "request_4": {"category": "MSS_I816-1216_O192-304", "input_length": 888, "output_length": 261, "arrival_time": 1367, "sched_time": 1402, "wait_time": 35},
+    "request_5": {"category": "SMS_I96-144_O1632-2448", "input_length": 139, "output_length": 1880, "arrival_time": 1522, "sched_time": 1522, "wait_time": 0},
+    "request_6": {"category": "SMS_I192-304_O1632-2448", "input_length": 205, "output_length": 1992, "arrival_time": 2096, "sched_time": 2096, "wait_time": 0},
+    "request_7": {"category": "MSS_I816-1216_O400-608", "input_length": 875, "output_length": 432, "arrival_time": 2291, "sched_time": 2353, "wait_time": 62},
+    "request_8": {"category": "SSS_I192-304_O96-144", "input_length": 250, "output_length": 126, "arrival_time": 15059, "sched_time": 15059, "wait_time": 0},
+    "request_9": {"category": "LSS_I3264-4912_O400-608", "input_length": 3491, "output_length": 474, "arrival_time": 15064, "sched_time": 15064, "wait_time": 0},
+    "request_10": {"category": "MSS_I816-1216_O96-144", "input_length": 877, "output_length": 102, "arrival_time": 933053, "sched_time": 933053, "wait_time": 0}
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "batch_size": 4,
+  "max_model_len": 32384,
+  "num_gpu_blocks_override": 517,
+  "arrival_pattern": "LognormalArrival(lambda=0.0005613610847223421,cv=7,max=833689)",
+  "vocab": [200, 30000],
+  "peak_batch_blocks": 2030,
+  "requests": {
+    "request_0": {"category": "SSL_I192-304_O6544-9824", "input_length": 232, "output_length": 6606, "arrival_time": 0, "sched_time": 0, "wait_time": 0},
+    "request_1": {"category": "SSL_I192-304_O6544-9824", "input_length": 192, "output_length": 9104, "arrival_time": 1046, "sched_time": 1046, "wait_time": 0},
+    "request_2": {"category": "MMS_I1632-2448_O1632-2448", "input_length": 2031, "output_length": 1633, "arrival_time": 1185, "sched_time": 1185, "wait_time": 0},
+    "request_3": {"category": "MSS_I816-1216_O96-144", "input_length": 855, "output_length": 123, "arrival_time": 1193, "sched_time": 1193, "wait_time": 0},
+    "request_4": {"category": "SMS_I400-608_O1632-2448", "input_length": 513, "output_length": 1937, "arrival_time": 1201, "sched_time": 1317, "wait_time": 116},
+    "request_5": {"category": "MMS_I1632-2448_O1632-2448", "input_length": 2273, "output_length": 2336, "arrival_time": 8614, "sched_time": 8614, "wait_time": 0},
+    "request_6": {"category": "MSL_I816-1216_O6544-9824", "input_length": 1035, "output_length": 7723, "arrival_time": 8702, "sched_time": 8702, "wait_time": 0},
+    "request_7": {"category": "MSS_I816-1216_O96-144", "input_length": 966, "output_length": 139, "arrival_time": 8737, "sched_time": 8737, "wait_time": 0},
+    "request_8": {"category": "SSS_I192-304_O400-608", "input_length": 260, "output_length": 548, "arrival_time": 9473, "sched_time": 9473, "wait_time": 0},
+    "request_9": {"category": "SSS_I192-304_O400-608", "input_length": 239, "output_length": 558, "arrival_time": 16106, "sched_time": 16106, "wait_time": 0},
+    "request_10": {"category": "SSL_I96-144_O3264-4912", "input_length": 114, "output_length": 3528, "arrival_time": 16896, "sched_time": 16896, "wait_time": 0},
+    "request_11": {"category": "SSS_I96-144_O400-608", "input_length": 118, "output_length": 607, "arrival_time": 17043, "sched_time": 17043, "wait_time": 0},
+    "request_12": {"category": "SMS_I192-304_O816-1216", "input_length": 237, "output_length": 1158, "arrival_time": 17941, "sched_time": 17941, "wait_time": 0},
+    "request_13": {"category": "MSS_I816-1216_O400-608", "input_length": 860, "output_length": 427, "arrival_time": 18112, "sched_time": 18112, "wait_time": 0},
+    "request_14": {"category": "SSS_I96-144_O96-144", "input_length": 114, "output_length": 135, "arrival_time": 18127, "sched_time": 18127, "wait_time": 0},
+    "request_15": {"category": "SSS_I192-304_O96-144", "input_length": 258, "output_length": 139, "arrival_time": 19824, "sched_time": 19824, "wait_time": 0},
+    "request_16": {"category": "MSS_I1632-2448_O96-144", "input_length": 2287, "output_length": 133, "arrival_time": 26268, "sched_time": 26268, "wait_time": 0},
+    "request_17": {"category": "SSL_I400-608_O6544-9824", "input_length": 568, "output_length": 7005, "arrival_time": 26645, "sched_time": 26645, "wait_time": 0},
+    "request_18": {"category": "SSS_I192-304_O192-304", "input_length": 263, "output_length": 270, "arrival_time": 1424719, "sched_time": 1424719, "wait_time": 0}
+  }
+}

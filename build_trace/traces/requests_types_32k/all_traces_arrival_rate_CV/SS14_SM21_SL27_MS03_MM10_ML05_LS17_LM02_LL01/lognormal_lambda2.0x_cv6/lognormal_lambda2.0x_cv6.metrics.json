@@ -1,0 +1,14 @@
+{
+  "PPR": 2.7214700193423598,
+  "TPI": 0.34509522264955284,
+  "OV_block_step": 5419138,
+  "OV_frac": 0.24284999960116074,
+  "GE2_frac": 0.0999026921829387,
+  "peak_blocks": 1407,
+  "peak_step": 9109,
+  "gpu_blocks": 517,
+  "total_steps": 43162,
+  "type1_count": 60,
+  "type2_count": 26,
+  "plot_path": "traces/requests_types_32k/all_traces_arrival_rate_CV/SS14_SM21_SL27_MS03_MM10_ML05_LS17_LM02_LL01/lognormal_lambda2.0x_cv6/lognormal_lambda2.0x_cv6.png"
+}
