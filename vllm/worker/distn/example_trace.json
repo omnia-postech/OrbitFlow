@@ -1,0 +1,13 @@
+{
+    "batch_size": 4,
+    "max_model_len": 32384,
+    "num_gpu_blocks_override": 641,
+    "arrival_pattern": "LognormalArrival(lambda=0.00044635959415612286,cv=1,max=349494)",
+    "vocab": [200, 30000],
+    "peak_batch_blocks": 2785,
+    "requests": {
+        "request_0": {"category": "long short", "input_length": 5000, "output_length": 200, "arrival_time": 0, "sched_time": 0, "wait_time": 0},
+        "request_1": {"category": "long short", "input_length": 5000, "output_length": 200, "arrival_time": 100, "sched_time": 0, "wait_time": 0}
+    }
+  }
+  
