@@ -1,132 +1,285 @@
-""" 
-Solver inputs: list of Request 
-layer_num: 32 
-block_bandwidth: 103178.0 / 1000 (# blocks per second? or miliseconds)
-gpu_block_capacity: block_manager.num_total_gpu_blocks 
-window_ub: window upper bound? 
- 
-Solver outputs: list of Result 
-class Request:
-    def __init__(self, id: str, context_len_in_blocks: int, layer_time: float,
-                 deposit_count: int, slo: float, gpu_layers_on_gpu: int):
-        self.id = id
-        self.context_len_in_blocks = context_len_in_blocks
-        self.layer_time = layer_time
-        self.deposit_count = deposit_count
-        self.slo = slo
-        self.gpu_layers_on_gpu = gpu_layers_on_gpu
-"""
-import torch 
-from solver  import Solver_updated as Solver
-# from solver import LatencySolver as Solver
-from solver import Request
-# from solver  import Solver as Solver
-import time
-
-from math import floor
-from typing import List, Dict, Tuple, Union, Optional
-PROFILED_A = 1.0017431830666432e-06
-PROFILED_B = 0.049519613282613506
-RequestDesc = Dict[str, Union[str, bool, int, float]]
-
-def compute_batch_latency(
-    requests: List["Request"],
-    offload_num: Optional[Dict[int, int]] = None,
-    layer_num: int = 32,
-    block_bandwidth: float = 103_178.0,   # blocks per second
-    epsilon: float = 1e-12
-) -> Tuple[float, Dict[str, Optional[float]]]:
-    """
-    Return (token_time, {req.id: actual_time or None})
-    All time units must be consistent (s or ms).
-
-    Each Request may carry extra attributes:
-        • resume : bool   (default True)
-        • offload_num      –int
-          OR
-        • prefetch_dist    –int   (offload_num = floor(layer_num / prefetch_dist))
-    """
-    # compute batch layer time 
-    batch_req_len = sum(r.context_len_in_blocks for r in requests)* 16 
-    batch_layer = (PROFILED_A * batch_req_len + PROFILED_B ) / 32
-    print("batch_layer", batch_layer)
-    comp_time = batch_layer * 32 
-    print("comm_time", comp_time) 
-    
-    comm_time = 0 
-    token_time = max(comp_time, comm_time)
-    print("token_time", token_time) 
-    print("requests", requests)
-path = "/home/xinyuema/vllm/vllm/worker/distn/snapshot/step{}.pt" 
+# ──────────────────────────────────────────────────────────────
+#  Sim-KV  (minimal skeleton)
+# ──────────────────────────────────────────────────────────────
+import logging
+from collections import defaultdict
+from dataclasses import dataclass, field
+import math
+from typing import Dict, List, Deque, Optional, Tuple
+from collections import deque, OrderedDict
+from solver import Request as SolverReq          # ← the solver-side Request
+import json, random
 
 
+log = logging.getLogger("simkv")
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s | %(levelname)s | %(message)s")
+BLOCK_SIZE = 16                     # tokens per KV-block
+# ----------------------------------------------------------------------
+# Data models
+# ----------------------------------------------------------------------
 
-steps = list(range(49))
-steps = [0]
+# solver-side Request is *not* used here
+@dataclass
+class RequestSpec:
+    category: str
+    input_length: int
+    output_length: int
+    arrival_time: int
+    token_ids: list[int]
+    sched_time: Optional[int] = None
+    wait_time: Optional[int] = None
 
-solver = Solver()
-for step in steps: 
-    solver_req = torch.load(path.format(step), weights_only=False)
-    request_list, block_bandwidth, gpu_block_capacity = solver_req 
-    if len(request_list) == 0: 
-        # make a dummy request\
-        request_list.append(Request(
-            id="dummy1", context_len_in_blocks=10, layer_time=0.0000125, deposit_count=1000, slo=100, gpu_layers_on_gpu=3
-        ))
-        request_list.append(Request(
-            id="dummy2", context_len_in_blocks=30, layer_time=0.0000125, deposit_count=1000, slo=100, gpu_layers_on_gpu=2
-        ))        
-    # request_list[0].layer_time = 0.10
-    print("request_list", request_list)
-    print("block_bandwidth", block_bandwidth)
-    print("gpu_block_capacity", gpu_block_capacity)
-    import time 
-    print('---------solver original-----------')
-    start = time.time() 
-    output = solver.solve(
-        request_list, 
-        layer_num=32,
-        gpu_block_capacity=100*32)
-    end = time.time()
-    print("time", end-start)
-    end = time.time()
-    print(output)
-    solver_dists = {s.id: s.n for s in output}  
-    print(solver_dists)
-    print("solver time", end-start)
-    print('-----------solver original end-------------')
+@dataclass
+class Trace:
+    requests: Dict[str, RequestSpec]
+    batch_size: int
+    request_type_probs: any
+    vocab: Tuple[int, int]
+    num_gpu_blocks_override: Optional[int] = None
+    max_model_len: Optional[int] = None
+    gpu_memory_utilization: Optional[float] = None
 
-    # print('----------solver minimal--------------')
-    # start = time.time() 
-    # output = solver.solve_minimal(
-    #     request_list, 
-    #     layer_num=32,
-    #     gpu_block_capacity=30*32,
-    #     )
-    # end = time.time()
-    # print("time", end-start)
-    # end = time.time()
-    # print(output)
-    # solver_dists = {s.id: s.n for s in output}  
-    # print(solver_dists)
-    # print("solver time", end-start)
-    
-    # print('---------solver minimal end---------------')
+    @classmethod
+    def load_from_json(cls, path: str) -> "Trace":
+        with open(path, "r") as f:
+            d = json.load(f)
 
-    
-    # offload_num = {r.id: list(range(31)) for r in request_list}
-    # compute_batch_latency(request_list, offload_num=offload_num, block_bandwidth=block_bandwidth)
-    
-    # latency = solver.compute_T_batch(
-    #     requests_list=request_list,
-    #     offload_decision=solver_dists,
-    #     layer_num=32,
-    # )
-    # uni_dist = {r.id: 2 for r in request_list}
-    # print(latency)
-    # latency = solver.compute_T_batch(
-    #     requests_list=request_list,
-    #     offload_decision=uni_dist,
-    #     layer_num=32,
-    # )
-    # print(latency)
+        vmin, vmax = d["vocab"]
+        rq = {}
+        for rid, r in d["requests"].items():
+            if "token_ids" not in r or len(r["token_ids"]) != r["input_length"]:
+                r["token_ids"] = [random.randint(vmin, vmax)
+                                  for _ in range(r["input_length"])]
+            rq[rid] = RequestSpec(**r)
+
+        return cls(
+            requests=rq,
+            batch_size=d["batch_size"],
+            max_model_len=d["max_model_len"],
+            num_gpu_blocks_override=d["num_gpu_blocks_override"],
+            request_type_probs=d.get("request_type_probs"),
+            vocab=tuple(d["vocab"]),
+            gpu_memory_utilization=d.get("gpu_memory_utilization"),
+        )
+
+
+@dataclass(frozen=True)
+class TraceReq:
+    id: str
+    prompt_len: int
+    output_len: int
+    arrival_time: int
+
+@dataclass
+class ReqRuntime:
+    prompt_len: int
+    generated: int = 0        # decode tokens emitted so far
+    deposit: int = 0
+    def memory(self) -> int:
+        return self.prompt_len + self.generated
+
+# ----------------------------------------------------------------------
+# Component 0 – DelaySimulator (already implemented elsewhere)
+# ----------------------------------------------------------------------
+class DelaySimulator:
+    # reuse your existing implementation
+    ...
+
+# ----------------------------------------------------------------------
+# Component 1 – MemoryStat
+# ----------------------------------------------------------------------
+class MemoryStat:
+    def __init__(self):
+        self.total_tokens: int = 0
+        self.per_req: Dict[str, int] = {}
+
+    def update(self, runtimes: Dict[str, ReqRuntime]):
+        self.per_req = {rid: rt.memory() for rid, rt in runtimes.items()}
+        self.total_tokens = sum(self.per_req.values())
+
+# ----------------------------------------------------------------------
+# Component 2 – SolverInputGenerator
+# ----------------------------------------------------------------------
+class SolverInputGenerator:
+    def __init__(self, trace: Trace):
+        self.cap_blocks = trace.num_gpu_blocks_override
+        self.cap_tokens = self.cap_blocks * BLOCK_SIZE
+
+        self.pending: Deque[TraceReq] = deque(
+            TraceReq(rid,
+                     req.input_length,
+                     req.output_length,
+                     req.arrival_time)
+            for rid, req in sorted(trace.requests.items(),
+                                   key=lambda kv: kv[1].arrival_time)
+        )
+        self.active: "OrderedDict[str, TraceReq]" = OrderedDict()
+        self.paused: Deque[TraceReq] = deque()
+
+        # runtime counters for generated tokens
+        self.generated: Dict[str, int] = {}
+
+    # ----------------------------------------------------------------------
+    def _mem_tokens(self) -> int:
+        return sum(r.prompt_len + self.generated.get(r.id, 0)
+                   for r in self.active.values())
+
+    # ----------------------------------------------------------------------
+    def _trace_to_solver(self, tr: TraceReq) -> SolverReq:
+        """
+        Minimal mapping → solver.Request
+        • context_len_in_blocks = ceil(prompt/16)
+        • other fields initialised to 0 – you will fill real values later
+        """
+        return SolverReq(
+            id=tr.id,
+            context_len_in_blocks=math.ceil(tr.prompt_len / BLOCK_SIZE),
+            layer_time=0.0,
+            deposit_count=0,
+            slo=0.0,
+            gpu_layers_on_gpu=0,
+        )
+
+    # ----------------------------------------------------------------------
+    def step(self, t: int) -> List[SolverReq]:
+        """Advance to simulation step *t*, return list[solver.Request]."""
+
+        # 1) admit arrivals that can fit
+        while self.pending and self.pending[0].arrival_time <= t:
+            cand = self.pending[0]
+            if self._mem_tokens() + cand.prompt_len <= self.cap_tokens:
+                self.active[cand.id] = self.pending.popleft()
+                self.generated[cand.id] = 0
+            else:
+                break     # stop admitting – memory full
+
+        # 2) FIFO evict while over capacity
+        while self._mem_tokens() > self.cap_tokens:
+            vid, vict = self.active.popitem(last=True)
+            self.paused.append(vict)
+            self.generated.pop(vid, None)
+
+        # 3) build solver input
+        return [self._trace_to_solver(tr) for tr in self.active.values()]
+
+    # ----------------------------------------------------------------------
+    # helper for simulator to advance token counters
+    # ----------------------------------------------------------------------
+    def incr_generated(self, rid: str, n: int = 1):
+        if rid in self.generated:
+            self.generated[rid] += n
+# ----------------------------------------------------------------------
+# Component 3 – ControlPlane
+# ----------------------------------------------------------------------
+class ControlPlane:
+    def __init__(self):
+        self.paused: Dict[str, ReqRuntime] = {}
+
+    def handle_infeasible(self, runtimes: Dict[str, ReqRuntime]) -> Optional[str]:
+        # pick longest request to pause
+        victim = max(runtimes.items(), key=lambda kv: kv[1].memory())[0]
+        self.paused[victim] = runtimes.pop(victim)
+        log.warning("Paused %s due to infeasible placement.", victim)
+        return victim
+
+    def try_resume(self, runtimes: Dict[str, ReqRuntime]):
+        # naive: resume everything
+        for rid, rt in list(self.paused.items()):
+            runtimes[rid] = self.paused.pop(rid)
+
+# ----------------------------------------------------------------------
+# Component 4 – StepLogPrinter
+# ----------------------------------------------------------------------
+class StepLogPrinter:
+    def __init__(self):
+        self.step = 0
+    def log(self, mem: MemoryStat):
+        log.info("STEP %4d | mem_tot=%d | %s",
+                 self.step, mem.total_tokens, mem.per_req)
+        self.step += 1
+
+# ----------------------------------------------------------------------
+# Component 5 – Simulator loop
+# ----------------------------------------------------------------------
+class Simulator:
+    def __init__(self, gen: SolverInputGenerator, solver):
+        self.gen = gen
+        self.solver     = solver
+        self.runtimes: Dict[str, ReqRuntime] = {}
+        # self.delay_sim  = DelaySimulator(v_tps=1.0)  # customise
+        self.mem_stat   = MemoryStat()
+        self.ctrl_plane = ControlPlane()
+        self.logger     = StepLogPrinter()
+        self.decode_left: int = 0
+        self.step: int = 0
+
+    # ---- helpers -----------------------------------------------------
+    def _admit_arrivals(self):
+        """admit requests whose arrival_time ≤ current step"""
+        while self.gen.pending and self.gen.pending[0].arrival_time <= self.step:
+            req = self.gen.pending.popleft()      # FIFO arrival
+            self.runtimes[req.id] = ReqRuntime(prompt_len=req.prompt_len)
+            self.gen.generated[req.id] = 0        # initialise decode counter
+            log.info("Admitted %s at step %d", req.id, self.step)
+
+    def _call_solver(self):
+        inputs = self.gen.build(self.runtimes)
+        result = self.solver.solve(inputs)            # returns None ↔ infeasible
+        if result is None:
+            self.ctrl_plane.handle_infeasible(self.runtimes)
+            return self._call_solver()                # retry immediately
+        self.decode_left = int(result.window)
+        log.info("Solver window=%d", self.decode_left)
+
+    # ---- main loop ---------------------------------------------------
+    def run(self):
+        while self.gen.pending or self.runtimes:
+            self._admit_arrivals()
+
+            if self.decode_left == 0:
+                self.ctrl_plane.try_resume(self.runtimes)
+                self._call_solver()
+
+            # emit one token per active request
+            for rid, rt in self.runtimes.items():
+                rt.generated += 1                     # decode token
+                # self.delay_sim.on_token(rid, self.step)
+
+            self.decode_left = max(self.decode_left - 1, 0)
+
+            # finish requests whose output_len reached
+            for rid in list(self.runtimes):
+                # assume we stored output_len somewhere accessible
+                pass  # add finish logic here
+
+            # bookkeeping & logging
+            self.mem_stat.update(self.runtimes)
+            self.logger.log(self.mem_stat)
+
+            self.step += 1
+
+# ----------------------------------------------------------------------
+# Usage example
+# ----------------------------------------------------------------------
+import argparse, json, logging
+# ────── run simulation ──────────────────────────────────────────────────────
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s | %(levelname)s | %(message)s")
+log = logging.getLogger("main")
+
+# ────── CLI ──────────────────────────────────────────────────────────────────
+parser = argparse.ArgumentParser()
+parser.add_argument("--trace", required=True, help="Path to trace JSON file")
+args = parser.parse_args()
+# ────── dummy solver (always returns 32-token window) ───────────────────────
+class DummySolver:
+    def solve(self, reqs):
+        class R: window = 32
+        return R()
+# ────── build generator from trace file ─────────────────────────────────────
+trace = Trace.load_from_json(args.trace)
+# print(f"trace: {trace}")
+gen   = SolverInputGenerator(trace)
+sim   = Simulator(gen, DummySolver())
+sim.run()
