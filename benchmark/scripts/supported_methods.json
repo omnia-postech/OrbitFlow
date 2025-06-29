@@ -5,6 +5,12 @@
       "--flattened-cache",      "true",
       "--merge-prefetch-buffer", "true"
     ],
+    "Flexgen_orig": [
+        "--prefetch-mode",        "flexgen_orig",
+        "--prefetch-distance",    "1",
+        "--flattened-cache",      "true",
+        "--merge-prefetch-buffer", "true"
+      ],
     "NoPrefetch": [
         "--prefetch-mode",        "none",
         "--prefetch-distance",    "1",
@@ -60,6 +66,30 @@
         "--merge-prefetch-buffer", "true",
         "--pause-and-resume",
         "--enable-deposit"
+    ],
+    "UniformSolver": [
+        "--prefetch-mode",        "solver",
+        "--prefetch-distance",    "1",
+        "--flattened-cache",      "true",
+        "--merge-prefetch-buffer", "true",
+        "--uniform-solver"
+    ],
+    "UniformSolver_TD": [
+        "--prefetch-mode",        "solver",
+        "--prefetch-distance",    "1",
+        "--flattened-cache",      "true",
+        "--merge-prefetch-buffer", "true",
+        "--enable-deposit",
+        "--uniform-solver"
+    ],
+    "UniformSolver_TD_PR": [
+        "--prefetch-mode",        "solver",
+        "--prefetch-distance",    "1",
+        "--flattened-cache",      "true",
+        "--merge-prefetch-buffer", "true",
+        "--pause-and-resume",
+        "--enable-deposit",
+        "--uniform-solver"
     ],
     "OursUniformSolver": [
         "--prefetch-mode",        "solver",
