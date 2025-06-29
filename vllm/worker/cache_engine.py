@@ -681,6 +681,20 @@ class FlattenedCacheEngine(CacheEngineBase):
         self.max_slo = 0 # used by selectN 
         self.max_comp_time = 0  # used by selectN
         self.estimator = None # used by selectN, to estimate the token length
+
+        self.fixed_flexgen_distance = None
+        if cache_config.prefetch_mode == "flexgen_orig":        
+            # # worst_case_token_len = cache_config.worst_case_token_len  # 기본값
+            # batch_size = cache_config.batch_size
+            # blocks_per_layer = ceil(worst_case_token_len / self.block_size) + 1
+            # num_layers_on_GPU = self.num_total_gpu_blocks // blocks_per_layer
+            # num_layers_to_offload = self.num_attention_layers - num_layers_on_GPU
+            # self.fixed_flexgen_distance = max(1, floor(self.num_attention_layers / num_layers_to_offload) - 1)                        
+            # logger.critical(f"[flexgen_orig] Fixed prefetch distance: {self.fixed_flexgen_distance} (worst_case_token_len={worst_case_token_len}, batch_size={batch_size})")
+
+            # worst_case_token_len = 41582 # for 32k trace
+            self.fixed_flexgen_distance = 1
+
     def register_bm(self, block_manager): 
         self.block_manager = block_manager
         # logger.debug(f"Linking block manager")
@@ -1185,6 +1199,10 @@ class FlattenedCacheEngine(CacheEngineBase):
             else:          
                 dist = self.resume_distances
                 logger.info(f"[driver] {dist}") 
+        elif self.prefetch_mode == "flexgen_orig":
+            dist = [self.fixed_flexgen_distance] * len(snapshot.candidates)
+            logger.info(f"[flexgen_orig] Using fixed prefetch distance: {self.fixed_flexgen_distance}")
+            return dist, {"policy": "flexgen_orig"}
         elif prefetch_mode == "flexgen":
             if is_decoding:
                 total_blocks = self.num_gpu_blocks 
@@ -1281,7 +1299,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             raise ValueError(f"unknown policy {prefetch_mode}")
         dist = self._normalise_prefetch_distance(spec=dist, candidates=snapshot.candidates)
         # NOTE(HONG): distance 0 is not allowed, so we start from 1; if you want to use distance 0 -> comment out below part
-        if prefetch_mode in ["distn", "flexgen", "selectn"]:
+        if prefetch_mode in ["distn", "flexgen", "flexgen_orig", "selectn"]:
             for s, d in dist.items():
                 if d == 0:
                     dist[s] = 1
