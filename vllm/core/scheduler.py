@@ -18,7 +18,7 @@ from vllm.sequence import (Sequence, SequenceData, SequenceGroup,
 from vllm.utils import Device, PyObjectCache
 from gurobipy import GRB
 from vllm.worker.distn.solver import Request
-from vllm.worker.distn.solver import Solver_updated, Solver_uniform
+from vllm.worker.distn.solver import Solver_updated, Solver_uniform, Solver_v1
 from vllm.logger import init_logger
 logger = init_logger(__name__)
 
@@ -374,7 +374,7 @@ class Scheduler:
             self.solver = Solver_uniform()
         else:
             logger.critical(f"Using non-uniform  solver for scheduling. ")
-            self.solver = Solver_updated()
+            self.solver = Solver_v1()
         
         version = "selfattn"
         if (self.scheduler_config.runner_type == "pooling"
@@ -1175,7 +1175,7 @@ class Scheduler:
                 prefetch_distance = -1 # solver will never enter preemption by design, none correspond to dist of -1 
             elif self.cache_config.prefetch_mode in ['static']: 
                 prefetch_distance = self.cache_config.prefetch_distance # use the same distance as the rest of the scheduler
-            elif self.cache_config.prefetch_mode in ['selectn', "flexgen", "distn_single"]:
+            elif self.cache_config.prefetch_mode in ['selectn', "flexgen", "flexgen_orig", "distn_single"]:
                 prefetch_distance = 1 # as long as there is blocks enough for 1 layer, we will eventually swap it in #FIXME 
             else: 
                 prefetch_distance = -1 # default
@@ -1427,7 +1427,7 @@ class Scheduler:
                     True, enable_chunking)
 
             # If the sequence group cannot be allocated, stop.
-            if self.cache_config.prefetch_mode in ["solver", "flexgen", "distn_single"]:
+            if self.cache_config.prefetch_mode in ["solver", "flexgen", "flexgen_orig", "distn_single"]:
                 num_gpu_layers = 16
             else: 
                 num_gpu_layers = self.block_manager.num_attention_layers
@@ -2040,7 +2040,7 @@ class Scheduler:
 
     def _allocate_and_set_running(self, seq_group: SequenceGroup) -> None:
         # (xinyue) allocating new sequence here 
-        if self.cache_config.prefetch_mode in ["solver", "flexgen", "distn_single"]: # since we disable distance 0
+        if self.cache_config.prefetch_mode in ["solver", "flexgen", "flexgen_orig", "distn_single"]: # since we disable distance 0
             num_gpu_layers = 16
         else:
             num_gpu_layers = self.block_manager.num_attention_layers
