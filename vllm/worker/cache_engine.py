@@ -623,6 +623,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         self.prefetch_distance = cache_config.prefetch_distance 
         self.merge_prefetch_buffer = cache_config.merge_prefetch_buffer     
         self.pause_and_resume = cache_config.pause_and_resume
+        self.pause_strategy = cache_config.pause_strategy
         self.static_batching = cache_config.static_batching
         self.removable_cache = cache_config.removable_cache
         if not hasattr(self.cache_config, "need_solver"):
