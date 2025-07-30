@@ -949,12 +949,25 @@ class Scheduler:
                                 logger.critical("[Solver-fallback] single-req → prevent pause → distn_single mode")
                                 break
 
-                            victim_sg = max(
-                                decode_candidates,
-                                key=lambda sg: len(
-                                    sg.seq_group.get_seqs()[0].data._cached_all_token_ids   # 💡 길이 비교
-                                )
-                            )
+                            if self.cache_config.pause_strategy == "longest": 
+                                victim_sg = max(decode_candidates, key=lambda sg: len(sg.seq_group.get_seqs()[0].data._cached_all_token_ids))
+                            elif self.cache_config.pause_strategy == "shortest":
+                                victim_sg = min(decode_candidates, key=lambda sg: len(sg.seq_group.get_seqs()[0].data._cached_all_token_ids))
+                            elif self.cache_config.pause_strategy == "random":                                
+                                victim_sg = random.choice(decode_candidates)  # Randomly select a victim
+                            elif self.cache_config.pause_strategy == "slo_loose":
+                                victim_sg = min(decode_candidates, key=lambda sg: (1 / self.slo_from_delaysim[sg.seq_group.request_id], len(sg.seq_group.get_seqs()[0].data._cached_all_token_ids)))
+                            elif self.cache_config.pause_strategy == "slo_strict":
+                                victim_sg = max(decode_candidates, key=lambda sg: (1 / self.slo_from_delaysim[sg.seq_group.request_id], len(sg.seq_group.get_seqs()[0].data._cached_all_token_ids)))
+                            else:
+                                raise ValueError(f"Unknown pause strategy: {self.cache_config.pause_strategy}")
+
+                            # victim_sg = max(
+                            #     decode_candidates,
+                            #     key=lambda sg: len(
+                            #         sg.seq_group.get_seqs()[0].data._cached_all_token_ids   # 💡 길이 비교
+                            #     )
+                            # )
                             vid = victim_sg.seq_group.request_id
                             msg = ""
                             for request in request_list:

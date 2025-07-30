@@ -28,8 +28,8 @@ ROOT="/home/heelim/vllm"               # project root
 profiled_path="/home/heelim/vllm/benchmark/scripts/profiled_results_A5000.json"
 FIGURE_ONLY="${1:-0}"                  # default = 0 (run + plot)
 
-EXP_LIST=(paper_main_exp_design_validation)              # high-level experiment names
-METHOD_LIST=(UniformSolver)                  # see supported_methods.json for keys
+EXP_LIST=(paper_main_exp_TP)              # high-level experiment names
+METHOD_LIST=(DistNSingle)                  # see supported_methods.json for keys
 # TRACE_LIST=(lambda1.0x_cv1 lambda2.0x_cv1 lambda3.0x_cv1 lambda4.0x_cv1 lambda5.0x_cv1)
 TRACE_LIST=(lambda2.0x_cv1)
 
@@ -39,7 +39,7 @@ BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"
 PLOTTER="${ROOT}/benchmark/data_analysis/metrics_plot.py"
 
 # SLO_RATIO_LIST=(1 1.5 2 2.5 1.25)                   # e.g. 1.5 2.0 2.5 …
-SLO_RATIO_LIST=(2)                   # e.g. 1.5 2.0 2.5 …
+SLO_RATIO_LIST=(5.4)                   # e.g. 1.5 2.0 2.5 …
 
 ###############################################################################
 # 2. UTILITY FUNCTIONS                                                         #
