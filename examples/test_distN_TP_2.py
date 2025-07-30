@@ -47,6 +47,7 @@ MAX_MODEL_LEN = 13000
 BLOCK_SIZE  = 16
 SLO_THRESHOLD = 0.5      
 CSV_OUTPUT_FILE = "metrics.csv"
+NUM_LAYERS = int(os.environ.get("NUM_LAYERS", 32)) # Xinyue: HARDCODE, should be passed from model config to block manager
 # PROFILED_A = 1.0017431830666432e-06
 # PROFILED_B = 0.049519613282613506
 test_trace = {
@@ -728,7 +729,7 @@ def main(configs):
     print(f"slo_ratio: {configs.slo_ratio}")
     
     if flattened_cache and num_gpu_blocks_override is not None:
-        num_gpu_blocks_override *= 32 
+        num_gpu_blocks_override *= NUM_LAYERS
     print(f"max_model_len: {max_model_len}")
     args = EngineArgs(
         model=MODEL,
