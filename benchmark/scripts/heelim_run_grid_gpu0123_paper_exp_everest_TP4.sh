@@ -19,25 +19,28 @@ IFS=$'\n\t'                    # safer word-splitting
 ###############################################################################
 # 1. CONSTANTS – edit freely ✏️                                                #
 ###############################################################################
-export CUDA_VISIBLE_DEVICES=3
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 export VLLM_CONFIGURE_LOGGING=1        # 0 → minimal, 1 → user-configurable
+export NUM_LAYERS=80
 
 LOGGING_LEVEL=CRITICAL                 # CRITICAL│ERROR│WARNING│INFO│DEBUG
 ROOT="/home/heelim/vllm"               # project root
 
-profiled_path="/home/heelim/vllm/benchmark/scripts/profiled_results_A6000.json"
+profiled_path="/home/heelim/vllm/benchmark/scripts/profiled_results_A6000_70B.json"
 FIGURE_ONLY="${1:-0}"                  # default = 0 (run + plot)
 
-EXP_LIST=(paper_main_exp_context_length)              # high-level experiment names
-METHOD_LIST=(Flexgen)                  # see supported_methods.json for keys
-TRACE_LIST=(64k_lambda2.0x_cv1)     # trace JSONs (basename only)
+EXP_LIST=(paper_main_exp_TP)              # high-level experiment names
+METHOD_LIST=(DistNSingle)                  # see supported_methods.json for keys
+TRACE_LIST=(128k_bs8_lambda2.0x_cv1)
 
 TRACE_CFG_DIR="${ROOT}/benchmark/selected_traces"
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"
 PLOTTER="${ROOT}/benchmark/data_analysis/metrics_plot.py"
 
-SLO_RATIO_LIST=(2.5)                   # e.g. 1.5 2.0 2.5 …
+# SLO_RATIO_LIST=(1 1.5 2 2.5 1.25)                   # e.g. 1.5 2.0 2.5 …
+# SLO_RATIO_LIST=(1 1.5 2 2.5)                   # e.g. 1.5 2.0 2.5 …
+SLO_RATIO_LIST=(1)                   # e.g. 1.5 2.0 2.5 …
 
 ###############################################################################
 # 2. UTILITY FUNCTIONS                                                         #
@@ -126,7 +129,7 @@ for SLO in "${SLO_RATIO_LIST[@]}"; do
           echo "    ↳ FIGURE_ONLY=1 → skipping execution"
         else
           echo "    ↳ running..."
-          python "${ROOT}/examples/test_distN.py" \
+          python "${ROOT}/examples/test_distN_TP_4.py" \
             --config-file "${TRACE_CFG_DIR}/${TRACE}.json" \
             "${EXP_ARGS[@]}" \
             --profiled-results $profiled_path \
