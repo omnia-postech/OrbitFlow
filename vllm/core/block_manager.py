@@ -14,12 +14,12 @@ from vllm.sequence import Sequence, SequenceGroup, SequenceStatus
 from vllm.utils import Device
 from vllm.logger import init_logger
 from itertools import chain
-
+import os
 logger = init_logger(__name__)
 
 SeqId = int
 EncoderSeqId = str
-
+NUM_LAYERS = int(os.environ.get("NUM_LAYERS", 32)) # Xinyue: HARDCODE, should be passed from model config to block manager
 
 class SelfAttnBlockSpaceManager(BlockSpaceManager):
     """BlockSpaceManager which manages the allocation of KV cache.
@@ -642,7 +642,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         self._last_access_blocks_tracker = LastAccessBlocksTracker(
             self.block_allocator)
         
-        self.num_attention_layers = 32 # FIXME HARDCODE Xinyue; propagate num model layers until here
+        self.num_attention_layers = NUM_LAYERS # FIXME HARDCODE Xinyue; propagate num model layers until here
         self.cache_config = cache_config
         
         
@@ -737,7 +737,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         for seq in waiting_seqs[1:]:
             self.block_tables[seq.seq_id] = []
             self.cpu_block_tables[seq.seq_id] = []
-            for i in range(32):
+            for i in range(NUM_LAYERS):
                 self.block_tables[seq.seq_id].append(self.block_tables[seq.seq_id][i].fork())
                 self.cpu_block_tables[seq.seq_id].append(self.cpu_block_tables[seq.seq_id][i].fork())
                 
@@ -764,7 +764,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
             
 
     def check_next_step_preemption(self, len_decode_seq: int) -> bool:
-        num_touched_blocks_by_all_decoding_requets = 32 * len_decode_seq # 1(token at each step) * num_layer * num_requests
+        num_touched_blocks_by_all_decoding_requets = NUM_LAYERS * len_decode_seq # 1(token at each step) * num_layer * num_requests
 
         num_free_gpu_blocks = self.block_allocator.get_num_free_blocks(
             Device.GPU)
@@ -1291,7 +1291,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         # existing count of blocks to touch.
         num_blocks_touched += self.block_allocator.get_num_full_blocks_touched(
             blocks, device=device)
-        watermark_blocks = 32 
+        watermark_blocks = NUM_LAYERS
         # should be able to at least append one more block1 !!!
         # if device == Device.GPU:
         #     watermark_blocks = self.watermark_blocks

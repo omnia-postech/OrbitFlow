@@ -1284,6 +1284,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         # Enable top-k sampling to reflect the accurate memory usage.
         sampling_params = SamplingParams(top_p=0.99, top_k=self.vocab_size - 1)
         max_num_batched_tokens = self.scheduler_config.max_num_batched_tokens
+        max_num_batched_tokens = self.scheduler_config.max_num_batched_tokens // 2
         max_num_seqs = self.scheduler_config.max_num_seqs
         # This represents the maximum number of different requests
         # that will have unique loras, an therefore the max amount of memory
@@ -1386,7 +1387,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                 dtype=self.model_config.dtype,
                 device=self.device)
 
-        gpu_cpu_cache_map = {seq_id:[1,]*32 for seq_id in range(max_num_seqs)}
+        gpu_cpu_cache_map = {seq_id:[1,]*num_layers for seq_id in range(max_num_seqs)}
         self.execute_model(model_input, [0,], kv_caches, kv_caches_cpu, gpu_cpu_cache_map, intermediate_tensors)
         torch.cuda.synchronize()
         return

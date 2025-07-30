@@ -9,7 +9,10 @@ from pathlib import Path
 import json
 from vllm.logger import init_logger
 logger = init_logger(__name__)
-profiled_path = "/home/heelim/vllm/benchmark/scripts/profiled_results_A5000.json"
+
+# profiled_path = "/home/heelim/vllm/benchmark/scripts/profiled_results_A6000.json"
+profiled_path = "/home/heelim/vllm/benchmark/scripts/profiled_results_A6000_70B.json"
+
 # ========= 1. INPUTS =====================================================
 
 TOKENS_PER_BLOCK = 16          # system constant
@@ -2062,14 +2065,14 @@ class LatencySolver:
         else:
             return None
 
-    requests = [
-        Request(id="req1", context_len_in_blocks=10, layer_time=0.5, deposit_count=2, slo=1.0, gpu_layers_on_gpu=4),
-        Request(id="req2", context_len_in_blocks=20, layer_time=0.6, deposit_count=3, slo=1.5, gpu_layers_on_gpu=5)
-    ]
-    solver = Solver_updated()
-    result = solver.solve(requests)
-    if result:
-        for res in result:
-            print(res.__dict__)
-    else:
-        print("No solution found.") 
+    # requests = [
+    #     Request(id="req1", context_len_in_blocks=10, layer_time=0.5, deposit_count=2, slo=1.0, gpu_layers_on_gpu=4),
+    #     Request(id="req2", context_len_in_blocks=20, layer_time=0.6, deposit_count=3, slo=1.5, gpu_layers_on_gpu=5)
+    # ]
+    # solver = Solver_updated()
+    # result = solver.solve(requests)
+    # if result:
+    #     for res in result:
+    #         print(res.__dict__)
+    # else:
+    #     print("No solution found.") 
