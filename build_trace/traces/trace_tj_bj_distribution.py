@@ -8,7 +8,7 @@ import json, numpy as np, matplotlib.pyplot as plt
 from pathlib import Path
 
 # ① metrics 파일이 모여 있는 “최상위” 폴더를 맞춰 주세요
-root = Path("all_traces_v6")
+root = Path("/home/heelim/vllm/build_trace/traces/requests_types_128k_bs8")
 
 metrics = list(root.rglob("*.metrics.json"))
 if not metrics:
