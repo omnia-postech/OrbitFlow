@@ -1,13 +1,16 @@
 {
     "batch_size": 4,
     "max_model_len": 32384,
-    "num_gpu_blocks_override": 641,
-    "arrival_pattern": "LognormalArrival(lambda=0.00044635959415612286,cv=1,max=349494)",
+    "num_gpu_blocks_override": 500,
+    "arrival_pattern": "LognormalArrival(lambda=0.001466234315522346,cv=1,max=78023)",
     "vocab": [200, 30000],
-    "peak_batch_blocks": 2785,
+    "peak_batch_blocks": 2655,
     "requests": {
-        "request_0": {"category": "long short", "input_length": 5000, "output_length": 200, "arrival_time": 0, "sched_time": 0, "wait_time": 0},
-        "request_1": {"category": "long short", "input_length": 5000, "output_length": 200, "arrival_time": 100, "sched_time": 0, "wait_time": 0}
+        "request_0": {"category": "example_trace", "input_length": 5000, "output_length": 6000, "arrival_time": 0, "sched_time": 0, "wait_time": 0},
+        "request_1": {"category": "example_trace", "input_length": 2500, "output_length": 500, "arrival_time": 200, "sched_time": 0, "wait_time": 0},
+        "request_2": {"category": "example_trace", "input_length": 10, "output_length": 1000, "arrival_time": 1500, "sched_time": 0, "wait_time": 0},
+        "request_3": {"category": "example_trace", "input_length": 4000, "output_length": 300, "arrival_time": 4000, "sched_time": 0, "wait_time": 0},
+        "request_4": {"category": "example_trace", "input_length": 4800, "output_length": 300, "arrival_time": 5000, "sched_time": 0, "wait_time": 0},
+        "request_5": {"category": "example_trace", "input_length": 3130, "output_length": 200, "arrival_time": 5400, "sched_time": 0, "wait_time": 0}
     }
-  }
-  
+}

@@ -1,0 +1,29 @@
+{
+    "batch_size": 4,
+    "max_model_len": 32384,
+tests    "num_gpu_blocks_override": 800,
+    "arrival_pattern": "LognormalArrival(lambda=0.001466234315522346,cv=1,max=78023)",
+    "vocab": [200, 30000],
+    "peak_batch_blocks": 2655,
+    "requests": {
+        "request_0": {"category": "example_trace", "input_length": 20000, "output_length": 1000, "arrival_time": 0, "sched_time": 0, "wait_time": 0},
+        "request_1": {"category": "example_trace", "input_length": 10000, "output_length": 800, "arrival_time": 200, "sched_time": 0, "wait_time": 0},
+        "request_2": {"category": "example_trace", "input_length": 10, "output_length": 800, "arrival_time": 300, "sched_time": 0, "wait_time": 0},
+        "request_3": {"category": "example_trace", "input_length": 8000, "output_length": 1000, "arrival_time": 500, "sched_time": 0, "wait_time": 0},
+        "request_4": {"category": "example_trace", "input_length": 10, "output_length": 1000, "arrival_time": 500, "sched_time": 0, "wait_time": 0},
+        "request_5": {"category": "example_trace", "input_length": 6000, "output_length": 300, "arrival_time": 600, "sched_time": 0, "wait_time": 0},
+        "request_6": {"category": "example_trace", "input_length": 10, "output_length": 300, "arrival_time": 800, "sched_time": 0, "wait_time": 0},
+        "request_7": {"category": "example_trace", "input_length": 4000, "output_length": 200, "arrival_time": 1000, "sched_time": 0, "wait_time": 0},
+        "request_8": {"category": "example_trace", "input_length": 10, "output_length": 200, "arrival_time": 1000, "sched_time": 0, "wait_time": 0},
+        "request_9": {"category": "example_trace", "input_length": 20000, "output_length": 1000, "arrival_time": 3200, "sched_time": 0, "wait_time": 0},
+        "request_10": {"category": "example_trace", "input_length": 10000, "output_length": 800, "arrival_time": 3400, "sched_time": 0, "wait_time": 0},
+        "request_11": {"category": "example_trace", "input_length": 10, "output_length": 800, "arrival_time": 3500, "sched_time": 0, "wait_time": 0},
+        "request_12": {"category": "example_trace", "input_length": 8000, "output_length": 1000, "arrival_time": 3700, "sched_time": 0, "wait_time": 0},
+        "request_13": {"category": "example_trace", "input_length": 10, "output_length": 1000, "arrival_time": 3700, "sched_time": 0, "wait_time": 0},
+        "request_14": {"category": "example_trace", "input_length": 6000, "output_length": 300, "arrival_time": 3800, "sched_time": 0, "wait_time": 0},
+        "request_15": {"category": "example_trace", "input_length": 10, "output_length": 300, "arrival_time": 4000, "sched_time": 0, "wait_time": 0},
+        "request_16": {"category": "example_trace", "input_length": 4000, "output_length": 200, "arrival_time": 4200, "sched_time": 0, "wait_time": 0},
+        "request_17": {"category": "example_trace", "input_length": 10, "output_length": 200, "arrival_time": 4200, "sched_time": 0, "wait_time": 0}
+
+    }
+}
