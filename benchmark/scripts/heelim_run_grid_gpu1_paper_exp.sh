@@ -21,19 +21,21 @@ IFS=$'\n\t'                    # safer word-splitting
 ###############################################################################
 export CUDA_VISIBLE_DEVICES=1
 export VLLM_CONFIGURE_LOGGING=1        # 0 → minimal, 1 → user-configurable
+export NUM_LAYERS=80                   # number of layers in the model (e.g. 80 for LLaMa3-70B and 32 for LLaMa3-8B) 
 
 LOGGING_LEVEL=CRITICAL                 # CRITICAL│ERROR│WARNING│INFO│DEBUG
 ROOT="/home/heelim/vllm"               # project root
 
+profiled_path="/home/heelim/vllm/benchmark/scripts/profiled_results_A6000.json"
 FIGURE_ONLY="${1:-0}"                  # default = 0 (run + plot)
 
-EXP_LIST=(paper_main_exp)              # high-level experiment names
+EXP_LIST=(paper_main_exp_context_length)              # high-level experiment names
 METHOD_LIST=(Flexgen)                  # see supported_methods.json for keys
-TRACE_LIST=(lambda1.5x_cv1 lambda2.5x_cv1 lambda3.5x_cv1)     # trace JSONs (basename only)
+TRACE_LIST=(128k_lambda2.0x_cv1)     # trace JSONs (basename only)
 
 TRACE_CFG_DIR="${ROOT}/benchmark/selected_traces"
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
-BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"
+BASE_LOG="${ROOT}/configs/logging_template.json"
 PLOTTER="${ROOT}/benchmark/data_analysis/metrics_plot.py"
 
 SLO_RATIO_LIST=(2.5)                   # e.g. 1.5 2.0 2.5 …
@@ -128,6 +130,7 @@ for SLO in "${SLO_RATIO_LIST[@]}"; do
           python "${ROOT}/examples/test_distN.py" \
             --config-file "${TRACE_CFG_DIR}/${TRACE}.json" \
             "${EXP_ARGS[@]}" \
+            --profiled-results $profiled_path \
             --slo-ratio "$SLO" \
             --output-log "${RUN_DIR}/outputs.log"
         fi

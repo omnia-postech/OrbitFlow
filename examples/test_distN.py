@@ -30,15 +30,17 @@ import torch
 from vllm.sampling_params import SamplingParams
 torch.set_printoptions(edgeitems=2, linewidth=120, sci_mode=True)
 # --- Config ---
-MODEL = "/home/jongseop/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"
-# MODEL = "/home/heelim/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"
+# MODEL = "/home/jongseop/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"
+MODEL = "/home/heelim/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"
 PROMPT_DIR = "./prompts"
 USE_DEFAULT_SAMPLES = True
-BATCH_SIZE = 4  # Serving batch size set to 4
+# BATCH_SIZE = 4  # Serving batch size set to 4
+BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 4))
 MAX_MODEL_LEN = 13000
 BLOCK_SIZE  = 16
 SLO_THRESHOLD = 0.5      
 CSV_OUTPUT_FILE = "metrics.csv"
+NUM_LAYERS = int(os.environ.get("NUM_LAYERS", 32)) # Xinyue: HARDCODE, should be passed from model config to block manager
 # PROFILED_A = 1.0017431830666432e-06
 # PROFILED_B = 0.049519613282613506
 test_trace = {
@@ -692,6 +694,7 @@ def main(configs):
     static_batching = configs.static_batching if hasattr(configs, "static_batching") else False
     removable_cache = configs.removable_cache if hasattr(configs, "removable_cache") else False
     uniform_solver = configs.uniform_solver if hasattr(configs, "uniform_solver") else False
+    pause_strategy = getattr(configs, "pause_strategy", "longest")
 
     if configs.profiled_results:
         p_path = configs.profiled_results
@@ -714,13 +717,14 @@ def main(configs):
     print(f"num_gpu_blocks_override: {num_gpu_blocks_override}")
     print(f"merge_prefetch_buffer: {merge_prefetch_buffer}")
     print(f"pause_and_resume: {pause_and_resume}")
+    print(f"pause_strategy: {pause_strategy}")
     print(f"static_batching: {static_batching}")
     print(f"removable_cache: {removable_cache}")
     print(f"uniform_solver: {uniform_solver}")
     print(f"slo_ratio: {configs.slo_ratio}")
     
     if flattened_cache and num_gpu_blocks_override is not None:
-        num_gpu_blocks_override *= 32 
+        num_gpu_blocks_override *= NUM_LAYERS
     print(f"max_model_len: {max_model_len}")
     args = EngineArgs(
         model=MODEL,
@@ -741,6 +745,7 @@ def main(configs):
         flattened_cache=flattened_cache,
         merge_prefetch_buffer=merge_prefetch_buffer,
         pause_and_resume=pause_and_resume,
+        pause_strategy=pause_strategy,
         uniform_solver=uniform_solver,
         removable_cache=removable_cache,
         # static_batching=static_batching,
@@ -765,7 +770,7 @@ if __name__ == "__main__":
     parser.add_argument("--prefetch-mode",
                         type=str,
                         default="none",
-                        help="prefetch method: none, static, distn, static_req_wise, selectn, flexgen")
+                        help="prefetch method: none, static, distn, static_req_wise, selectn, flexgen, flexgen_orig")
     parser.add_argument("--is-monolithic-distn",
                         type=bool,
                         default=True,
@@ -810,6 +815,11 @@ if __name__ == "__main__":
                         type=str,
                         default="/home/heelim/vllm/benchmark/scripts/profiled_results.json",
                         help="profiling results. If not provided, use the default ones.")
+    parser.add_argument("--pause-strategy", 
+                        type=str, 
+                        default="longest", 
+                        choices=["longest", "shortest", "random", "slo_loose", "slo_strict", "no_pause"], 
+                        help="pause strategy for scheduler")                            
     parser.add_argument("--slo-ratio",
                         type=float,
                         default=2.5,

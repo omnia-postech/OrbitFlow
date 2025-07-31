@@ -30,7 +30,7 @@ import copy
 import math
 from itertools import chain
 
-
+NUM_LAYERS = int(os.environ.get("NUM_LAYERS", 32)) # Xinyue: HARDCODE, should be passed from model config to block manager
 class CacheEngine(CacheEngineBase):
     """Manages the KV cache.
 
@@ -50,7 +50,6 @@ class CacheEngine(CacheEngineBase):
         
         self.gpu_cpu_cache_map = [1,] * self.num_attention_layers
         self.cpu_cache_num, self.gpu_cache_num = self.determine_cache_num_with_map(self.gpu_cpu_cache_map)
-        # self.gpu_cache_num = 32
 
         self.kv_cache_shape = list(self.attn_backend.get_kv_cache_shape(
             self.num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size))
@@ -615,6 +614,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         self.kv_cache_shape = list(self.attn_backend.get_kv_cache_shape(
             self.num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size))
 
+        logger.critical(f"kv cache shape: {self.kv_cache_shape}")
         self.gpu_cpu_cache_map: Dict[int, List[int]] = {}
         self.active_gpu_cpu_cache_map: Dict[int, List[int]] = {}
         # self.cpu_cache_num, self.gpu_cache_num = self.determine_cache_num_with_map(self.gpu_cpu_cache_map)
@@ -623,6 +623,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         self.prefetch_distance = cache_config.prefetch_distance 
         self.merge_prefetch_buffer = cache_config.merge_prefetch_buffer     
         self.pause_and_resume = cache_config.pause_and_resume
+        self.pause_strategy = cache_config.pause_strategy
         self.static_batching = cache_config.static_batching
         self.removable_cache = cache_config.removable_cache
         if not hasattr(self.cache_config, "need_solver"):
@@ -665,7 +666,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         logger.info(msg)
         self.num_attention_layers = model_config.get_num_layers_by_block_type(
             parallel_config, LayerBlockType.attention)
-        
+        print(f"self.num_attention_layers")
         self.mapping = MappingTable(num_layers=self.num_attention_layers,cpu_offset=0, gpu_cpu_cache_map=self.gpu_cpu_cache_map)
         
         if self.prefetch_mode == "distn":
@@ -681,6 +682,20 @@ class FlattenedCacheEngine(CacheEngineBase):
         self.max_slo = 0 # used by selectN 
         self.max_comp_time = 0  # used by selectN
         self.estimator = None # used by selectN, to estimate the token length
+
+        self.fixed_flexgen_distance = None
+        if cache_config.prefetch_mode == "flexgen_orig":        
+            # # worst_case_token_len = cache_config.worst_case_token_len  # 기본값
+            # batch_size = cache_config.batch_size
+            # blocks_per_layer = ceil(worst_case_token_len / self.block_size) + 1
+            # num_layers_on_GPU = self.num_total_gpu_blocks // blocks_per_layer
+            # num_layers_to_offload = self.num_attention_layers - num_layers_on_GPU
+            # self.fixed_flexgen_distance = max(1, floor(self.num_attention_layers / num_layers_to_offload) - 1)                        
+            # logger.critical(f"[flexgen_orig] Fixed prefetch distance: {self.fixed_flexgen_distance} (worst_case_token_len={worst_case_token_len}, batch_size={batch_size})")
+
+            # worst_case_token_len = 41582 # for 32k trace
+            self.fixed_flexgen_distance = 1
+
     def register_bm(self, block_manager): 
         self.block_manager = block_manager
         # logger.debug(f"Linking block manager")
@@ -705,7 +720,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             is allocated;   `self.prefetch_offset` equals the first *block index*
             that belongs to the prefetch region.
         """
-
+        logger.critical(f"num_blocks: {num_blocks}, num_attention_layers: {self.num_attention_layers}")
         # ---------- convenience ----------
         elem_size = torch.tensor([], dtype=self.dtype).element_size() # 2 accooutns for key and value
         num_blocks_per_layer = (
@@ -1185,6 +1200,10 @@ class FlattenedCacheEngine(CacheEngineBase):
             else:          
                 dist = self.resume_distances
                 logger.info(f"[driver] {dist}") 
+        elif self.prefetch_mode == "flexgen_orig":
+            dist = [self.fixed_flexgen_distance] * len(snapshot.candidates)
+            logger.info(f"[flexgen_orig] Using fixed prefetch distance: {self.fixed_flexgen_distance}")
+            return dist, {"policy": "flexgen_orig"}
         elif prefetch_mode == "flexgen":
             if is_decoding:
                 total_blocks = self.num_gpu_blocks 
@@ -1204,8 +1223,8 @@ class FlattenedCacheEngine(CacheEngineBase):
                     blocks_per_layer += math.ceil(ctx_len / self.block_size) +1 # lookahead!! to avoid premption before changing
                     
                 num_layers_on_GPU = (total_blocks // blocks_per_layer)
-                num_layers_on_GPU = min(32, num_layers_on_GPU)
-                num_layers_to_offload = 32 - num_layers_on_GPU
+                num_layers_on_GPU = min(NUM_LAYERS, num_layers_on_GPU)
+                num_layers_to_offload = NUM_LAYERS - num_layers_on_GPU
                 logger.debug(f"num_layers_on_GPU: {num_layers_on_GPU}, num_layers_to_offload: {num_layers_to_offload}, blocks_per_layer: {blocks_per_layer}")
                 if num_layers_to_offload == 0:
                     self.prev_flexgen_distance = -1
@@ -1250,7 +1269,7 @@ class FlattenedCacheEngine(CacheEngineBase):
                                                                         mode="linear") 
                                 
                 self.prev_selectn_distance = self.prefetch_distance_for_seletcn(comm_time, comp_time)
-                if self.prev_selectn_distance == 32:
+                if self.prev_selectn_distance == NUM_LAYERS:
                     self.prev_selectn_distance = -1
                 self.need_update_selectn = False
             dist = [self.prev_selectn_distance] * len(snapshot.candidates)
@@ -1268,8 +1287,8 @@ class FlattenedCacheEngine(CacheEngineBase):
             for ctx_len in total_context_lens:
                 blocks_per_layer += math.ceil(ctx_len / self.block_size) + 2 # lookahead!! to avoid premption before changing
             num_layers_on_GPU = math.floor(total_blocks / blocks_per_layer)
-            num_layers_on_GPU = min(32, num_layers_on_GPU)
-            num_layers_to_offload = 32 - num_layers_on_GPU
+            num_layers_on_GPU = min(NUM_LAYERS, num_layers_on_GPU)
+            num_layers_to_offload = NUM_LAYERS - num_layers_on_GPU
             # increase the distance by 1 if no free blocks available for next step 
             if num_layers_to_offload == 0:
                 dist = -1
@@ -1281,7 +1300,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             raise ValueError(f"unknown policy {prefetch_mode}")
         dist = self._normalise_prefetch_distance(spec=dist, candidates=snapshot.candidates)
         # NOTE(HONG): distance 0 is not allowed, so we start from 1; if you want to use distance 0 -> comment out below part
-        if prefetch_mode in ["distn", "flexgen", "selectn"]:
+        if prefetch_mode in ["distn", "flexgen", "flexgen_orig", "selectn"]:
             for s, d in dist.items():
                 if d == 0:
                     dist[s] = 1

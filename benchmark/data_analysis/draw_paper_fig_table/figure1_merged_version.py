@@ -40,8 +40,8 @@ bars = ax_a.bar(x_pos, y_mapped,
                 alpha=style["bar"]["alpha"])
 
 ax_a.set_title('Model: LLaMA3-70B', **style["title"])
-ax_a.set_xlabel('Sequence Length', **style["label"])
-ax_a.set_ylabel('KVCache Size (GB)', **style["label"])
+ax_a.set_xlabel('Sequence Length\n(a)', **style["label"])
+ax_a.set_ylabel('KV Cache Size (GB)', **style["label"])
 ax_a.set_xticks(x_pos)
 ax_a.set_xticklabels(x_labels, **style["tick"])
 ax_a.set_ylim(0, 110)
@@ -88,7 +88,7 @@ for i in [0, -1]:
 ax_b.set_xticks(x_idx)
 ax_b.set_xticklabels(context_lengths, **style["tick"])
 ax_b.tick_params(axis='y', labelsize=style["tick"]["fontsize"])
-ax_b.set_xlabel('Sequence length', **style["label"])
+ax_b.set_xlabel('Sequence length\n(b)', **style["label"])
 ax_b.set_ylabel('Latency (s)', **style["label"])
 ax_b.set_yticks([0.1,0.200,0.300])
 ax_b.set_ylim(-0.0,0.45)  # set y-limits to match the original plot
@@ -149,7 +149,7 @@ ax_c.text(head_x + 2*3.4, head_y + 1.7*(-2.2),
           'Latency margin\nabsorbed by TPOT',
           ha='center', va='center', fontsize=style["text"]["fontsize"]*0.8)
 
-ax_c.set_xlabel('Sequence length', **style["label"])
+ax_c.set_xlabel('Sequence length\n(c)', **style["label"])
 ax_c.set_ylabel('Latency (ms)', **style["label"])
 ax_c.set_xticks([2,8,16])
 ax_c.set_xticklabels(['2k','8k','16k'], **style["tick"])
@@ -169,12 +169,14 @@ for spine in ax_c.spines.values():
 
 # ====================================================================
 # labels (a)(b)(c)
-fig.text(0.15, -0.04, '(a)', ha='center', va='center', fontsize=style["title"]["fontsize"])
-fig.text(0.5, -0.04, '(b)', ha='center', va='center', fontsize=style["title"]["fontsize"])
-fig.text(0.85, -0.04, '(c)', ha='center', va='center', fontsize=style["title"]["fontsize"])
+# fig.text(0.17, -0.04, '(a)', ha='center', va='center', fontsize=style["title"]["fontsize"])
+# fig.text(0.5, -0.04, '(b)', ha='center', va='center', fontsize=style["title"]["fontsize"])
+# fig.text(0.85, -0.04, '(c)', ha='center', va='center', fontsize=style["title"]["fontsize"])
 
-plt.tight_layout()
+# plt.tight_layout()
+plt.subplots_adjust(left=0.05, right=0.98, top=0.92, bottom=0.25, wspace=0.27)
 
-plt.savefig('figures/merged_graphs.png', dpi=300, bbox_inches='tight')
+plt.savefig('figures/merged_graphs_.png', dpi=300, bbox_inches='tight')
 plt.savefig('figures/merged_graphs.pdf', dpi=1200, bbox_inches='tight')
+print(f"saved to figures/merged_graphs.png")
 plt.show()

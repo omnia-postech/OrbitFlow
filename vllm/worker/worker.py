@@ -224,7 +224,7 @@ class Worker(LocalOrDistributedWorkerBase):
             num_gpu_blocks = int(available_kv_cache_memory // cache_block_size)
             # num_gpu_blocks = 10081
             # NOTE(HONG): 20000 * 2MB = 40GB * 4 GPUs = 160GB <- we have 210 GB free CPU mem
-            num_cpu_blocks = 14000 * 32 if self.cache_config.flattened_cache else 14000
+            num_cpu_blocks = 25000 * self.model_config.get_num_layers(self.parallel_config) if self.cache_config.flattened_cache else 20000
             # num_cpu_blocks = int(self.cache_config.swap_space_bytes //
             #                      cache_block_size)
         num_gpu_blocks = max(num_gpu_blocks, 0)
@@ -285,6 +285,7 @@ class Worker(LocalOrDistributedWorkerBase):
 
     def _init_cache_engine(self): # FIXME target to fix Xinyue 
         assert self.cache_config.num_gpu_blocks is not None
+        logger.critical(f"num_gpu_blocks: {self.cache_config.num_gpu_blocks}")
         if self.cache_config.flattened_cache:
             self.cache_engine = [
                 FlattenedCacheEngine(

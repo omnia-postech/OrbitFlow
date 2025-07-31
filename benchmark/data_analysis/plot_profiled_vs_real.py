@@ -208,13 +208,6 @@ def _draw_four_fits(ax, x: np.ndarray, y: np.ndarray,
             label=(f"{int(tau*100)}ᵗʰ-QR : y={mq:.2e}x+{bq:.2e}\n"
                    f"            pseudo-R²={pseudo_r2:.4f}, "
                    f"cov={cov_qr:.2%}"))
-    ## temp ## 
-    temp_r2 = _r2_from_line(x, y, 1.23e-06, bq)
-    ax.plot(x_fit, 1.23e-06 * x_fit + bq,
-            lw=1.2, color="black",
-            label=(f"TEMP {int(tau*100)}ᵗʰ-QR : y={1.23e-06:.2e}x+{bq:.2e}\n"
-                   f"            pseudo-R²={temp_r2:.4f}, "
-                   f"cov={cov_qr:.2%}"))
 
 def _draw_three_fits(ax,
                      x: np.ndarray, y: np.ndarray,
@@ -482,8 +475,9 @@ def main(argv) -> None:
         sys.exit(f"CSV not found: {csv_path}")
 
     df = load_metrics(csv_path)
-    # out_path1 = write_all_tbt_figures(df, csv_path, env_offset=0.009)
-    out_path1 = write_all_tbt_figures(df, csv_path, exclude_ranges=[(0, 9500)], env_offset=0.009)
+    out_path1 = write_all_tbt_figures(df, csv_path)
+    out_path1 = write_all_tbt_figures(df, csv_path,exclude_ranges=[(0, 3500)])
+    # out_path1 = write_all_tbt_figures(df, csv_path, exclude_ranges=[(0, 9500)], env_offset=0.009)
     print(f"Figure written ➜ {out_path1}")
 
     csv2 = argv[1] if len(argv) > 1 else None 
@@ -494,7 +488,7 @@ def main(argv) -> None:
             sys.exit(f"CSV not found: {csv_path2}")
 
         df2 = load_metrics(csv_path2)
-        out_path2 = write_all_tbt_figures(df2, csv_path2,exclude_ranges=[(12000, 18000)])
+        out_path2 = write_all_tbt_figures(df2, csv_path2,exclude_ranges=[(0, 3500)])
         print(f"Figure written ➜ {out_path2}")
         
         df = df[['time_between_tokens', "request_id"]]

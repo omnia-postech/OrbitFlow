@@ -25,7 +25,7 @@ def main(args, sample_input):
     # llm = LLM(**dataclasses.asdict(engine_args))
 
     # model_id = args.model
-    model_id = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+    model_id = "meta-llama/Meta-Llama-3.1-70B-Instruct"
 
     # tokenizer_id = args.tokenizer if args.tokenizer is not None else args.model
     # tokenizer_mode = args.tokenizer_mode
@@ -42,7 +42,7 @@ def main(args, sample_input):
     sampling_params = SamplingParams(temperature=0.8, top_p=0.95, max_tokens=args.max_tokens)
 
     # Create an LLM.
-    llm = LLM(model=model_id, enforce_eager=True, enable_chunked_prefill=False, max_model_len=109902+256) # max_model_len = len(prompt) + len(output)
+    llm = LLM(model=model_id, enforce_eager=True, enable_chunked_prefill=False, max_model_len=109902+256, tensor_parallel_size=4) # max_model_len = len(prompt) + len(output)
     # Generate texts from the prompts. The output is a list of RequestOutput objects
     # that contain the prompt, generated text, and other information.
     start_time = time.time()
@@ -82,7 +82,7 @@ if __name__ == "__main__":
                         default=10000,
                         help="Output length for each request. Overrides the "
                         "output length from the dataset.")
-    parser.add_argument('--input', default='../samples/2k.md', type=str)
+    parser.add_argument('--input', default='/home/heelim/vllm/samples/BookSum/2k.md', type=str)
     # parser.add_argument('--model', default='meta-llama/Meta-Llama-3.1-8B-Instruct', type=str)
     # parser.add_argument(
     #     '--tokenizer-mode',

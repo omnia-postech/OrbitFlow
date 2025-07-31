@@ -1,0 +1,14 @@
+{
+  "PPR": 8.917316692667706,
+  "TPI": 0.8081425226974248,
+  "OV_block_step": 30895895,
+  "OV_frac": 2.752214022781205,
+  "GE2_frac": 0.6732141837492148,
+  "peak_blocks": 5716,
+  "peak_step": 9393,
+  "gpu_blocks": 641,
+  "total_steps": 17513,
+  "type1_count": 20,
+  "type2_count": 15,
+  "plot_path": "/home/heelim/vllm/build_trace/traces/requests_types_32k/all_traces_arrival_rate_CV/SS00_SM00_SL00_MS00_MM00_ML00_LS33_LM33_LL34/lognormal_lambda10.0x_cv1/lognormal_lambda10.0x_cv1.png"
+}
