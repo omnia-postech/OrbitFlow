@@ -1,0 +1,11 @@
+{
+  "batch_size": 1,
+  "max_model_len": 129536,
+  "num_gpu_blocks_override": 5,
+  "arrival_pattern": "LognormalArrival(lambda=0.0005864937262089384,cv=1,max=55414)",
+  "vocab": [200, 30000],
+  "peak_batch_blocks": 663,
+  "requests": {
+    "request_0": {"category": "MMS_I408-612_O408-612", "input_length": 79, "output_length": 80, "arrival_time": 0, "sched_time": 0, "wait_time": 0}
+  }
+}
