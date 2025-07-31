@@ -36,7 +36,7 @@ TRACE_LIST=(profile_trace_A6000)
 
 TRACE_CFG_DIR="${ROOT}/benchmark/selected_traces"
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
-BASE_LOG="${ROOT}/configs/test_no_prefetch_logging.json"
+BASE_LOG="${ROOT}/configs/logging_template.json"
 PLOTTER="${ROOT}/benchmark/data_analysis/metrics_plot.py"
 
 # SLO_RATIO_LIST=(1 1.5 2 2.5 1.25)                   # e.g. 1.5 2.0 2.5 …

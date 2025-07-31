@@ -13,13 +13,13 @@
         "class": "logging.FileHandler",
         "formatter": "vllm",
         "level": "INFO",
-        "filename": "../outputs/benchmark/static_1/trace_pause_resume/vllm_msg.log"
+        "filename": "../outputs/template/vllm_msg.log"
       }
     },
     "loggers": {
       "vllm": {
         "handlers": ["vllm"],
-        "level": "INFO",
+        "level": "DEBUG",
         "propagate": false
       }
     }
