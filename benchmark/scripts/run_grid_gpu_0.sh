@@ -7,13 +7,13 @@
 export CUDA_VISIBLE_DEVICES=0
 export VLLM_CONFIGURE_LOGGING=1
 LOGGING_LEVEL=CRITICAL
-ROOT="/home/heelim/vllm"
+ROOT="/home/xinyuema/vllm"
 
-profiled_path="${ROOT}/outputs/benchmark/profiled_results_A5000.json"
+profiled_path="${ROOT}/benchmark/scripts/profiled_results_A5000.json"
 FIGURE_ONLY=$1
 EXP_LIST=(Profile_Trace)                         # ← your “experiments”
 # METHOD_LIST=(Ours NoPrefetch Flexgen NextLayer Static8 SelectN DistNSingle Ours_TP)      # ← indexes into JSON above
-METHOD_LIST=(NextLayer)      # ← indexes into JSON above
+METHOD_LIST=(NoPrefetch)      # ← indexes into JSON above
 TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/profile/"
 TRACE_LIST=(profile_trace)
 
