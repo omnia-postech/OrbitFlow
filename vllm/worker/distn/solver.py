@@ -1,4 +1,5 @@
 import math
+import os
 import gurobipy as gp
 from gurobipy import GRB
 from typing import Optional, List, Dict
@@ -10,8 +11,11 @@ import json
 from vllm.logger import init_logger
 logger = init_logger(__name__)
 
-# profiled_path = "/home/heelim/vllm/benchmark/scripts/profiled_results_A6000.json"
-profiled_path = "/home/heelim/vllm/benchmark/scripts/profiled_results_A6000_70B.json"
+# Use environment variable or default path for profiled results
+DEFAULT_PROFILED_PATH = os.environ.get(
+    "PROFILED_RESULTS_PATH",
+    "/home/heelim/vllm/benchmark/scripts/profiled_results_A6000.json"
+)
 
 # ========= 1. INPUTS =====================================================
 
@@ -42,7 +46,9 @@ class ProfileBasedEstimator:
     # ──────────────────────────────────────────────────────────────────
     # construction
     # ──────────────────────────────────────────────────────────────────
-    def __init__(self, profiled_path: str | Path):
+    def __init__(self, profiled_path: str | Path | None = None):
+        if profiled_path is None:
+            profiled_path = DEFAULT_PROFILED_PATH
         self.profile_path = Path(profiled_path).expanduser()
         with self.profile_path.open("r", encoding="utf-8") as f:
             self._data: Dict[str, Dict[str, Dict[str, float]]] = json.load(f)
@@ -162,7 +168,7 @@ class ResultList(list):
 
 # Old solver + communication latency fixed (still non-convex)
 class Solver_v1:
-    def __init__(self):
+    def __init__(self, profiled_path: str | Path | None = None):
         self.profiled_estimator = ProfileBasedEstimator(profiled_path)
         self.which = "NoPrefetch"
         self.mode = "linear"
@@ -429,7 +435,7 @@ class Solver_v1:
 
 # New solver: MILP, accurate comm, accurate future forecast, and optimize for both token_time and decode_steps
 class Solver_updated:
-    def __init__(self):
+    def __init__(self, profiled_path: str | Path | None = None):
         self.profiled_estimator = ProfileBasedEstimator(profiled_path)
         self.which = "NoPrefetch"
         self.mode = "linear"
