@@ -31,7 +31,7 @@ from vllm.sampling_params import SamplingParams
 torch.set_printoptions(edgeitems=2, linewidth=120, sci_mode=True)
 # --- Config ---
 # MODEL = "/home/jongseop/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"
-MODEL = "/home/heelim/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"
+MODEL = "/home/xinyuema/models/llama-3-8b-gradientAI"
 PROMPT_DIR = "./prompts"
 USE_DEFAULT_SAMPLES = True
 # BATCH_SIZE = 4  # Serving batch size set to 4
