@@ -304,6 +304,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         paused_cpu_seq_groups
     ):  # called only on driver
         # 1. update mapping
+        logger.debug(f"================ [driver] start prepare_cache_plan() ================")
         cache_engine.update_mapping(attn_meta, seq_group_metadata,
                                     finished_requests, paused_cpu_seq_groups)
         
@@ -340,6 +341,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         # bm = cache_engine._get_bm()
         # plan_data['bm'] = bm
 
+        logger.debug(f"================ [driver] finish prepare_cache_plan() ================")
         return plan_data
 
     def _get_driver_input_and_broadcast(
