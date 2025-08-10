@@ -687,7 +687,7 @@ class SelfAttnBlockSpaceManagerFlattened(BlockSpaceManager):
         num_free_gpu_blocks = self.block_allocator.get_num_free_blocks(
             device=Device.GPU)
 
-        # logger.critical(f"seq:{seq.seq_id} num_required_blocks {num_required_blocks}, num_free_gpu_blocks {num_free_gpu_blocks}, watermark_blocks {self.watermark_blocks}, num_total_gpu_blocks {self.num_total_gpu_blocks}")
+        logger.debug(f"seq:{seq.seq_id} num_required_blocks {num_required_blocks}, num_free_gpu_blocks {num_free_gpu_blocks}, watermark_blocks {self.watermark_blocks}, num_total_gpu_blocks {self.num_total_gpu_blocks}")
         # Use watermark to avoid frequent cache eviction.
         if (self.num_total_gpu_blocks - num_required_blocks <
                 self.watermark_blocks):
