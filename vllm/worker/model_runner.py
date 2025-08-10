@@ -1284,7 +1284,8 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         # Enable top-k sampling to reflect the accurate memory usage.
         sampling_params = SamplingParams(top_p=0.99, top_k=self.vocab_size - 1)
         max_num_batched_tokens = self.scheduler_config.max_num_batched_tokens
-        max_num_batched_tokens = self.scheduler_config.max_num_batched_tokens // 2
+        # NOTE(HONG): Need to check later -> why we need to divide by 2?
+        # max_num_batched_tokens = self.scheduler_config.max_num_batched_tokens // 2
         max_num_seqs = self.scheduler_config.max_num_seqs
         # This represents the maximum number of different requests
         # that will have unique loras, an therefore the max amount of memory
