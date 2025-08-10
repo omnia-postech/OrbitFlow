@@ -30,6 +30,45 @@ import copy
 import math
 from itertools import chain
 
+def log_cpu_memory_profile(logger, context_msg: str, additional_info: dict = None):
+    """CPU 메모리 프로파일링 로깅 함수"""
+    try:
+        proc = psutil.Process(os.getpid())
+        mem_info = proc.memory_info()
+        sys_mem = psutil.virtual_memory()
+        
+        rss_mb = mem_info.rss / 1024 / 1024
+        vms_mb = mem_info.vms / 1024 / 1024
+        sys_avail_mb = sys_mem.available / 1024 / 1024
+        sys_used_pct = sys_mem.percent
+        sys_total_mb = sys_mem.total / 1024 / 1024
+        sys_used_mb = sys_mem.used / 1024 / 1024
+        sys_free_mb = sys_mem.free / 1024 / 1024
+        sys_active_mb = getattr(sys_mem, "active", 0) / 1024 / 1024
+        sys_inactive_mb = getattr(sys_mem, "inactive", 0) / 1024 / 1024
+        sys_buffers_mb = getattr(sys_mem, "buffers", 0) / 1024 / 1024
+        sys_cached_mb = getattr(sys_mem, "cached", 0) / 1024 / 1024
+
+        log_msg = (
+            f"[CPU_MEM_PROFILE] {context_msg} | "
+            f"RSS: {rss_mb:.2f}MB | VMS: {vms_mb:.2f}MB | "
+            f"SysTotal: {sys_total_mb:.2f}MB | SysUsed: {sys_used_mb:.2f}MB | "
+            f"SysAvail: {sys_avail_mb:.2f}MB | SysFree: {sys_free_mb:.2f}MB | "
+            f"SysActive: {sys_active_mb:.2f}MB | SysInactive: {sys_inactive_mb:.2f}MB | "
+            f"SysBuffers: {sys_buffers_mb:.2f}MB | SysCached: {sys_cached_mb:.2f}MB | "
+            f"({sys_used_pct:.1f}% used)"
+        )
+        
+        if additional_info:
+            info_str = " | ".join([f"{k}: {v}" for k, v in additional_info.items()])
+            log_msg += f" | {info_str}"
+            
+        logger.critical(log_msg)
+        return {"rss_mb": rss_mb, "vms_mb": vms_mb, "sys_avail_mb": sys_avail_mb, "sys_used_pct": sys_used_pct}
+    except Exception as e:
+        logger.warning(f"Failed to log CPU memory profile: {e}")
+        return None
+
 NUM_LAYERS = int(os.environ.get("NUM_LAYERS", 32)) # Xinyue: HARDCODE, should be passed from model config to block manager
 class CacheEngine(CacheEngineBase):
     """Manages the KV cache.
@@ -61,14 +100,44 @@ class CacheEngine(CacheEngineBase):
         # ------------- CPU 메모리 측정 (할당 전) -------------
         proc = psutil.Process(os.getpid())
         rss_before = proc.memory_info().rss / 1024 / 1024  # MB
+        vms_before = proc.memory_info().vms / 1024 / 1024  # MB
         logger.critical("CPU RSS before CPU-cache alloc: %.2f MB", rss_before)
+        logger.critical("CPU VMS before CPU-cache alloc: %.2f MB", vms_before)
+        
+        # System memory before allocation
+        sys_mem_before = psutil.virtual_memory()
+        logger.critical("System memory before CPU-cache alloc:")
+        logger.critical("  Total: %.2f MB | Used: %.2f MB | Free: %.2f MB | Available: %.2f MB | (%.1f%% used)", 
+                       sys_mem_before.total / 1024 / 1024,
+                       sys_mem_before.used / 1024 / 1024,
+                       sys_mem_before.free / 1024 / 1024,
+                       sys_mem_before.available / 1024 / 1024, 
+                       sys_mem_before.percent)
 
         self.cpu_cache = self._allocate_kv_cache_cpu(self.num_cpu_blocks, "cpu")
         
         # ------------- CPU 메모리 측정 (할당 후) -------------
         rss_after = proc.memory_info().rss / 1024 / 1024  # MB
+        vms_after = proc.memory_info().vms / 1024 / 1024  # MB
         logger.critical("CPU RSS after  CPU-cache alloc: %.2f MB", rss_after)
+        logger.critical("CPU VMS after  CPU-cache alloc: %.2f MB", vms_after)
         logger.critical("Δ CPU RSS: %.2f MB", rss_after - rss_before)
+        logger.critical("Δ CPU VMS: %.2f MB", vms_after - vms_before)
+        
+        # System memory after allocation
+        sys_mem_after = psutil.virtual_memory()
+        logger.critical("System memory after CPU-cache alloc:")
+        logger.critical("  Total: %.2f MB | Used: %.2f MB | Free: %.2f MB | Available: %.2f MB | (%.1f%% used)", 
+                       sys_mem_after.total / 1024 / 1024,
+                       sys_mem_after.used / 1024 / 1024,
+                       sys_mem_after.free / 1024 / 1024,
+                       sys_mem_after.available / 1024 / 1024, 
+                       sys_mem_after.percent)
+        logger.critical("Δ System memory changes (CPU-cache alloc):")
+        logger.critical("  Δ Used: %.2f MB | Δ Free: %.2f MB | Δ Available: %.2f MB", 
+                       (sys_mem_after.used - sys_mem_before.used) / 1024 / 1024,
+                       (sys_mem_after.free - sys_mem_before.free) / 1024 / 1024,
+                       (sys_mem_after.available - sys_mem_before.available) / 1024 / 1024)
         
         self.is_monolithic_distn = cache_config.is_monolithic_distn
         self.prefetch_mode = cache_config.prefetch_mode
@@ -614,7 +683,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         self.kv_cache_shape = list(self.attn_backend.get_kv_cache_shape(
             self.num_gpu_blocks, self.block_size, self.num_kv_heads, self.head_size))
 
-        logger.critical(f"kv cache shape: {self.kv_cache_shape}")
+        logger.debug(f"GPU kv cache shape(2, num_blocks, block_size, num_kv_heads, head_size): {self.kv_cache_shape}")
         self.gpu_cpu_cache_map: Dict[int, List[int]] = {}
         self.active_gpu_cpu_cache_map: Dict[int, List[int]] = {}
         # self.cpu_cache_num, self.gpu_cache_num = self.determine_cache_num_with_map(self.gpu_cpu_cache_map)
@@ -637,14 +706,44 @@ class FlattenedCacheEngine(CacheEngineBase):
         # ------------- CPU 메모리 측정 (할당 전) -------------
         proc = psutil.Process(os.getpid())
         rss_before = proc.memory_info().rss / 1024 / 1024  # MB
-        logger.critical("CPU RSS before CPU-cache alloc: %.2f MB", rss_before)
+        vms_before = proc.memory_info().vms / 1024 / 1024  # MB
+        logger.critical("CPU RSS before FlattenedCache CPU-cache alloc: %.2f MB", rss_before)
+        logger.critical("CPU VMS before FlattenedCache CPU-cache alloc: %.2f MB", vms_before)
+        
+        # System memory before allocation
+        sys_mem_before = psutil.virtual_memory()
+        logger.critical("System memory before FlattenedCache CPU-cache alloc:")
+        logger.critical("  Total: %.2f MB | Used: %.2f MB | Free: %.2f MB | Available: %.2f MB | (%.1f%% used)", 
+                       sys_mem_before.total / 1024 / 1024,
+                       sys_mem_before.used / 1024 / 1024,
+                       sys_mem_before.free / 1024 / 1024,
+                       sys_mem_before.available / 1024 / 1024, 
+                       sys_mem_before.percent)
 
         self.cpu_cache = self._allocate_kv_cache_cpu(self.num_cpu_blocks, "cpu")
         
         # ------------- CPU 메모리 측정 (할당 후) -------------
         rss_after = proc.memory_info().rss / 1024 / 1024  # MB
-        logger.critical("CPU RSS after  CPU-cache alloc: %.2f MB", rss_after)
-        logger.critical("Δ CPU RSS: %.2f MB", rss_after - rss_before)    
+        vms_after = proc.memory_info().vms / 1024 / 1024  # MB
+        logger.critical("CPU RSS after FlattenedCache CPU-cache alloc: %.2f MB", rss_after)
+        logger.critical("CPU VMS after FlattenedCache CPU-cache alloc: %.2f MB", vms_after)
+        logger.critical("Δ FlattenedCache CPU RSS: %.2f MB", rss_after - rss_before)
+        logger.critical("Δ FlattenedCache CPU VMS: %.2f MB", vms_after - vms_before)
+        
+        # System memory after allocation
+        sys_mem_after = psutil.virtual_memory()
+        logger.critical("System memory after FlattenedCache CPU-cache alloc:")
+        logger.critical("  Total: %.2f MB | Used: %.2f MB | Free: %.2f MB | Available: %.2f MB | (%.1f%% used)", 
+                       sys_mem_after.total / 1024 / 1024,
+                       sys_mem_after.used / 1024 / 1024,
+                       sys_mem_after.free / 1024 / 1024,
+                       sys_mem_after.available / 1024 / 1024, 
+                       sys_mem_after.percent)
+        logger.critical("Δ System memory changes (FlattenedCache CPU-cache alloc):")
+        logger.critical("  Δ Used: %.2f MB | Δ Free: %.2f MB | Δ Available: %.2f MB", 
+                       (sys_mem_after.used - sys_mem_before.used) / 1024 / 1024,
+                       (sys_mem_after.free - sys_mem_before.free) / 1024 / 1024,
+                       (sys_mem_after.available - sys_mem_before.available) / 1024 / 1024)    
         
         # NOTE(HONG): this is for first prefill distance, we use preceding decoding's distance for other prefill steps
         self.prev_selectn_distance = -1
@@ -661,9 +760,9 @@ class FlattenedCacheEngine(CacheEngineBase):
         self.resume_distances: List[int] = []
         self.is_distnsingle_fallback: bool = False
         
-        msg = f"Prefetch mode: {self.prefetch_mode}, prefetch distance: {self.prefetch_distance}"
-        msg = f"Merge prefetch buffer: {self.merge_prefetch_buffer}"
-        logger.info(msg)
+        logger.debug(f"Prefetch mode: {self.prefetch_mode}, prefetch distance: {self.prefetch_distance}")        
+        logger.info(f"Merge prefetch buffer: {self.merge_prefetch_buffer}")
+
         self.num_attention_layers = model_config.get_num_layers_by_block_type(
             parallel_config, LayerBlockType.attention)
         print(f"self.num_attention_layers")
@@ -673,8 +772,8 @@ class FlattenedCacheEngine(CacheEngineBase):
             logger.info("DistN mode:" + "monolithic" if self.is_monolithic_distn else "dynamic")
         
         free_mem, total_mem = torch.cuda.mem_get_info()
-        logger.info(f"Free Memory: {free_mem / 1024 / 1024} MB")        
-        logger.info(f"Total Memory: {total_mem / 1024 / 1024} MB")
+        logger.info(f"GPU Free Memory: {free_mem / 1024 / 1024} MB")        
+        logger.info(f"GPU Total Memory: {total_mem / 1024 / 1024} MB")
 
         self._paused_layers_freed: Dict[int, List[int]] = defaultdict(list)
         
@@ -719,8 +818,7 @@ class FlattenedCacheEngine(CacheEngineBase):
             * and `self.merge_prefetch_buffer` is True  ➜ a **single, merged tensor**
             is allocated;   `self.prefetch_offset` equals the first *block index*
             that belongs to the prefetch region.
-        """
-        logger.critical(f"num_blocks: {num_blocks}, num_attention_layers: {self.num_attention_layers}")
+        """        
         # ---------- convenience ----------
         elem_size = torch.tensor([], dtype=self.dtype).element_size() # 2 accooutns for key and value
         num_blocks_per_layer = (
@@ -789,9 +887,9 @@ class FlattenedCacheEngine(CacheEngineBase):
             mib(prefetch_cache_bytes),
         )
         if len(kv_cache) == 1:
-            logger.critical("GPU cache shape %s (merged)", tuple(kv_cache[0].shape))
+            logger.debug("GPU cache shape %s (merged)", tuple(kv_cache[0].shape))
         else:  # two-tensor case
-            logger.info(
+            logger.debug(
                 "GPU cache shapes main %s, prefetch %s",
                 tuple(kv_cache[0].shape),
                 tuple(kv_cache[1].shape),
@@ -810,7 +908,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         kv_cache: List[torch.Tensor] = []
         total_cpu_bytes = 0
         pin_memory = is_pin_memory_available()
-        logger.info(f"CPU CACHE PINNED: {pin_memory}")
+        logger.debug(f"CPU CACHE PINNED: {pin_memory}")
         
         flattened_kv_cache = torch.zeros(kv_cache_shape,
                                         dtype=self.dtype,
@@ -822,7 +920,7 @@ class FlattenedCacheEngine(CacheEngineBase):
 
         total_cpu_bytes = total_cpu_bytes / 1024 / 1024
         msg = f"CPU cache allocated {total_cpu_bytes} MB, with shape{tuple(kv_cache[0].shape)}"
-        logger.critical(msg)
+        logger.info(msg)
         return kv_cache
     
     def update_mapping(
@@ -959,22 +1057,31 @@ class FlattenedCacheEngine(CacheEngineBase):
         """
         Step 4: Snapshot and build cache allocation/deallocation plan.
         """
+        logger.debug(f"======== start build_cache_plan() ========")
         snap = self._snapshot_and_log(
             configure_paused=False,
             seq_group_metadata=seq_group_metadata,
         )
         plan = None
         dist_dict, _ = self._select_prefetch_distance(snap, self.prefetch_distance, total_context_lens, is_decoding)
-        logger.critical(f"[driver] distance: {dist_dict}")
+        logger.debug(f"[driver] Initial distance: {dist_dict}")
         plan, cur_blocks = self._plan_cache_delta(snap, dist_dict, pause_and_resume)
+        logger.debug(f"[driver] Initial plan: {plan}, cur_blocks: {cur_blocks}")
+        
         if (plan.feasible == False and  self.prefetch_mode == "solver") or self.is_distnsingle_fallback:
+            logger.info(f"[SOLVER_FALLBACK] Initial plan failed, falling back to distn_single")
+            logger.info(f"[SOLVER_FALLBACK] Original plan feasible: {plan.feasible}, prefetch mode: {self.prefetch_mode == 'solver'}")
+            logger.info(f"[SOLVER_FALLBACK] distnsingle_fallback flag: {self.is_distnsingle_fallback}")
+            
             prefetch_mode = "distn_single"
-            logger.critical(f"use distn single for this step and notify solver")
+            logger.debug(f"[SOLVER_FALLBACK] Use distn single for this step and notify solver")
             dist_dict, _ = self._select_prefetch_distance(snap, self.prefetch_distance, total_context_lens, is_decoding, custom_prefetch_mode=prefetch_mode,cur_blocks = cur_blocks)
-            logger.critical(f"fall back dist:{dist_dict}")
+            logger.debug(f"[SOLVER_FALLBACK] Fallback distance: {dist_dict}")
             plan,cur_blocks = self._plan_cache_delta(snap, dist_dict, pause_and_resume)
             # if plan.feasible == False and  self.prefetch_mode == "solver": # (xinyue) already checked by upper if
             self.cache_config.need_solver = True
+            logger.info(f"[SOLVER_FALLBACK] Fallback plan feasible: {plan.feasible}, need_solver set to True")
+        logger.debug(f"======== finish build_cache_plan() ========")
         return plan, dist_dict
     def execute_pause_resume(
             self,
@@ -985,11 +1092,17 @@ class FlattenedCacheEngine(CacheEngineBase):
         # ----------------- RESUME -----------------
         for seq_id, layer, cpu_blocks, new_gpu_blocks in resume_plan:
             for src, dst in zip(cpu_blocks, new_gpu_blocks):
+                # NOTE(HONG): Convert CPU block ID to CPU cache index (subtract GPU blocks offset)
+                cpu_index = src - self.num_gpu_blocks if src >= self.num_gpu_blocks else src
+                
                 # key
-                self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][src], non_blocking=False)
+                # self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][src], non_blocking=False)
+                self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][cpu_index], non_blocking=False)
                 # value
-                self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][src], non_blocking=False)
-                logger.debug(f"[worker][RESUME] seq_id={seq_id} CPU_block={src} → GPU_block={dst}")   
+                # self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][src], non_blocking=False)
+                # logger.debug(f"[worker][RESUME] seq_id={seq_id} CPU_block={src} → GPU_block={dst}")
+                self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][cpu_index], non_blocking=False)
+                logger.debug(f"[worker][RESUME] seq_id={seq_id} CPU_block={src} (cpu_index={cpu_index}) → GPU_block={dst}")
 
         logger.debug("===== [worker] pause_resume_cache_update END [worker] =====")
 
@@ -1004,6 +1117,13 @@ class FlattenedCacheEngine(CacheEngineBase):
         """
         Step 5: Execute cache reconfiguration plan.
         """        
+        # Worker side 실행 시작 시점 메모리 프로파일링
+        mem_before = log_cpu_memory_profile(logger, "WORKER_EXECUTE_CACHE_PLAN_START", {
+            "num_alloc_layers": len(plan.alloc_layers),
+            "prefetch_resize": plan.prefetch_resize,
+            "is_prefill": attn_meta.num_prefills > 0
+        })
+        
         # 새로 받은 GPU 블록 매핑을 (sid, layer) -> new_blocks 로 lookup 할 dict 생성
         blocks_map: Dict[Tuple[int,int], List[int]] = {
             (sid, layer): blocks for sid, layer, blocks in new_gpu_blocks
@@ -1014,6 +1134,8 @@ class FlattenedCacheEngine(CacheEngineBase):
         # -- 2b. ALLOCATE ------------------------------------------------------- #
         is_prefill = attn_meta.num_prefills > 0
         logger.debug(f"[worker][execute_cache_plan] is_prefill={is_prefill}, num_prefills={attn_meta.num_prefills}")
+        
+        total_copies = 0
         for sid, layer, cpu_blocks in plan.alloc_layers:
             logger.debug(f"[worker][execute_cache_plan] alloc_layers={plan.alloc_layers}")
 
@@ -1030,10 +1152,26 @@ class FlattenedCacheEngine(CacheEngineBase):
             logger.debug(f"[worker][execute_cache_plan] cpu_blocks:{cpu_blocks}")            
             
             # copy payload CPU → GPU
+            cpu_cache_size = self.cpu_cache[0][0].size(0)  # NOTE(HONG): Get actual CPU cache size
             for dst, src in zip(new_blocks, cpu_blocks):
                 logger.debug(f"[worker][execute_cache_plan] copying CPU[{src}]→GPU[{dst}] for seq={sid}, layer={layer}")
-                self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][src],non_blocking=False)
-                self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][src],non_blocking=False)
+                # self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][src],non_blocking=False)
+                # self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][src],non_blocking=False)                
+                
+                # Convert CPU block ID to CPU cache index (subtract GPU blocks offset)
+                cpu_index = src - self.num_gpu_blocks if src >= self.num_gpu_blocks else src
+                
+                # Bounds check for CPU cache access
+                if cpu_index >= cpu_cache_size or cpu_index < 0:
+                    logger.error(f"[worker][execute_cache_plan] ERROR: CPU index {cpu_index} (from block ID {src}) is out of bounds for CPU cache size {cpu_cache_size}")
+                    logger.error(f"[worker][execute_cache_plan] cpu_blocks: {cpu_blocks}")
+                    logger.error(f"[worker][execute_cache_plan] num_gpu_blocks: {self.num_gpu_blocks}")
+                    logger.error(f"[worker][execute_cache_plan] CPU cache shape: {self.cpu_cache[0][0].shape}")
+                    raise IndexError(f"CPU cache index {cpu_index} (from block ID {src}) is out of bounds for dimension 0 with size {cpu_cache_size}")
+                
+                self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][cpu_index],non_blocking=False)
+                self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][cpu_index],non_blocking=False)
+                total_copies += 1
             
             if not is_prefill and sid in sid2row:
                 row = sid2row[sid]
@@ -1047,6 +1185,20 @@ class FlattenedCacheEngine(CacheEngineBase):
                 # for resumed requests... they may came with their old slot mappings... 
                 temp_mapping = attn_meta.slot_mapping[layer][row] % 16                
                 attn_meta.slot_mapping[layer][row] = temp_mapping + new_blocks[-1]*16
+        
+        # Worker side 실행 완료 후 메모리 프로파일링
+        mem_after = log_cpu_memory_profile(logger, "WORKER_EXECUTE_CACHE_PLAN_END", {
+            "total_cpu_to_gpu_copies": total_copies,
+            "num_layers_processed": len(plan.alloc_layers)
+        })
+        
+        if mem_before and mem_after:
+            rss_delta = mem_after["rss_mb"] - mem_before["rss_mb"]
+            vms_delta = mem_after["vms_mb"] - mem_before["vms_mb"]
+            log_cpu_memory_profile(logger, "WORKER_EXECUTE_CACHE_PLAN_SUMMARY", {
+                "rss_delta_mb": f"{rss_delta:+.2f}",
+                "vms_delta_mb": f"{vms_delta:+.2f}"
+            })
         
         return self.cache_config
 
@@ -1084,6 +1236,7 @@ class FlattenedCacheEngine(CacheEngineBase):
         return self.cache_config
 
     def _snapshot_and_log(self, configure_paused, seq_group_metadata) -> "Snapshot":
+        logger.debug(f"===== start _snapshot_and_log() =====")
         m  = self.mapping
         bm = self.block_manager
 
@@ -1092,20 +1245,34 @@ class FlattenedCacheEngine(CacheEngineBase):
             candidates += [sid for sid in m.seq_row_order if sid in m.paused_gpu_seqs]
         paused_list = list(m.paused_gpu_seqs)
 
+        logger.debug(f"[SNAPSHOT] configure_paused={configure_paused}")
+        logger.debug(f"[SNAPSHOT] seq_row_order: {m.seq_row_order}")
+        logger.debug(f"[SNAPSHOT] active_gpu_seqs: {m.active_gpu_seqs}")
+        logger.debug(f"[SNAPSHOT] paused_gpu_seqs: {m.paused_gpu_seqs}")
+        logger.debug(f"[SNAPSHOT] candidates: {candidates}")
+        logger.debug(f"[SNAPSHOT] paused_list: {paused_list}")
+
         # 2. helper map {seq_id → index in seq_group_metadata}
         sid2sg = sid2sgidx(seq_group_metadata)
+        logger.debug(f"[SNAPSHOT] sid2sgidx: {sid2sg}")
+
+        free_gpu_blocks = bm.get_num_free_gpu_blocks()
+        prev_dist_dict = getattr(m, "prev_dist_dict", {})
+        logger.debug(f"[SNAPSHOT] free_gpu_blocks: {free_gpu_blocks}")
+        logger.debug(f"[SNAPSHOT] prev_dist_dict: {prev_dist_dict}")
+
         snap = Snapshot(
             mapping          = _freeze_mapping(m),
-            free_gpu_blocks  = bm.get_num_free_gpu_blocks(),
+            free_gpu_blocks  = free_gpu_blocks,
             candidates       = candidates,
-            prev_dist_dict   = getattr(m, "prev_dist_dict", {}),
+            prev_dist_dict   = prev_dist_dict,
             sid2sgidx        = sid2sg,
             seq_group_metadata = seq_group_metadata,   # read-only pointer
             time             = time.time(),
             paused_gpu_seqs  = paused_list,
         )
-        logger.debug("KV-snapshot: seqs=%d gpu_free=%d",
-                    len(candidates), snap.free_gpu_blocks)
+        logger.debug(f"[SNAPSHOT] Snapshot created: candidates={len(candidates)}, gpu_free={snap.free_gpu_blocks}, paused_gpu_seqs={len(paused_list)}")
+        logger.debug(f"===== finish _snapshot_and_log() =====")
         return snap
     
     def _compute_comm_time_per_block(self) -> float:
@@ -1177,14 +1344,24 @@ class FlattenedCacheEngine(CacheEngineBase):
     def _select_prefetch_distance(self, snapshot, prefetch_distance, total_context_lens, is_decoding, custom_prefetch_mode=None,
                         cur_blocks: int = None, # current gpu blocks
                                   ):
+        logger.debug(f"===== start _select_prefetch_distance() =====")
         self.cache_config.need_solver = False
+        
+        # Prefetch distance 선택 시작 시점 메모리 프로파일링
+        # total_context_tokens = sum(total_context_lens) if total_context_lens else 0
+        # log_cpu_memory_profile(logger, "SELECT_PREFETCH_DISTANCE_START", {
+        #     "prefetch_mode": self.prefetch_mode,
+        #     "total_context_tokens": total_context_tokens,
+        #     "num_candidates": len(snapshot.candidates),
+        #     "is_decoding": is_decoding
+        # })
         
         prefetch_mode = self.prefetch_mode
         
         # override 
         if custom_prefetch_mode is not None:
             prefetch_mode = custom_prefetch_mode
-            logger.critical(f"[driver] custom prefetch mode: {prefetch_mode}")
+            logger.debug(f"[driver] custom prefetch mode: {prefetch_mode}")
         
         if prefetch_mode == "none":
             dist = [-1] * len(snapshot.candidates) 
@@ -1194,12 +1371,14 @@ class FlattenedCacheEngine(CacheEngineBase):
             # deprecated branch     
             if not is_decoding and not self._solver_prefill_done:
                 dist = [-1] * len(snapshot.candidates)
-                logger.info(f"[driver] prefetch distance: {dist}")
+                logger.info(f"[SOLVER_INIT] Initial solver distance: {dist}")
+                logger.info(f"[SOLVER_INIT] candidates: {snapshot.candidates}, num_layers: {self.block_manager.num_attention_layers}")
+                logger.info(f"[SOLVER_INIT] Will try to allocate ALL {self.block_manager.num_attention_layers} layers to GPU")
                 self._solver_prefill_done = True
                 self.cache_config.need_solver = True                
             else:          
                 dist = self.resume_distances
-                logger.info(f"[driver] {dist}") 
+                logger.info(f"[SOLVER_RESUME] Resume distances: {dist}") 
         elif self.prefetch_mode == "flexgen_orig":
             dist = [self.fixed_flexgen_distance] * len(snapshot.candidates)
             logger.info(f"[flexgen_orig] Using fixed prefetch distance: {self.fixed_flexgen_distance}")
@@ -1306,6 +1485,29 @@ class FlattenedCacheEngine(CacheEngineBase):
                     dist[s] = 1
         logger.info(f"[driver] prefetch distance: {dist}")
         self.prev_candidates = snapshot.candidates.copy() # save for next step
+        
+        # Prefetch distance 선택 완료 시점 메모리 프로파일링
+        avg_distance = sum(dist.values()) / len(dist) if dist else 0
+        max_distance = max(dist.values()) if dist else 0
+        min_distance = min(dist.values()) if dist else 0
+        
+        # Distance별 예상 offloading 계산
+        total_layers_to_offload = 0
+        for sid, distance in dist.items():
+            if distance > 0:
+                layers_on_gpu = min(distance + 1, self.num_attention_layers)
+                layers_to_offload = self.num_attention_layers - layers_on_gpu
+                total_layers_to_offload += layers_to_offload
+        
+        # log_cpu_memory_profile(logger, "SELECT_PREFETCH_DISTANCE_END", {
+        #     "final_prefetch_mode": prefetch_mode,
+        #     "avg_distance": f"{avg_distance:.2f}",
+        #     "max_distance": max_distance,
+        #     "min_distance": min_distance,
+        #     "total_layers_to_offload": total_layers_to_offload
+        # })
+        
+        logger.debug(f"===== finish _select_prefetch_distance() =====")
         return dist, {"policy": prefetch_mode}
     
     def _pick_removable_layers(self, layer_map: dict[int, list[int]], need_blocks: int) -> tuple[list[int], list[int]]:        
@@ -1353,6 +1555,17 @@ class FlattenedCacheEngine(CacheEngineBase):
         Derive the minimal set of cache moves required to realise `dist_dict`
         given the current `snapshot`.  Pure function – no state is mutated.
         """
+        # 메모리 프로파일링 시작점
+        logger.debug(f"===== start _plan_cache_delta() =====")
+        logger.debug(f"[DELTA] candidates: {snapshot.candidates}")
+        logger.debug(f"[DELTA] dist_dict: {dist_dict}")
+        logger.debug(f"[DELTA] pause_and_resume: {pause_and_resume}")
+        mem_before = log_cpu_memory_profile(logger, "PLAN_CACHE_DELTA_START", {
+            "num_candidates": len(snapshot.candidates),
+            "free_gpu_blocks": snapshot.free_gpu_blocks,
+            "pause_and_resume": pause_and_resume
+        })
+        
         dealloc_layers   = defaultdict(list)          # GPU ➜ CPU
         expected_freed   = defaultdict(list)
         alloc_layers: List[Tuple[int, int, List[int]]] = []  # CPU ➜ GPU
@@ -1368,28 +1581,48 @@ class FlattenedCacheEngine(CacheEngineBase):
 
             gpu_layers = m.gpu_map.get(sid, {})
             cpu_layers = m.cpu_map.get(sid, {})
+            logger.debug(f"[DELTA] sid={sid} distance={d} gpu_layers={gpu_layers} cpu_layers={cpu_layers}")
 
             for lyr in range(n_lay):
                 want_gpu   = _want_gpu(lyr, d)
                 have_gpu   = lyr in gpu_layers and gpu_layers[lyr]    # list not empty
                 have_cpu   = lyr in cpu_layers and cpu_layers[lyr]
+                logger.debug(f"[DELTA] sid={sid} lyr={lyr} want_gpu={want_gpu} have_gpu={have_gpu} have_cpu={have_cpu}")
 
                 if want_gpu and not have_gpu and have_cpu:
                     # ---------------------- allocate later -------------------
                     alloc_layers.append((sid, lyr, cpu_layers[lyr]))
+                    logger.debug(f"[DELTA] alloc_layers append: (sid={sid}, lyr={lyr}, cpu_blocks={cpu_layers[lyr]})")
 
                 elif (not want_gpu) and have_gpu:
                     # ---------------------- free later -----------------------
                     dealloc_layers[sid].append(lyr)
                     expected_freed[sid].extend(gpu_layers[lyr])
+                    logger.debug(f"[DELTA] dealloc_layers append: sid={sid}, lyr={lyr}, gpu_blocks={gpu_layers[lyr]}")
 
                 # else: already in the desired place → nothing to do
+
+        # Distance별 할당/해제 계획 완료 후 메모리 프로파일링
+        total_alloc_blocks = sum(len(blocks) for _, _, blocks in alloc_layers)
+        total_dealloc_blocks = sum(len(blocks) for blocks in expected_freed.values())
+        
+        logger.debug(f"[DELTA] alloc_layers: {alloc_layers}")
+        logger.debug(f"[DELTA] dealloc_layers: {dict(dealloc_layers)}")
+        logger.debug(f"[DELTA] expected_freed blk idx: {dict(expected_freed)}")
+        log_cpu_memory_profile(logger, "AFTER_DISTANCE_PLANNING", {
+            "total_alloc_blocks": total_alloc_blocks,
+            "total_dealloc_blocks": total_dealloc_blocks,
+            "net_block_change": total_alloc_blocks - total_dealloc_blocks,
+            "num_alloc_layers": len(alloc_layers),
+            "num_dealloc_seqs": len(dealloc_layers)
+        })
 
         # NOTE(HONG): ② Removable-cache: dealloc plan following fallback mechanism(pausing) - free extra blocks from paused GPU
         missing = 0
         freed_paused_blks = 0
         
         if pause_and_resume:
+            logger.debug(f"[DELTA] pause_and_resume enabled, removable_cache={self.removable_cache}")
             if self.removable_cache:
                 # TOTAL_GPU_BLOCKS = self.block_manager.num_total_gpu_blocks
                 # HEADROOM_RATIO   = 0.05
@@ -1444,6 +1677,20 @@ class FlattenedCacheEngine(CacheEngineBase):
                         freed_ids = self.mapping.get_seq_gpu_block_ids(sid)
                         logger.critical("[RC] seq %d: pausing all layers %s", sid, alive_layers)
                         freed_paused_blks += len(freed_ids)
+
+        # Removable cache 처리 후 메모리 프로파일링
+        total_pause_blocks = sum(len(self.mapping.gpu_map.get(sid, {}).get(lyr, [])) 
+                               for sid, layers in pause_layers.items() 
+                               for lyr in layers)
+        logger.debug(f"[DELTA] pause_layers: {pause_layers}")
+        logger.debug(f"[DELTA] freed_paused_blks: {freed_paused_blks}, total_pause_blocks: {total_pause_blocks}, missing: {missing}")
+        
+        log_cpu_memory_profile(logger, "AFTER_REMOVABLE_CACHE", {
+            "freed_paused_blocks": freed_paused_blks,
+            "total_pause_blocks": total_pause_blocks,
+            "num_paused_seqs": len(pause_layers),
+            "missing_blocks": missing
+        })
         # estimate prefetch pages -------------------------------------------------
         need_prefetch = self._estimate_prefetch_blocks(
                             snapshot.seq_group_metadata,
@@ -1461,17 +1708,22 @@ class FlattenedCacheEngine(CacheEngineBase):
         will_alloc_blk = _count_blocks(t[2] for t in alloc_layers)          # CPU -> GPU
         post_gpu_blk = current_gpu_blk + will_alloc_blk - will_free_blk
         left = self.block_manager.num_total_gpu_blocks - post_gpu_blk
-        logger.critical("GPU-blk forecast: now=%d  +alloc=%d  −free=%d  ⇒ after=%d ⇒ total=%d  left=%d for %d requests", current_gpu_blk, will_alloc_blk, will_free_blk, post_gpu_blk, self.block_manager.num_total_gpu_blocks, self.block_manager.num_total_gpu_blocks - post_gpu_blk, len(snapshot.candidates))
+        logger.debug(f"[DELTA] GPU-blk forecast: now={current_gpu_blk} +alloc={will_alloc_blk} -free={will_free_blk} ⇒ after={post_gpu_blk} ⇒ total={self.block_manager.num_total_gpu_blocks} left={self.block_manager.num_total_gpu_blocks - post_gpu_blk} for {len(snapshot.candidates)} requests")
 
         # NOTE(HONG): conservative estimate of worst-case extra blocks
         def _needs_solver(self, post_gpu_blk: int, n_running: int) -> bool:        
             worst_case_extra = n_running * self.num_attention_layers
+            logger.debug(f"[SOLVER_CHECK] post_gpu_blk={post_gpu_blk}, n_running={n_running}, num_attention_layers={self.num_attention_layers}")
+            logger.debug(f"[SOLVER_CHECK] worst_case_extra={worst_case_extra}, total_gpu_blocks={self.block_manager.num_total_gpu_blocks}")
+            logger.debug(f"[SOLVER_CHECK] post_gpu_blk + worst_case_extra = {post_gpu_blk + worst_case_extra}")
+            logger.debug(f"[SOLVER_CHECK] exceeds_budget = {post_gpu_blk + worst_case_extra > self.block_manager.num_total_gpu_blocks}")
             return (
                 self.prefetch_mode == "solver" and
                 post_gpu_blk + worst_case_extra > self.block_manager.num_total_gpu_blocks
             )
         if _needs_solver(self, post_gpu_blk, len(snapshot.candidates)):
-            logger.info("Plan exceeds budget → hand over to Solver")
+            logger.info("!!!!! Plan exceeds budget → hand over to Solver !!!!!")
+            logger.info(f"[SOLVER_FALLBACK] post_gpu_blk={post_gpu_blk}, worst_case_extra={len(snapshot.candidates) * self.num_attention_layers}, total={self.block_manager.num_total_gpu_blocks}")
             empty_plan = Plan({}, {}, [], 0, {}, feasible=False)
             return empty_plan, post_gpu_blk
         elif left < 0:
@@ -1481,10 +1733,10 @@ class FlattenedCacheEngine(CacheEngineBase):
                 left += len(last_entry[2])  # add back the blocks
                 self.mapping.gpu_cpu_cache_map[last_entry[0]][last_entry[1]] = []  # clear the mapping
                 # will_alloc_blk = _count_blocks(t[2] for t in alloc_layers)/
-            logger.critical(f"Plan exceeds budget, partial alloc, let scheduler handle it") 
+            logger.debug(f"Plan exceeds budget, partial alloc, let scheduler handle it") 
             will_alloc_blk = _count_blocks(t[2] for t in alloc_layers)          # CPU -> GPU
             post_gpu_blk = current_gpu_blk + will_alloc_blk - will_free_blk
-            logger.critical("[Adjust]GPU-blk forecast: now=%d  +alloc=%d  −free=%d  ⇒ after=%d ⇒ total=%d  left=%d for %d requests", current_gpu_blk, will_alloc_blk, will_free_blk, post_gpu_blk, self.block_manager.num_total_gpu_blocks, self.block_manager.num_total_gpu_blocks - post_gpu_blk, len(snapshot.candidates))
+            logger.debug("[Adjust]GPU-blk forecast: now=%d  +alloc=%d  −free=%d  ⇒ after=%d ⇒ total=%d  left=%d for %d requests", current_gpu_blk, will_alloc_blk, will_free_blk, post_gpu_blk, self.block_manager.num_total_gpu_blocks, self.block_manager.num_total_gpu_blocks - post_gpu_blk, len(snapshot.candidates))
             plan = Plan(
                 dealloc_layers=dict(dealloc_layers),
                 expected_freed=dict(expected_freed),
@@ -1503,11 +1755,48 @@ class FlattenedCacheEngine(CacheEngineBase):
             pause_layers=pause_layers,
         )
 
+        # 최종 계획 완료 시점 메모리 프로파일링
+        mem_after = log_cpu_memory_profile(logger, "PLAN_CACHE_DELTA_END", {
+            "final_alloc_blocks": will_alloc_blk,
+            "final_free_blocks": will_free_blk,
+            "post_gpu_blocks": post_gpu_blk,
+            "gpu_blocks_left": left,
+            "prefetch_resize": prefetch_resize,
+            "plan_feasible": True
+        })
+        
+        if mem_before and mem_after:
+            rss_delta = mem_after["rss_mb"] - mem_before["rss_mb"]
+            vms_delta = mem_after["vms_mb"] - mem_before["vms_mb"]
+            log_cpu_memory_profile(logger, "PLAN_CACHE_DELTA_SUMMARY", {
+                "rss_delta_mb": f"{rss_delta:+.2f}",
+                "vms_delta_mb": f"{vms_delta:+.2f}"
+            })
+
+        logger.debug(f"[DELTA] plan.dealloc_layers: {plan.dealloc_layers}")
+        logger.debug(f"[DELTA] plan.alloc_layers: {plan.alloc_layers}")
+        logger.debug(f"[DELTA] plan.pause_layers: {plan.pause_layers}")
+        logger.debug(f"===== finish _plan_cache_delta() =====")
         return plan, post_gpu_blk
     
     def _execute_plan(self, plan, seq_group_metadata, attn_meta):
-        logger.debug(f"[driver] _execute_plan started")
-        # logger.debug(f"[driver] Received plan: {plan}")
+        
+        logger.debug(f"======== start _execute_plan() ========")
+        # 실행 시작 시점 메모리 프로파일링
+        mem_before = log_cpu_memory_profile(logger, "EXECUTE_PLAN_START", {
+            "num_dealloc_seqs": len(plan.dealloc_layers),
+            "num_alloc_layers": len(plan.alloc_layers),
+            "num_pause_seqs": len(plan.pause_layers),
+            "prefetch_resize": plan.prefetch_resize
+        })
+        
+        logger.debug(f"[driver] Received plan: {plan}")
+        logger.debug(f"[driver] Plan details - dealloc_layers: {plan.dealloc_layers}")
+        logger.debug(f"[driver] Plan details - alloc_layers: {plan.alloc_layers}")
+        logger.debug(f"[driver] Plan details - pause_layers: {plan.pause_layers}")
+        logger.debug(f"[driver] Plan details - prefetch_resize: {plan.prefetch_resize}")
+        logger.debug(f"[driver] Plan details - expected_freed: {plan.expected_freed}")
+        
         bm = self.block_manager 
         mapping = self.mapping 
         sid2sgidx_ = sid2sgidx(seq_group_metadata)
@@ -1516,6 +1805,10 @@ class FlattenedCacheEngine(CacheEngineBase):
         sid2row: dict[int, int]  = mapping.sid2row        # {sid: row}
         logger.debug(f"[driver] Sequence row order: {seq_row_order}")
         logger.debug(f"[driver] SID to row mapping: {sid2row}")
+        logger.debug(f"[driver] Block manager free GPU blocks before execution: {bm.get_num_free_gpu_blocks()}")
+        logger.debug(f"[driver] Current mapping active_gpu_seqs: {mapping.active_gpu_seqs}")
+        logger.debug(f"[driver] Current mapping paused_gpu_seqs: {mapping.paused_gpu_seqs}")
+        logger.debug(f"[driver] Current mapping paused_cpu_seqs: {mapping.paused_cpu_seqs}")
 
         to_worker_new_gpu_blocks: List[Tuple[int, int, List[int]]] = []
         
@@ -1525,10 +1818,14 @@ class FlattenedCacheEngine(CacheEngineBase):
             freed_ids = bm.free_seq_by_layer({sid: layers})
             logger.debug(f"[PAUSE] seq_id={sid} freed_block_ids={freed_ids}")
             for lyr in layers:
+                logger.debug(f"[PAUSE] Processing layer {lyr} for seq_id={sid}")
+                logger.debug(f"[PAUSE] Before clear - mapping.gpu_map[{sid}][{lyr}]: {mapping.gpu_map[sid][lyr]}")
                 mapping.gpu_map[sid][lyr] = []
                 mapping._set_gpu_flag(sid, lyr, False)
+                logger.debug(f"[PAUSE] After clear - mapping.gpu_map[{sid}][{lyr}]: {mapping.gpu_map[sid][lyr]}")
             self._paused_layers_freed[sid].extend(layers)
             logger.debug(f"[PAUSE] sid={sid} offloaded {layers} → freed={freed_ids}")
+            logger.debug(f"[PAUSE] Updated _paused_layers_freed[{sid}]: {self._paused_layers_freed[sid]}")
             
             remaining = [lyr for lyr, blks in mapping.gpu_map[sid].items() if blks]
             logger.debug(f"[PAUSE] seq_id={sid} remaining_gpu_layers after offload: {remaining}")
@@ -1537,19 +1834,37 @@ class FlattenedCacheEngine(CacheEngineBase):
         freed = bm.free_seq_by_layer(plan.dealloc_layers)
         logger.debug(f"[driver] Blocks freed by layer: {plan.dealloc_layers}")
         logger.debug(f"[driver] Returned freed list: {freed}")
+        logger.debug(f"[driver] Expected freed blocks: {set(chain.from_iterable(plan.expected_freed.values()))}")
         assert set(freed) == set(chain.from_iterable(plan.expected_freed.values()))
 
         # ---------- clear bookkeeping for layers we just evicted -----------
         for sid, layers in plan.dealloc_layers.items():
             logger.debug(f"[driver] Clearing metadata for SID {sid}, layers {layers}")
             for lyr in layers:
+                logger.debug(f"[driver] Processing dealloc for sid={sid}, layer={lyr}")
+                
                 # (1) no GPU block ids left
+                logger.debug(f"[driver] Before clear - mapping.gpu_map[{sid}][{lyr}]: {mapping.gpu_map[sid][lyr]}")
                 mapping.gpu_map[sid][lyr] = []
+                logger.debug(f"[driver] After clear - mapping.gpu_map[{sid}][{lyr}]: {mapping.gpu_map[sid][lyr]}")
+                
                 # (2) per-request block table blank
                 row_g = sid2sgidx_[sid]
+                logger.debug(f"[driver] Before clear - seq_group_metadata[{row_g}].block_tables[{sid}][{lyr}]: {seq_group_metadata[row_g].block_tables[sid][lyr]}")
                 seq_group_metadata[row_g].block_tables[sid][lyr] = []
+                logger.debug(f"[driver] After clear - seq_group_metadata[{row_g}].block_tables[{sid}][{lyr}]: {seq_group_metadata[row_g].block_tables[sid][lyr]}")
+                
                 # (3) 1/0 bitmap: mark layer as CPU
                 mapping._set_gpu_flag(sid, lyr, False)
+                logger.debug(f"[driver] Set GPU flag to False for sid={sid}, layer={lyr}")
+
+        # Pause 및 Dealloc 처리 후 메모리 프로파일링
+        total_paused_blocks = sum(len(freed_ids) for freed_ids in [bm.free_seq_by_layer({sid: layers}) for sid, layers in plan.pause_layers.items()])
+        log_cpu_memory_profile(logger, "AFTER_PAUSE_DEALLOC", {
+            "total_freed_blocks": len(freed),
+            "total_paused_blocks": total_paused_blocks,
+            "free_gpu_blocks": bm.get_num_free_gpu_blocks()
+        })
 
 
         if plan.prefetch_resize:
@@ -1559,56 +1874,128 @@ class FlattenedCacheEngine(CacheEngineBase):
         
         # -- 2b. ALLOCATE ------------------------------------------------------- #
         is_prefill = attn_meta.num_prefills > 0
-        for sid, layer, cpu_blocks in plan.alloc_layers:
+        logger.debug(f"[driver] Starting allocation phase, is_prefill={is_prefill}")
+        logger.debug(f"[driver] Number of alloc_layers to process: {len(plan.alloc_layers)}")
+        
+        for i, (sid, layer, cpu_blocks) in enumerate(plan.alloc_layers):
+            logger.debug(f"[driver] Processing allocation {i+1}/{len(plan.alloc_layers)} - sid={sid}, layer={layer}")
             n_blocks = len(cpu_blocks)
+            logger.debug(f"[driver] Allocating {n_blocks} blocks for sid={sid}, layer={layer}")
+            logger.debug(f"[driver] CPU blocks to copy: {cpu_blocks}")
+            
             new_gpu_blocks = bm.allocate_seq_by_layer(sid, layer, n_blocks)   # → List[int]             
-            logger.debug(f"[driver] free_blocks: {bm.get_num_free_gpu_blocks()}")
-            # logger.debug(f"[driver] cpu_blocks:{cpu_blocks}")
-            # logger.debug(f"[driver] new_gpu_blocks:{new_gpu_blocks}")
+            logger.debug(f"[driver] Allocated GPU blocks: {new_gpu_blocks}")
+            logger.debug(f"[driver] free_blocks after allocation: {bm.get_num_free_gpu_blocks()}")
+            logger.debug(f"[driver] cpu_blocks:{cpu_blocks}")
+            logger.debug(f"[driver] new_gpu_blocks:{new_gpu_blocks}")
             
-            # copy payload CPU → GPU
-            for dst, src in zip(new_gpu_blocks, cpu_blocks):
-                # logger.debug(f"[driver] copying CPU[{src}] to GPU[{dst}]")
-                self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][src],non_blocking=False)
-                self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][src],non_blocking=False)
-                # logger.debug(f"Copy complete for dst={dst}, src={src}")
+        # copy payload CPU → GPU
+            logger.debug(f"[driver] Starting CPU→GPU copy for {len(new_gpu_blocks)} blocks")
+            copy_start_time = time.time()
+            cpu_cache_size = self.cpu_cache[0][0].size(0)  # Get actual CPU cache size
+            for copy_idx, (dst, src) in enumerate(zip(new_gpu_blocks, cpu_blocks)):
+                logger.debug(f"[driver] Copy {copy_idx+1}/{len(new_gpu_blocks)}: CPU[{src}] → GPU[{dst}]")
+                
+                # Convert CPU block ID to CPU cache index (subtract GPU blocks offset)
+                cpu_index = src - self.num_gpu_blocks if src >= self.num_gpu_blocks else src
+                
+                # Bounds check for CPU cache access
+                if cpu_index >= cpu_cache_size or cpu_index < 0:
+                    logger.error(f"[driver] ERROR: CPU index {cpu_index} (from block ID {src}) is out of bounds for CPU cache size {cpu_cache_size}")
+                    logger.error(f"[driver] cpu_blocks: {cpu_blocks}")
+                    logger.error(f"[driver] num_gpu_blocks: {self.num_gpu_blocks}")
+                    logger.error(f"[driver] CPU cache shape: {self.cpu_cache[0][0].shape}")
+                    raise IndexError(f"CPU cache index {cpu_index} (from block ID {src}) is out of bounds for dimension 0 with size {cpu_cache_size}")
+                
+                copy_block_start = time.time()
+                self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][cpu_index],non_blocking=False)
+                self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][cpu_index],non_blocking=False)
+                copy_block_time = time.time() - copy_block_start
+                logger.debug(f"[driver] Copy complete for dst={dst}, src={src} (cpu_index={cpu_index}) (took {copy_block_time*1000:.2f}ms)")
             
+            total_copy_time = time.time() - copy_start_time
+            logger.debug(f"[driver] Total copy time for layer {layer}: {total_copy_time*1000:.2f}ms, avg per block: {(total_copy_time/len(new_gpu_blocks)*1000):.2f}ms")
+            
+            logger.debug(f"[driver] Before mapping update - mapping.gpu_map[{sid}]: {mapping.gpu_map.get(sid, {})}")
             mapping.gpu_map.setdefault(sid, {})[layer] = new_gpu_blocks
+            logger.debug(f"[driver] After mapping update - mapping.gpu_map[{sid}][{layer}]: {mapping.gpu_map[sid][layer]}")
             to_worker_new_gpu_blocks.append((sid, layer, new_gpu_blocks.copy()))
 
             # keep the 1/0 bitmap in sync
             mapping._set_gpu_flag(sid, layer, True)
-            # logger.debug(f"[driver] Updated mapping.gpu_map[{sid}][{layer}] = {new_gpu_blocks}")
+            logger.debug(f"[driver] Updated mapping.gpu_map[{sid}][{layer}] = {new_gpu_blocks}")
+            logger.debug(f"[driver] Set GPU flag to True for sid={sid}, layer={layer}")
             
             # if not is_prefill and sid in sid2row:
             if sid in sid2row:
+                logger.debug(f"[driver] Updating block tables and slot mapping for sid={sid}")
                 row = sid2sgidx_[sid]
+                logger.debug(f"[driver] seq_group_metadata row index: {row}")
                 seq_group_metadata[row].block_tables[sid][layer] = new_gpu_blocks   # local mapping
-                # logger.debug(f"[driver] Updated seq_group_metadata[{row}].block_tables for SID {sid}, layer {layer}")
+                logger.debug(f"[driver] Updated seq_group_metadata[{row}].block_tables for SID {sid}, layer {layer}")
 
                 # for prefill, change only slot mapping, since it does not contain any blocktables yet
                 row = sid2row[sid]
+                logger.debug(f"[driver] attention row index: {row}")
                 if not is_prefill:
+                    logger.debug(f"[driver] Decoding phase - updating block tables")
                     tgt = attn_meta.block_tables[row, layer]             # view (2,)
+                    logger.debug(f"[driver] Target block table shape: {tgt.shape}, before zero: {tgt}")
                     tgt.zero_()
                     logger.debug(f"[driver] alloc assign block table seq {sid}, layer {layer}, len(blt) {tgt.shape} cpu_blocks {cpu_blocks} -> gpu_blocks {new_gpu_blocks}")
                     tgt[:n_blocks] = torch.as_tensor(new_gpu_blocks,
                                                 dtype=tgt.dtype,
                                                 device=tgt.device)
+                    logger.debug(f"[driver] After assignment: {tgt}")
+                else:
+                    logger.debug(f"[driver] Prefill phase - skipping block table update")
+                    
                 # for resumed requests... they may came with their old slot mappings... 
                 # FIXME (xinyue) with prefill offload, the slot mapping will be repeated 32 times, source of error; but the offset should be correct?? 
+                logger.debug(f"[driver] Before slot mapping update - attn_meta.slot_mapping[{layer}][{row}]: {attn_meta.slot_mapping[layer][row]}")
                 temp_mapping = attn_meta.slot_mapping[layer][row] % 16 
+                logger.debug(f"[driver] temp_mapping (mod 16): {temp_mapping}")
+                logger.debug(f"[driver] new_gpu_blocks[-1]: {new_gpu_blocks[-1]}")
                 attn_meta.slot_mapping[layer][row] = temp_mapping + new_gpu_blocks[-1]*16
-                # logger.debug(f"[driver] Updated slot_mapping[{layer}][{row}] = {attn_meta.slot_mapping[layer][row]}")
+                logger.debug(f"[driver] Updated slot_mapping[{layer}][{row}] = {attn_meta.slot_mapping[layer][row]}")
+            else:
+                logger.debug(f"[driver] SID {sid} not found in sid2row mapping, skipping block table updates")
+        
+        # Allocation 처리 완료 후 메모리 프로파일링
+        total_allocated_blocks = sum(len(new_blocks) for _, _, new_blocks in to_worker_new_gpu_blocks)
+        log_cpu_memory_profile(logger, "AFTER_ALLOCATION", {
+            "total_allocated_blocks": total_allocated_blocks,
+            "num_allocations": len(to_worker_new_gpu_blocks),
+            "final_free_gpu_blocks": bm.get_num_free_gpu_blocks()
+        })
+        
         logger.debug(f"[driver] mapping after resize: {mapping}")
-        # logger.debug(f"[driver] GPU map after resize:{mapping.gpu_map}")
-        # logger.critical(f"[driver] gpu_cpu_cache_map after resize:{mapping.gpu_cpu_cache_map}")
-        # logger.critical(f"mapping after resize: {self.mapping}")
+        logger.debug(f"[driver] GPU map after resize:{mapping.gpu_map}")
+        logger.debug(f"[driver] gpu_cpu_cache_map after resize:{mapping.gpu_cpu_cache_map}")
+        logger.debug(f"[driver] Final to_worker_new_gpu_blocks: {to_worker_new_gpu_blocks}")
+        logger.debug(f"mapping after resize: {self.mapping}")
         
         # ---------------- sync ordered view -----------
+        logger.debug(f"[driver] Syncing active_gpu_cpu_map with seq_row_order: {seq_row_order}")
         self._sync_active_gpu_cpu_map(seq_row_order)
         bm.cache_config = self.cache_config
-        logger.debug("[driver] _execute_plan completed")
+        logger.debug(f"[driver] Sync complete")
+        
+        # 전체 실행 완료 후 메모리 프로파일링
+        mem_after = log_cpu_memory_profile(logger, "EXECUTE_PLAN_END", {
+            "total_new_gpu_blocks": len(to_worker_new_gpu_blocks),
+            "plan_completed": True
+        })
+        
+        if mem_before and mem_after:
+            rss_delta = mem_after["rss_mb"] - mem_before["rss_mb"]
+            vms_delta = mem_after["vms_mb"] - mem_before["vms_mb"]
+            log_cpu_memory_profile(logger, "EXECUTE_PLAN_SUMMARY", {
+                "rss_delta_mb": f"{rss_delta:+.2f}",
+                "vms_delta_mb": f"{vms_delta:+.2f}"
+            })
+        
+        logger.debug(f"======== finish _execute_plan() ========")
         return to_worker_new_gpu_blocks
      
     def pause_resume_cache_update(self) -> None:
@@ -1701,11 +2088,14 @@ class FlattenedCacheEngine(CacheEngineBase):
                 # Copy KV from CPU → GPU using flattened cache layout
                 logger.debug(f"[RESUME] Copying KV from CPU→GPU for seq_id={seq_id}, layer={layer}")
                 for src, dst in zip(cpu_blocks, new_gpu_blocks):
+                    # Convert CPU block ID to CPU cache index (subtract GPU blocks offset)
+                    cpu_index = src - self.num_gpu_blocks if src >= self.num_gpu_blocks else src
+                    
                     # key
-                    self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][src], non_blocking=False)
+                    self.gpu_cache[0][0][dst].copy_(self.cpu_cache[0][0][cpu_index], non_blocking=False)
                     # value
-                    self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][src], non_blocking=False)
-                    logger.debug(f"[RESUME] seq_id={seq_id} CPU_block={src} → GPU_block={dst}")
+                    self.gpu_cache[0][1][dst].copy_(self.cpu_cache[0][1][cpu_index], non_blocking=False)
+                    logger.debug(f"[RESUME] seq_id={seq_id} CPU_block={src} (cpu_index={cpu_index}) → GPU_block={dst}")
 
                 # Update per-sequence flag
                 self.mapping._set_gpu_flag(seq_id, layer, True)
@@ -1828,22 +2218,28 @@ class FlattenedCacheEngine(CacheEngineBase):
         
     # 3) shrink / grow prefetch area if needed
     def _maybe_resize_prefetch_window(self, need_blocks: int) -> None:
+        logger.debug(f"[RESIZE] _maybe_resize_prefetch_window called with need_blocks={need_blocks}")
         BLOCK_DIM = 1
         KV_DIM = 0
         kv = self.gpu_cache[0]                          # shape (2, cur_blocks, …)
         cur_blocks = kv.shape[BLOCK_DIM]
         cur_prefetch = cur_blocks - self.num_gpu_blocks
         missing = max(0, need_blocks - cur_prefetch)
+        logger.debug(f"[RESIZE] cur_blocks={cur_blocks}, num_gpu_blocks={self.num_gpu_blocks}, cur_prefetch={cur_prefetch}, missing={missing}")
 
         grow_by = math.ceil(missing / PREFETCH_GROW_STEP) * PREFETCH_GROW_STEP
+        logger.debug(f"[RESIZE] PREFETCH_GROW_STEP={PREFETCH_GROW_STEP}, grow_by={grow_by}")
         if grow_by == 0:
+            logger.debug(f"[RESIZE] No growth needed, returning")
             return                                       # nothing to do
 
         new_blocks = cur_blocks + grow_by
+        logger.debug(f"[RESIZE] new_blocks={new_blocks}")
         # Use backend helper to respect hidden strides/layouts
         new_shape = self.attn_backend.get_kv_cache_shape(
             new_blocks, self.block_size, self.num_kv_heads, self.head_size
         )
+        logger.debug(f"[RESIZE] new_shape={new_shape}")
 
         logger.critical(
             "Prefetch resize: have=%d need=%d  → +%d blocks",
@@ -1955,7 +2351,7 @@ class MappingTable:
     prev_dist_dict: dict[int, int] = field(default_factory=dict, init=False)  # {sid: distance}
     def update_mapping_table(self, attn_meta, seq_group_metadata, finished_requests: List[str], paused_cpu_seq_groups:List=[] ):
         """ update seq dicts and maps; Ignore prefetch map for now"""
-        logger.debug(f"===== start update_mapping_table =====")
+        logger.debug(f"======== start update_mapping_table() ========")
         # logger.debug(f"update_mapping_table {seq_group_metadata}")
 
         if len(finished_requests) > 0:
@@ -1996,32 +2392,42 @@ class MappingTable:
                     for lyr in range(self.num_layers):
                         self.gpu_map[seq.seq_id][lyr] = []
                         self._set_gpu_flag(seq.seq_id, lyr, False) 
-                    logger.debug(f"cache_engine pausing seq {seq.seq_id} {self.gpu_map[seq.seq_id]}")
+                    logger.debug(f"Paused seq {seq.seq_id}: cleared GPU map and set flags to False. gpu_map={self.gpu_map[seq.seq_id]}")
         self.seq_row_order = [
             sid 
             for group in seq_group_metadata
             for sid in group.seq_data.keys()
         ]
+        logger.debug(f"seq_row_order updated: {self.seq_row_order}")
         self.sid2row = {sid: row for row, sid in enumerate(self.seq_row_order)}
+        logger.debug(f"sid2row updated: {self.sid2row}")
         gpu_bt, cpu_bt = self.collect_block_tables(seq_group_metadata)
-        
+        # logger.debug(f"Collected block tables: gpu_bt: {gpu_bt[0]}, cpu_bt: {cpu_bt[0]}")
+        logger.debug(f"Collected block tables: gpu_bt: {gpu_bt}, cpu_bt: {cpu_bt}")
+
         candidates: list[int] = [sid for sid in self.seq_row_order if sid in self.active_gpu_seqs]
+        logger.debug(f"Candidates for active_gpu_seqs: {candidates}")
         for sid, bt in gpu_bt.items():
             self.gpu_map[sid] = {}
             for lyr in range(len(bt)):
                 self.gpu_map[sid][lyr] = bt[lyr]
                 self._set_gpu_flag(sid, lyr, True if len(bt[lyr]) > 0 else False)
+            logger.debug(f"Updated gpu_map for sid={sid}: {self.gpu_map[sid]}")
         for sid, bt in cpu_bt.items():
             self.cpu_map[sid] = {lyr: bt[lyr] for lyr in range(len(bt))}
+            logger.debug(f"Updated cpu_map for sid={sid}: {self.cpu_map[sid]}")
         current_seq_to_req = {
             sid: g.request_id
             for g in seq_group_metadata
             for sid in g.seq_data.keys()
         }
         current_seq_ids = set(current_seq_to_req.keys())
+        logger.debug(f"current_seq_to_req: {current_seq_to_req}")
+        logger.debug(f"current_seq_ids: {current_seq_ids}")
 
         # remember any new mappings so we still know the request later
         self.seq_to_req.update(current_seq_to_req)
+        logger.debug(f"seq_to_req updated: {self.seq_to_req}")
 
 
         # HACK (xinyue) exempt preempt decode sequences due to continuous batchd prefill 
@@ -2039,6 +2445,7 @@ class MappingTable:
         self.paused_cpu_seqs = set()
 
         self.all_seqs = set(self.gpu_map) | set(self.cpu_map)
+        logger.debug(f"all_seqs updated: {self.all_seqs}")
 
         def _has_blocks(cache_map: dict[int, dict[int, Optional[list]]], sid: int) -> bool:
             return sid in cache_map and any(cache_map[sid].values())
@@ -2081,6 +2488,10 @@ class MappingTable:
             if sid in self.active_gpu_seqs 
             and sid in self.gpu_cpu_cache_map
         )
+
+        logger.debug(f"MappingTable.update: all_seqs_by_req={self.all_seqs_by_req}")
+        logger.debug(f"======== finish update_mapping_table() ========")
+
     def all_gpu_block_ids(self) -> set[int]:
         """
         Return *all* physical block-IDs currently resident in GPU memory.
