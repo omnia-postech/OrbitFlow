@@ -2,6 +2,8 @@ import os
 import time
 import json
 from collections import defaultdict
+import psutil
+import tracemalloc
 
 from vllm.engine.llm_engine import LLMEngine
 from vllm.engine.arg_utils import EngineArgs
@@ -12,6 +14,68 @@ from vllm.inputs import TokensPrompt
 
 from trace_generator import Trace
 logger = init_logger("vllm")
+
+def log_memory_usage(tag="", process=None):
+    """Log current CPU memory usage"""
+    if process is None:
+        process = psutil.Process()
+    
+    memory_info = process.memory_info()
+    rss_mb = memory_info.rss / 1024 / 1024  # MB
+    vms_mb = memory_info.vms / 1024 / 1024  # MB
+    
+    # System memory
+    sys_memory = psutil.virtual_memory()
+    available_mb = sys_memory.available / 1024 / 1024
+    used_percent = sys_memory.percent
+    total_mb = sys_memory.total / 1024 / 1024
+    used_mb = sys_memory.used / 1024 / 1024
+    free_mb = sys_memory.free / 1024 / 1024
+    active_mb = getattr(sys_memory, "active", 0) / 1024 / 1024
+    inactive_mb = getattr(sys_memory, "inactive", 0) / 1024 / 1024
+    buffers_mb = getattr(sys_memory, "buffers", 0) / 1024 / 1024
+    cached_mb = getattr(sys_memory, "cached", 0) / 1024 / 1024
+    shared_mb = getattr(sys_memory, "shared", 0) / 1024 / 1024
+    slab_mb = getattr(sys_memory, "slab", 0) / 1024 / 1024
+
+    logger.critical(
+        f"[MEMORY {tag}] RSS: {rss_mb:.1f}MB, VMS: {vms_mb:.1f}MB, "
+        f"System Used: {used_percent:.1f}%, Available: {available_mb:.1f}MB, "
+        f"Total: {total_mb:.1f}MB, Used: {used_mb:.1f}MB, Free: {free_mb:.1f}MB, "
+        f"Active: {active_mb:.1f}MB, Inactive: {inactive_mb:.1f}MB, "
+        f"Buffers: {buffers_mb:.1f}MB, Cached: {cached_mb:.1f}MB, "
+        f"Shared: {shared_mb:.1f}MB, Slab: {slab_mb:.1f}MB"
+    )
+    return rss_mb
+
+def start_memory_profiling():
+    """Start tracemalloc for detailed memory tracking"""
+    tracemalloc.start()
+    logger.critical("[MEMORY] Started tracemalloc profiling")
+
+def log_top_memory_allocations(limit=10):
+    """Log top memory allocations"""
+    if not tracemalloc.is_tracing():
+        return
+    
+    snapshot = tracemalloc.take_snapshot()
+    top_stats = snapshot.statistics('lineno')
+    
+    logger.critical(f"[MEMORY] Top {limit} memory allocations:")
+    for stat in top_stats[:limit]:
+        logger.critical(f"  {stat}")
+
+def get_memory_diff(snapshot_before):
+    """Get memory difference since snapshot_before"""
+    if not tracemalloc.is_tracing():
+        return None
+    
+    snapshot_after = tracemalloc.take_snapshot()
+    top_stats = snapshot_after.compare_to(snapshot_before, 'lineno')
+    
+    logger.critical("[MEMORY] Top memory differences:")
+    for stat in top_stats[:10]:
+        logger.critical(f"  {stat}")
 import logging
 
 import pandas as pd 
@@ -350,17 +414,26 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
     
     
     step_count = 1
+    memory_check_interval = 1  # Check memory every 50 steps
+    
     # The main simulation loop
     while queue or request_metadata:
         step_start=0.0
         step_end=0.0
+        
+        # Memory monitoring every N steps
+        if step_count % memory_check_interval == 0:
+            log_memory_usage(f"STEP_{step_count}")
+            
         # 4) Find all requests that have arrival_time <= cumulative_steps
         #    -> these are ready to enqueue
         ready = [(req_id, req_obj) for (req_id, req_obj) in queue
                  if req_obj.arrival_time <= cumulative_steps]
         if ready:
             # We enqueue *all* that are <= cumulative_steps
+            log_memory_usage("BEFORE_ENQUEUE")
             enqueue_batch(engine, ready, request_metadata)
+            log_memory_usage("AFTER_ENQUEUE")
             for (req_id, req_obj )in ready: 
                 if hasattr(req_obj, "slo") and req_obj.slo is not None: 
                     max_slo = req_obj.slo
@@ -375,7 +448,7 @@ def run_inference_step_mode(engine, trace_obj, csv_path=None, enable_deposit=Fal
                     #                                                 which="NoPrefetch" ,
                     #                                                 mode="linear")
                     slo = sim.register(req_id, max_slo)
-                logger.critical(f"Enqueued request {req_id} with max_slo {max_slo} and SLO {(1/sim.v[req_id]):.3f} ms per token")
+                logger.debug(f"Enqueued request {req_id} with max_slo {max_slo} and SLO {(1/sim.v[req_id]):.3f} ms per token")
             # Remove them from the queue
             queue = [(req_id, req_obj) for (req_id, req_obj) in queue
                      if req_obj.arrival_time > cumulative_steps]
@@ -754,11 +827,25 @@ def main(configs):
     print(f"Logging to {configs.output_log}")
     import sys 
     sys.stdout = open(configs.output_log, 'w')
+    
+    # Start memory profiling
+    start_memory_profiling()
+    initial_snapshot = tracemalloc.take_snapshot() if tracemalloc.is_tracing() else None
+    log_memory_usage("BEFORE_ENGINE_INIT")
+    
     engine = LLMEngine.from_engine_args(args)  
+    
+    log_memory_usage("AFTER_ENGINE_INIT")
+    log_top_memory_allocations(10)
     
     csv_path = configs.output_log.replace(".log", ".csv")
 
     run_inference_step_mode(engine, trace, csv_path=csv_path,enable_deposit=configs.enable_deposit, estimator=estimator, slo_ratio=configs.slo_ratio)
+    
+    # Final memory check
+    log_memory_usage("AFTER_INFERENCE")
+    if initial_snapshot:
+        get_memory_diff(initial_snapshot)
 
 if __name__ == "__main__":
     from vllm.utils import FlexibleArgumentParser

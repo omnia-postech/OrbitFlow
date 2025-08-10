@@ -13,7 +13,7 @@
         "class": "logging.FileHandler",
         "formatter": "vllm",
         "level": "DEBUG",
-        "filename": "../outputs/heelim/cpu_mem_debugging/test_cpu/vllm_msg.log"        
+        "filename": "/home/heelim/vllm/outputs/benchmark/cpu_mem_debugging/slo2.5/Ours/8k_lambda2.0x_cv1/vllm_msg.log"
       }
     },
     "loggers": {
