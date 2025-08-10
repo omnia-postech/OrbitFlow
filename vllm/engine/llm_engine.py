@@ -426,9 +426,12 @@ class LLMEngine:
             num_gpu_blocks = num_gpu_blocks_override
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
-        self.cache_config.num_cpu_blocks = num_cpu_blocks
+        # NOTE(HONG): automatically setting num_cpu_blocks 2 time larger than num_gpu_blocks
+        # self.cache_config.num_cpu_blocks = num_cpu_blocks
+        self.cache_config.num_cpu_blocks = num_gpu_blocks * 2        
 
-        self.model_executor.initialize_cache(num_gpu_blocks, num_cpu_blocks)
+        # self.model_executor.initialize_cache(num_gpu_blocks, num_cpu_blocks)
+        self.model_executor.initialize_cache(self.cache_config.num_gpu_blocks, self.cache_config.num_cpu_blocks)
         elapsed = time.time() - start
         logger.info(("init engine (profile, create kv cache, "
                      "warmup model) took %.2f seconds"), elapsed)
