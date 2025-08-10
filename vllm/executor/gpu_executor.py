@@ -73,7 +73,7 @@ class GPUExecutor(ExecutorBase):
         # NOTE: This is logged in the executor because there can be >1 worker
         # with other executors. We could log in the engine level, but work
         # remains to abstract away the device for non-GPU configurations.
-        logger.info("# GPU blocks: %d, # CPU blocks: %d", num_gpu_blocks,
+        logger.info("Initial # GPU blocks: %d, # CPU blocks: %d", num_gpu_blocks,
                     num_cpu_blocks)
         max_concurrency = (num_gpu_blocks * self.cache_config.block_size /
                            self.model_config.max_model_len)
