@@ -132,6 +132,7 @@ for SLO in "${SLO_RATIO_LIST[@]}"; do
             --config-file "${TRACE_CFG_DIR}/${TRACE}.json" \
             --model "${MODEL_PATH}" \
             "${EXP_ARGS[@]}" \
+            --profiled-results $profiled_path \
             --slo-ratio "$SLO" \
             --output-log "${RUN_DIR}/outputs.log"
         fi
