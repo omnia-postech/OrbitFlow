@@ -25,6 +25,7 @@ export NUM_LAYERS=32                   # number of layers in the model (e.g. 80 
 
 LOGGING_LEVEL=DEBUG                 # CRITICAL│ERROR│WARNING│INFO│DEBUG
 ROOT="/home/heelim/vllm"               # project root
+MODEL_PATH="/home/heelim/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"   # ← set your model path or HF ID here
 
 profiled_path="/home/heelim/vllm/benchmark/scripts/profiled_results_A6000.json"
 FIGURE_ONLY="${1:-0}"                  # default = 0 (run + plot)
@@ -129,6 +130,7 @@ for SLO in "${SLO_RATIO_LIST[@]}"; do
           echo "    ↳ running..."
           python "${ROOT}/examples/test_distN.py" \
             --config-file "${TRACE_CFG_DIR}/${TRACE}.json" \
+            --model "${MODEL_PATH}" \
             "${EXP_ARGS[@]}" \
             --profiled-results $profiled_path \
             --slo-ratio "$SLO" \

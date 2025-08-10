@@ -24,7 +24,7 @@ export VLLM_CONFIGURE_LOGGING=1        # 0 → minimal, 1 → user-configurable
 
 LOGGING_LEVEL=CRITICAL                 # CRITICAL│ERROR│WARNING│INFO│DEBUG
 ROOT="/home/heelim/vllm"               # project root
-MODEL_PATH="/home/heelim/.cache/huggingface/hub/models--meta-llama--Meta-Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659"   # ← set your model path or HF ID here
+MODEL_PATH="/home/xinyuema/models/llama-3-8b-gradientAI"   # ← set your model path or HF ID here
 
 FIGURE_ONLY="${1:-0}"                  # default = 0 (run + plot)
 
@@ -126,7 +126,7 @@ for SLO in "${SLO_RATIO_LIST[@]}"; do
           echo "    ↳ FIGURE_ONLY=1 → skipping execution"
         else
           echo "    ↳ running..."
-          python "${ROOT}/examples/test_distN.py" \
+          python "${ROOT}/examples/test_distN_A100.py" \
             --config-file "${TRACE_CFG_DIR}/${TRACE}.json" \
             --model "${MODEL_PATH}" \
             "${EXP_ARGS[@]}" \
