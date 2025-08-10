@@ -21,6 +21,7 @@ IFS=$'\n\t'                    # safer word-splitting
 ###############################################################################
 export CUDA_VISIBLE_DEVICES=0
 export VLLM_CONFIGURE_LOGGING=1        # 0 → minimal, 1 → user-configurable
+export NUM_LAYERS=32
 
 LOGGING_LEVEL=CRITICAL                 # CRITICAL│ERROR│WARNING│INFO│DEBUG
 ROOT="/home/xinyuema/vllm"               # project root
