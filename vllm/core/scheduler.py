@@ -1582,7 +1582,7 @@ class Scheduler:
         msg += f"swapped: {[seq.get_seqs()[0].seq_id for seq in self.swapped]}, "
         msg += f"paused_cpu: {[seq.get_seqs()[0].seq_id for seq in self.paused_cpu]}, "
         msg += f"paused: {[seq.get_seqs()[0].seq_id for seq in self.paused]}"
-        logger.critical(msg)
+        logger.debug(msg)
         if self.cache_config.static_batching:            
             num_current_requests = len(self.running) + len(self.swapped) + len(self.paused_cpu) + len(self.paused)
             logger.info(f"live requests in batch: {num_current_requests}")
