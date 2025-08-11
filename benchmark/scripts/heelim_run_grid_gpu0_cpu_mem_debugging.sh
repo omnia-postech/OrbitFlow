@@ -38,7 +38,7 @@ TRACE_LIST=(test2)     # trace JSONs (basename only)
 TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/cpu_mem_debugging"  # where traces are stored/home/heelim/vllm/benchmark/test_t
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"
 BASE_LOG="${ROOT}/configs/logging_template.json"
-PLOTTER="${ROOT}/benchmark/data_analysis/metrics_plot.py"
+PLOTTER="${ROOT}/benchmark/data_analysis/others/metrics_plot.py"
 
 SLO_RATIO_LIST=(2.5)                   # e.g. 1.5 2.0 2.5 …
 
