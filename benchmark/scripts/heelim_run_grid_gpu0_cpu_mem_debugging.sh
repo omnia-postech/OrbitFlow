@@ -33,7 +33,7 @@ FIGURE_ONLY="${1:-0}"                  # default = 0 (run + plot)
 
 EXP_LIST=(cpu_mem_debugging)              # high-level experiment names
 METHOD_LIST=(Ours)                  # see supported_methods.json for keys
-TRACE_LIST=(test1)     # trace JSONs (basename only)
+TRACE_LIST=(test2)     # trace JSONs (basename only)
 
 TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/cpu_mem_debugging"  # where traces are stored/home/heelim/vllm/benchmark/test_t
 METHOD_CFG_FILE="${ROOT}/benchmark/scripts/supported_methods.json"

@@ -468,6 +468,7 @@ def write_all_tbt_figures(
 
 def main(argv) -> None:
 
+    # No prefetch 
     csv = argv[0]
     print(f"CSV path: {csv}")
     csv_path = Path(csv).expanduser().resolve()
@@ -480,6 +481,7 @@ def main(argv) -> None:
     # out_path1 = write_all_tbt_figures(df, csv_path, exclude_ranges=[(0, 9500)], env_offset=0.009)
     print(f"Figure written ➜ {out_path1}")
 
+    # Next Layer
     csv2 = argv[1] if len(argv) > 1 else None 
     if csv2:
         print(f"CSV path: {csv2}")
@@ -493,6 +495,7 @@ def main(argv) -> None:
         
         df = df[['time_between_tokens', "request_id"]]
         df3 = df2[['time_between_tokens', "request_id"]]
+        # difference between no prefetch and next layer
         df3['time_between_tokens'][0]= [x-y for x, y in zip(df2['time_between_tokens'][0], df['time_between_tokens'][0])]
         csv3 = "/home/heelim/vllm/outputs/benchmark/Profile_Trace/NextLayer/profile_trace/outputs_diff.csv"
         csv_path3 = Path(csv3).expanduser().resolve()
