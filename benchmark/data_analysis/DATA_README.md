@@ -17,7 +17,86 @@ graph TD
     C --> E
 ```
 
-## 2. 📂 Common Data Parsing 
+## 2. 🚀 Quick Start Example
+
+See result_pipeline_script.sh
+### Start to data parsing
+```bash
+
+# base_paths: Support for multiple experimental routes
+base_paths=(
+  # List of base directory containing experimental data
+)
+reference_root= {Path of the reference trace that ran the experiment}
+
+# ───────────────────────────────────────────────
+# Step 1. Change SLO scale Only For Baselines
+# ───────────────────────────────────────────────
+echo "📐 Recalculating SLO scale for baselines..."
+for base_path in "${base_paths[@]}"; do
+  python ./data_analysis/data_parsing/slo_data_rescaler.py \
+    --old-sc {experimented slo scale} \
+    --new-sc-list {list of new slo scales} \
+    --base-path {base path} \
+    --is-arrival \
+    --arrival-rate-list {list of experimented arrival rates} \
+    --cv-list {list of experimented cv scales} \
+    --methods {list of experimented methods} \
+    --arrival-tpl {Format of the trace}
+done
+
+# ───────────────────────────────────────────────
+# Step 2. Collect all method/trace directories
+# ───────────────────────────────────────────────
+subdirs=(
+# List of slo scales and methods for which you would like to see results
+)
+
+declare -a all_roots all_subdirs
+ ....
+```
+
+### Draw graph
+See draw_graph_script.sh
+
+```bash
+echo "Draw the picture you want"
+
+python ./draw_graph/batch_size_graph.py \
+  {Path where batch size was tested} \
+  {Path where batch size 4 was experimented} \
+  --output-dir {Path where you want to save the figure}
+
+python ./draw_graph/cv_scale_graph.py \
+  {Experimental path according to CV scale} \
+  --output-dir {Path where you want to save the figure}
+
+python ./draw_graph/fallback_strategy_graph.py \
+  Path where the random selection results are saved \
+  Path where the shortest selection results are saved \
+  Path where the longest selection results are saved \
+  --output-dir {Path where you want to save the figure}
+
+python ./draw_graph/indivisual_component_token_deposit_graph.py \
+  Path where design validation results are saved \
+  Path where main results are saved \
+  --output-dir {Path where you want to save the figure}
+
+python ./draw_graph/p95_tbt_slo_attainment_gpu_utilization_graph.py \
+  Path where main results are saved \
+  --output-dir {Path where you want to save the figure}
+
+python ./draw_graph/tbt_tpot_slo_attainment_graph.py \
+  Path where main results are saved \
+  --output-dir {Path where you want to save the figure}
+
+python ./draw_graph/tp2_tp4_tbt_graph.py \
+  Path where tp2 results are saved \
+  Path where tp4 results are saved \
+  --output-dir {Path where you want to save the figure}
+```
+
+## 3. 📂 Common Data Parsing 
 
 This part describes the common data parsing codes used in the raw data evaluation pipeline, including their purpose, usage, required inputs, and output behavior.
 
@@ -140,81 +219,3 @@ python ./data_analysis/data_parsing/compute_memory_util_from_log.py \
 | `<trace_dirs>` | List of directories containing `outputs.log` |
 
 
-## 3. 🚀 Quick Start Example
-
-See result_pipeline_script.sh
-### Start to data parsing
-```bash
-
-# base_paths: Support for multiple experimental routes
-base_paths=(
-  # List of base directory containing experimental data
-)
-reference_root= {Path of the reference trace that ran the experiment}
-
-# ───────────────────────────────────────────────
-# Step 1. Change SLO scale Only For Baselines
-# ───────────────────────────────────────────────
-echo "📐 Recalculating SLO scale for baselines..."
-for base_path in "${base_paths[@]}"; do
-  python ./data_analysis/data_parsing/slo_data_rescaler.py \
-    --old-sc {experimented slo scale} \
-    --new-sc-list {list of new slo scales} \
-    --base-path {base path} \
-    --is-arrival \
-    --arrival-rate-list {list of experimented arrival rates} \
-    --cv-list {list of experimented cv scales} \
-    --methods {list of experimented methods} \
-    --arrival-tpl {Format of the trace}
-done
-
-# ───────────────────────────────────────────────
-# Step 2. Collect all method/trace directories
-# ───────────────────────────────────────────────
-subdirs=(
-# List of slo scales and methods for which you would like to see results
-)
-
-declare -a all_roots all_subdirs
- ....
-```
-
-### Draw graph
-See draw_graph_script.sh
-
-```bash
-echo "Draw the picture you want"
-
-python ./draw_graph/batch_size_graph.py \
-  {Path where batch size was tested} \
-  {Path where batch size 4 was experimented} \
-  --output-dir {Path where you want to save the figure}
-
-python ./draw_graph/cv_scale_graph.py \
-  {Experimental path according to CV scale} \
-  --output-dir {Path where you want to save the figure}
-
-python ./draw_graph/fallback_strategy_graph.py \
-  Path where the random selection results are saved \
-  Path where the shortest selection results are saved \
-  Path where the longest selection results are saved \
-  --output-dir {Path where you want to save the figure}
-
-python ./draw_graph/indivisual_component_token_deposit_graph.py \
-  Path where design validation results are saved \
-  Path where main results are saved \
-  --output-dir {Path where you want to save the figure}
-
-python ./draw_graph/p95_tbt_slo_attainment_gpu_utilization_graph.py \
-  Path where main results are saved \
-  --output-dir {Path where you want to save the figure}
-
-python ./draw_graph/tbt_tpot_slo_attainment_graph.py \
-  Path where main results are saved \
-  --output-dir {Path where you want to save the figure}
-
-python ./draw_graph/tp2_tp4_tbt_graph.py \
-  Path where tp2 results are saved \
-  Path where tp4 results are saved \
-  --output-dir {Path where you want to save the figure}
-```
