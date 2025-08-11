@@ -354,7 +354,7 @@ class LLMEngine:
             for v_id in range(self.parallel_config.pipeline_parallel_size)
         ]
 
-        # (xinyue) (HACK) link block_manager with cache engine 
+        # HACK(HONG): link block_manager with cache engine 
         for v_id in range(self.parallel_config.pipeline_parallel_size): 
             self.model_executor.driver_worker.cache_engine[v_id].register_bm(self.scheduler[v_id].block_manager)
         # Metric Logging.
@@ -426,11 +426,8 @@ class LLMEngine:
             num_gpu_blocks = num_gpu_blocks_override
 
         self.cache_config.num_gpu_blocks = num_gpu_blocks
-        # NOTE(HONG): automatically setting num_cpu_blocks 2 time larger than num_gpu_blocks
-        # self.cache_config.num_cpu_blocks = num_cpu_blocks
-        self.cache_config.num_cpu_blocks = num_gpu_blocks * 2        
-
-        # self.model_executor.initialize_cache(num_gpu_blocks, num_cpu_blocks)
+        # NOTE(HONG): automatically setting num_cpu_blocks 2 time larger than num_gpu_blocks to retain all KV tokens in CPU host memory        
+        self.cache_config.num_cpu_blocks = num_gpu_blocks * 2                
         self.model_executor.initialize_cache(self.cache_config.num_gpu_blocks, self.cache_config.num_cpu_blocks)
         elapsed = time.time() - start
         logger.info(("init engine (profile, create kv cache, "
