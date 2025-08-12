@@ -18,7 +18,7 @@ from vllm.sequence import (Sequence, SequenceData, SequenceGroup,
 from vllm.utils import Device, PyObjectCache
 from gurobipy import GRB
 from vllm.worker.distn.solver import Request
-from vllm.worker.distn.solver import Solver_updated, Solver_uniform, Solver_v1
+from vllm.worker.distn.solver import SolverV2, SolverV1_Uniform, SolverV1
 from vllm.logger import init_logger
 logger = init_logger(__name__)
 
@@ -357,7 +357,6 @@ class Scheduler:
         self.lora_config = lora_config
         self.pipeline_parallel_size = pipeline_parallel_size
 
-        # self._pause_window_remaining: int = 0
         self.slo_from_delaysim = {}
         
         self.gpu_blocks_per_layer = {}
@@ -371,10 +370,10 @@ class Scheduler:
 
         if self.cache_config.uniform_solver:
             logger.critical(f"Using uniform solver for scheduling. ")
-            self.solver = Solver_uniform()
+            self.solver = SolverV1_Uniform()
         else:
             logger.critical(f"Using non-uniform  solver for scheduling. ")
-            self.solver = Solver_v1()
+            self.solver = SolverV1()
         
         version = "selfattn"
         if (self.scheduler_config.runner_type == "pooling"
@@ -593,19 +592,9 @@ class Scheduler:
         decode_seq_groups: _schedule_running 에서 선택된 디코드 후보들
         """
         reqs: list[Request] = []
-        # if calibrate:
-        #     if self.last_decode_time > 0:
-        #         assert(self.step_tokens > 0)
-        #         last_layer_time = self.last_decode_time / self.block_manager.num_attention_layers 
-        #         global PROFILED_A, PROFILED_B
-        #         New_B =  last_layer_time - PROFILED_A * self.step_tokens
-        #         if New_B > 0:
-        #             PROFILED_B = New_B 
-        
-            
-        # 네트워크·모델상 상수 (기존 코드와 동일)
+                    
         for sg in decode_seq_groups:
-            seq      = sg.seq_group.get_seqs()[0]               # 단일 시퀀스 가정
+            seq      = sg.seq_group.get_seqs()[0]
             seq_id   = seq.seq_id
             req_id   = sg.seq_group.request_id
 
@@ -801,21 +790,7 @@ class Scheduler:
                     num_running_seqs = seq_group.get_max_num_running_seqs()
                     budget.add_num_seqs(seq_group.request_id, num_running_seqs)
                 if curr_loras is not None and seq_group.lora_int_id > 0:
-                    curr_loras.add(seq_group.lora_int_id)
-        # NOTE(xinyue): debugging the solver
-        # global file_no
-        # file_name = f"/home/xinyuema/vllm/vllm/worker/distn/snapshot/step{file_no}.pt"
-        # request_list = self._make_solver_requests(ret.decode_seq_groups)
-        # bandwidth = 25.19 * 1024**3  # B/s
-        # head_size = 128
-        # num_kv_heads = 8
-        # per_token_bytes = 2 * 2 * head_size * num_kv_heads
-        # block_bytes = per_token_bytes * self.block_manager.block_size
-        # block_bandwidth =  bandwidth / block_bytes
-        # gpu_block_capacity=self.block_manager.num_total_gpu_blocks
-        # packed_request = [request_list, block_bandwidth, gpu_block_capacity]
-        # torch.save(packed_request, file_name)
-        # file_no += 1
+                    curr_loras.add(seq_group.lora_int_id)        
 
         ret.solver_time = 0.0
         ret.solver_estimated_time = 0.0
@@ -832,9 +807,9 @@ class Scheduler:
         if self.cache_config.prefetch_mode == "solver":
             if self.cache_config.pause_and_resume:
                 previous_paused_ids = {seq_group.get_seqs()[0].seq_id for seq_group in self.paused}
-                # TODO(HONG): 가능성은 작지만 pause된 request들을 한꺼번에 빼는 경우 memory가 부족할 수 있음. 
-                # TODO(HONG): self.running 대신 ret.decode_seq_groups 으로 해야함. 
-                # (xinyue) this puts back the paused right away, wait until some of the running batch finishes
+                # TODO(HONG): Although unlikely, if paused requests are all restored at once, there may be insufficient memory.
+                # TODO(HONG): Should use ret.decode_seq_groups instead of self.running.
+                # NOTE(xinyue) this puts back the paused right away, wait until some of the running batch finishes
                 if (len(ret.decode_seq_groups)) <= 0 and not self.waiting and self.paused:
                     logger.debug(f"No running or waiting seqs; restoring {len(self.paused)} paused requests")
                     for pg in list(self.paused):
@@ -844,25 +819,15 @@ class Scheduler:
                         ret.decode_seq_groups.append(scheduled)
                         ret.decode_seq_groups_list.append(pg)
                     self.paused.clear()
-                    self.decode_window_left = 0          # 윈도우 강제 리셋
+                    self.decode_window_left = 0
             else: 
-                previous_paused_ids = set()            
-
-            # preempt_imminent = self._is_preemption(len(ret.decode_seq_groups))
-        
-            # if preempt_imminent:
-            #     logger.info(f"Preemption detected, trigger solver")
-            #     seq_ids = [sg.seq_group.get_seqs()[0].seq_id for sg in ret.decode_seq_groups]                                                
-            #     blocks_allocated = {seq_id: sg.seq_group.get_seqs()[0].n_blocks for seq_id, sg in zip(seq_ids, ret.decode_seq_groups)}
-            #     logger.info(f"total blocks/blocks_allocated: {self.block_manager.num_total_gpu_blocks//32}/{blocks_allocated}")
-            #     self.decode_window_left = 0
+                previous_paused_ids = set()
                     
             if self.decode_window_left > 0:
                 logger.info(f"Within decode window (remaining={self.decode_window_left}), skipping solver")
                 self.decode_window_left -= 1
 
-            # NOTE(HONG): signature -> 새 요청 도착 / 기존 요청 종료 판단용
-            # cur_sig = (frozenset(sg.seq_group.request_id for sg in ret.decode_seq_groups) | frozenset(pg.request_id for pg in self.paused))
+            # NOTE(HONG): If the decode window is not zero, we do not need to run the solver.
             cur_sig = (frozenset(sg.seq_group.request_id for sg in ret.decode_seq_groups) | (frozenset(pg.request_id for pg in self.paused) if self.cache_config.pause_and_resume else frozenset()))
             logger.info(f"signature_changed={cur_sig != self.prev_sig}  "
                          f"cur_sig={list(cur_sig)}  prev_sig={list(self.prev_sig)}")
@@ -870,7 +835,7 @@ class Scheduler:
             if signature_changed:
                 self.decode_window_left = 0
             
-            # (xinyue) lots of things not checked here!! 
+            # TODO(xinyue) lots of things not checked here!! 
             # 1. anything preempted, should not happen... Get a signal from cache_engine! 
             # 2. cur_sig != prev_sig, wait, can we use it for everything? 
             cond2 = signature_changed
@@ -894,12 +859,7 @@ class Scheduler:
             )
             
             if need_solver:
-                logger.info(f"need_solver={need_solver}  ret.decode_seq_groups={(ret.decode_seq_groups)}, self.decode_window_left={self.decode_window_left} , self.cache_config.need_solver:{self.cache_config.need_solver}" )
-                # if self.cache_config.need_solver:
-                #     logger.debug(f"solver triggered by cache engine")                
-                    # decode_candidates = ret.decode_seq_groups
-
-                restored_once = False
+                logger.info(f"need_solver={need_solver}  ret.decode_seq_groups={(ret.decode_seq_groups)}, self.decode_window_left={self.decode_window_left} , self.cache_config.need_solver:{self.cache_config.need_solver}")                
 
                 solver_start = time.perf_counter()
                 while True:                    
@@ -907,10 +867,9 @@ class Scheduler:
 
                     if not decode_candidates:
                         logger.info(f"No decode candidates for solver")
-                        break                      # ① 후보가 있으면 Solver 실행
+                        break
                     request_list = self._make_solver_requests(decode_candidates)
-                    
-                    # TODO(HONG): 매 호출마다 동일 계산 위로 빼는게 좋음. 
+                                        
                     bandwidth = 25.19 * 1024**3  # B/s
                     head_size = 128
                     num_kv_heads = 8
@@ -925,7 +884,7 @@ class Scheduler:
                     else: 
                         gpu_cap = self.block_manager.num_total_gpu_blocks
                         head_room = max(int(self.block_manager.num_total_gpu_blocks)*0.001, 100, len(decode_candidates)*self.block_manager.num_attention_layers)
-                    sol = self.solver.solve(                 # 💡 “resume=1” 강제 변형판
+                    sol = self.solver.solve(                 
                         request_list,
                         block_bandwidth=block_bandwidth,
                         gpu_block_capacity=gpu_cap - head_room,                        
@@ -933,10 +892,8 @@ class Scheduler:
 
                     # ---------- ② infeasible → victim pause ------------------------
                     if sol is None:                           # ② infeasible ⇒ fallback
-                        logger.critical(f"################# Solver infeasible ❌")
-                        # logger.info(f"Solver infeasible ❌, decode_candidates={decode_candidates}")                        
-                        # 가장 긴 요청 1개 선택                         
-                        # TODO(HONG): tie-break 구현
+                        logger.critical(f"################# Solver infeasible ❌")                                                
+                        # TODO(HONG): add tie-breaking strategy
                         if self.cache_config.pause_and_resume:                            
                             
                             # NOTE(HONG): if there is a single request left and no solution -> use distnsingle methods to prevent from pausing it. 
@@ -944,7 +901,7 @@ class Scheduler:
                             if single_running:                        
                                 self.is_distnsingle_fallback = True
                                 self.resume_distances = {r.id: -1 for r in request_list}   # -1 ⇒ distn_single
-                                self.decode_window_left = 128                             # 임의 window
+                                self.decode_window_left = 128                             # FIXME this is a default parameter, pretty ad-hoc (HONG)
                                 ret.solver_estimated_time = 100
                                 logger.critical("[Solver-fallback] single-req → prevent pause → distn_single mode")
                                 break
@@ -961,13 +918,7 @@ class Scheduler:
                                 victim_sg = max(decode_candidates, key=lambda sg: (1 / self.slo_from_delaysim[sg.seq_group.request_id], len(sg.seq_group.get_seqs()[0].data._cached_all_token_ids)))
                             else:
                                 raise ValueError(f"Unknown pause strategy: {self.cache_config.pause_strategy}")
-
-                            # victim_sg = max(
-                            #     decode_candidates,
-                            #     key=lambda sg: len(
-                            #         sg.seq_group.get_seqs()[0].data._cached_all_token_ids   # 💡 길이 비교
-                            #     )
-                            # )
+                            
                             vid = victim_sg.seq_group.request_id
                             msg = ""
                             for request in request_list:
@@ -1017,8 +968,7 @@ class Scheduler:
             else:                
                 logger.debug(f"need_solver={need_solver}  ret.decode_seq_groups={(ret.decode_seq_groups)}, self.decode_window_left={self.decode_window_left} , self.cache_config.need_solver:{self.cache_config.need_solver}" )
         self._scheduler_running_outputs_cache[self.next_cache_id].reset()
-        self._scheduled_seq_group_cache[self.next_cache_id].reset()
-        # logger.debug(f"!!!!!!!!!!! ret.paused: {ret.paused}")
+        self._scheduled_seq_group_cache[self.next_cache_id].reset()        
         return ret, is_paused_to_resume
 
     def _schedule_swapped(
@@ -1573,10 +1523,7 @@ class Scheduler:
                 self.is_distnsingle_fallback = False
 
         # If any requests are swapped, prioritized swapped requests.
-        logger.info(f"===================================================scheduler state===================================================")
-        # logger.info(f"swapped: {[seq.request_id for seq in self.swapped]}, paused_cpu: {[seq.request_id for seq in self.paused_cpu]}")
-        # logger.info(f"running: {[seq.request_id for seq in self.running]}, paused by fallback mechanism: {[seq.request_id for seq in self.paused]}")        
-        # logger.info(f"waiting: {[seq.request_id for seq in self.waiting]}")
+        logger.info(f"===================================================scheduler state===================================================")        
         msg = f"waiting: {[seq.get_seqs()[0].seq_id for seq in self.waiting]}, "
         msg += f"running: {[seq.get_seqs()[0].seq_id for seq in self.running]}, "
         msg += f"swapped: {[seq.get_seqs()[0].seq_id for seq in self.swapped]}, "
@@ -1601,11 +1548,7 @@ class Scheduler:
             logger.info(f"prefill stage!!!!!!")
             logger.debug(f"prefill sid after _schedule_prefills(): {[s.seq_group.request_id for s in prefills.seq_groups]}")
         else:
-            logger.info(f"decoding stage!!!!!!")
-
-        # if self.cache_config.pause_and_resume and self.cache_config.prefetch_mode == "solver":
-        #     if prefills.seq_groups:
-        #         self._pause_window_remaining = 0
+            logger.info(f"decoding stage!!!!!!")        
         
         if len(prefills.seq_groups
                ) == 0 and self.scheduler_config.policy == "priority":
@@ -1630,13 +1573,7 @@ class Scheduler:
             if cond1 or cond2:
                 if not self.is_distnsingle_fallback:
                     if not is_paused_to_resume:
-                        swapped_in = self._schedule_paused(budget, curr_loras, running_scheduled.preempted)
-                        # prioritize swapped requests over preempted requests. 
-                        # TODO resume and swap in cannot happend at the same time
-                        # if len(swapped_in.decode_seq_groups) == 0 and len(swapped_in.prefill_seq_groups) == 0:
-                        #     swapped_in = self._schedule_swapped(budget, curr_loras)
-            # elif cond2: # its possible that a request is preempted, but it should be set to NEVER in the next step. But it is the only thing in the waiting queue, cauing an error
-            #     if (running_scheduled.preempted) > 0: 
+                        swapped_in = self._schedule_paused(budget, curr_loras, running_scheduled.preempted)                        
                     
         assert (budget.num_batched_tokens <=
                 self.scheduler_config.max_num_batched_tokens)
