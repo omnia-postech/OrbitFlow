@@ -1,38 +1,30 @@
 # OrbitFlow Benchmark Script README
 
-This guide explains how to use `run_benchmarks.sh` to execute vLLM benchmarks for specific prefetch methods, traces, and SLO ratios.
+This guide explains how to use `run_orbitflow.sh` to execute vLLM benchmarks for specific prefetch methods, traces, and SLO ratios.
 
 ## Overview
 
-The script automates benchmarking with `test_distN.py`. It loops over:
+The script automates benchmarking with `orbitflow.py`. It loops over:
 
 - **SLO ratios**: Latency scaling factors (e.g., 1.5).
 - **Experiments**: Named groups (e.g., `TestBestAndWorst`).
-- **Methods**: Prefetch strategies (e.g., `Ours`, `OursUniformSolver`, `DistNSingle`) from `supported_methods.json`.
+- **Methods**: Prefetch strategies (e.g., `Ours`, `FlexGen`, `DistNSingle`) from `supported_methods.json`.
 - **Traces**: Workload inputs (e.g., `test_shortshort_enough`).
 
-**Modes**:
-
-- `FIGURE_ONLY=0` (default): Run benchmarks.
-- `FIGURE_ONLY=1`: Skip execution.
-
-Outputs (logs, CSVs) are saved in a structured directory.
-
 ## Prerequisites
-
 1. **Environment**:
    
    - Python 3.11 with vLLM.
-   - CUDA GPU (e.g., set `CUDA_VISIBLE_DEVICES=0`).
+   - CUDA GPU version 12.1.
 
 2. **Directory Structure**:
 
-   - Root: `/home/heelim/vllm` (adjust `ROOT` if needed).
+   - Root: `$HOME/vllm` (adjust `ROOT` if needed).
    - Files:
-      - `supported_methods.json`: Method CLI args.
-      - `examples/test_distN.py`: Benchmark script.
-      - `configs/test_no_prefetch_logging.json`: Logging config.
-      - `benchmark/test_traces/test_best_worst/*.json`: Trace files.
+      - `benchmark/scripts/supported_methods.json`: Method CLI args.
+      - `examples/orbitflow.py`: Benchmark script.
+      - `configs/logging_template.json`: Logging config.
+      - `benchmark/selected_traces/test_best_worst/*.json`: Trace files.
 
 3. **Install Dependencies**:
 
@@ -42,19 +34,22 @@ Outputs (logs, CSVs) are saved in a structured directory.
 
 ## Script Configuration
 
-Edit the **CONSTANTS** section:
+Edit the **CONSTANTS** section in `run_orbitflow.sh`:
 
 ```bash
 export CUDA_VISIBLE_DEVICES=0
 export VLLM_CONFIGURE_LOGGING=1
+export NUM_LAYERS=32  # e.g., 32 for LLaMa3-8B, 80 for LLaMa3-70B
 LOGGING_LEVEL=CRITICAL  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-ROOT="/home/heelim/vllm"
-FIGURE_ONLY="${1:-0}"  # 0: Run benchmarks, 1: Skip execution
+ROOT="$HOME/vllm"
+MODEL_PATH="meta-llama/Meta-Llama-3.1-8B-Instruct"  # Or use local path: "$HOME/models/llama-3.1-8b-instruct"
+profiled_path="$HOME/vllm/benchmark/scripts/profiling_data/profiled_results_A6000.json"
+FIGURE_ONLY="${1:-0}"  # 0: Run benchmarks + plot, 1: Plot only
 
-EXP_LIST=(TestBestAndWorst)
-METHOD_LIST=(Ours OursUniformSolver DistNSingle)  # Public methods
-TRACE_LIST=(test_shortshort_enough)  # Trace basenames
-TRACE_CFG_DIR="${ROOT}/benchmark/test_traces/test_best_worst"
+EXP_LIST=(paper_main_exp)
+METHOD_LIST=(Ours)
+TRACE_LIST=(both_dyn_veryhigh_bs2)  # Trace basenames
+TRACE_CFG_DIR="${ROOT}/benchmark/selected_traces"
 SLO_RATIO_LIST=(1.5)  # e.g., 1.5, 2.0
 ```
 
@@ -62,10 +57,13 @@ SLO_RATIO_LIST=(1.5)  # e.g., 1.5, 2.0
 - **METHOD_LIST**: Public methods from `supported_methods.json`.
 - **TRACE_LIST**: Trace files (without `.json`) in `TRACE_CFG_DIR`.
 - **SLO_RATIO_LIST**: SLO ratios.
+- **MODEL_PATH**: Path to model (e.g., LLaMa3-8B).
+- **NUM_LAYERS**: Model layers (e.g., 32 for LLaMa3-8B).
+- **profiled_path**: Path to profiling data.
 
 ## Creating Custom Traces
 
-You may create your own trace files to simulate specific workloads or existing traces we made. Place them in `TRACE_CFG_DIR` (e.g., `benchmark/test_traces/test_best_worst/`) and list their basenames (without `.json`) in `TRACE_LIST`.
+You may create your own trace files to simulate specific workloads or existing traces we made. Place them in `TRACE_CFG_DIR` (e.g., `benchmark/selected_traces/test_best_worst/`) and list their basenames (without `.json`) in `TRACE_LIST`.
 
 ### Trace Format
 
@@ -119,9 +117,14 @@ Trace files are JSON objects with the following structure:
 - Create traces manually or with a script to match your workload.
 - Validate JSON syntax before running.
 
-## Publicly Disclosed Methods
+## KV Placement Methods
 
-The following methods from `supported_methods.json` are available for public use:
+The following methods from `supported_methods.json` are available:
+
+- **Flexgen**: FlexGen-based prefetching strategy.
+- **NoPrefetch**: Disables prefetching entirely.
+- **NextLayer**: Prefetches only the immediate next layer.
+- **Static1/2/4/8**: Static prefetching with fixed distances (1, 2, 4, or 8 layers ahead).
 
 - **Ours**:
 
@@ -178,15 +181,15 @@ The following methods from `supported_methods.json` are available for public use
         ]
       }
       ```
-
-Add or modify these methods in `supported_methods.json`, ensuring valid `test_distN.py` arguments.
+      
+Add or modify these methods in `supported_methods.json`, ensuring valid `orbitflow.py` arguments.
 
 ## Running the Script
 
 1. **Set Permissions**:
 
    ```bash
-   chmod +x run_benchmarks.sh
+   chmod +x run_orbitflow.sh
    ```
 
 2. **Run**:
@@ -194,13 +197,13 @@ Add or modify these methods in `supported_methods.json`, ensuring valid `test_di
    - Run benchmarks:
 
       ```bash
-      ./run_benchmarks.sh 0
+      ./run_orbitflow.sh 0
       ```
 
    - Skip execution:
 
       ```bash
-      ./run_benchmarks.sh 1
+      ./run_orbitflow.sh 1
       ```
 
 3. **Output**:
@@ -223,26 +226,5 @@ Add or modify these methods in `supported_methods.json`, ensuring valid `test_di
    - Execute:
 
       ```bash
-      ./run_benchmarks.sh 0
+      ./run_orbitflow.sh 0
       ```
-
-## Troubleshooting
-
-- **No CSV**: Check `test_distN.py` or trace file validity.
-- **JSON Errors**: Verify `supported_methods.json` entries match `METHOD_LIST`.
-- **Logs**: Use `LOGGING_LEVEL=DEBUG` for detailed `vllm_msg.log`.
-
-## Adding Experiments
-
-1. Add traces to `benchmark/test_traces/test_best_worst/`.
-2. Update `TRACE_LIST`.
-3. Add public methods to `supported_methods.json` and `METHOD_LIST`.
-4. Modify `SLO_RATIO_LIST` or `EXP_LIST`.
-
-## Notes
-
-- Verify `ROOT` path.
-- Backup `outputs/` to avoid overwrites.
-- Monitor GPU memory for large traces.
-
-<!-- For support, contact [your contact info]. -->
