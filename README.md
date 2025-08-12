@@ -25,6 +25,7 @@ The script automates benchmarking with `orbitflow.py`. It loops over:
       - `examples/orbitflow.py`: Benchmark script.
       - `configs/logging_template.json`: Logging config.
       - `benchmark/selected_traces/test_best_worst/*.json`: Trace files.
+      - `benchmark/data_analysis/profiling/extract_profiled_results.py`: Profiling script.
 
 3. **Install Dependencies**:
 
@@ -59,7 +60,7 @@ SLO_RATIO_LIST=(1.5)  # e.g., 1.5, 2.0
 - **SLO_RATIO_LIST**: SLO ratios.
 - **MODEL_PATH**: Path to model (e.g., LLaMa3-8B).
 - **NUM_LAYERS**: Model layers (e.g., 32 for LLaMa3-8B).
-- **profiled_path**: Path to profiling data.
+- **profiled_path**: Path to profiling data (see Generating Profiled Data).
 
 ## Creating Custom Traces
 
@@ -116,6 +117,44 @@ Trace files are JSON objects with the following structure:
 
 - Create traces manually or with a script to match your workload.
 - Validate JSON syntax before running.
+
+## Generating Profiled Data
+
+To generate the `profiled_path` file (e.g., `profiled_results_A6000.json`), use the `extract_profiled_results.py` script located at `${HOME}/vllm/benchmark/data_analysis/profiling/extract_profiled_results.py`. This script processes two CSV files generated from benchmarks using the `NoPrefetch` and `NextLayer` methods to create profiling data tailored to your GPU and model.
+
+### Steps to Generate Profiled Data
+
+1. **Run Benchmarks for `NoPrefetch` and `NextLayer`**:
+
+   - Configure `run_orbitflow.sh` with `METHOD_LIST=(NoPrefetch NextLayer)` and `TRACE_LIST=(profile_trace)`.
+   - Ensure the trace file `$HOME/vllm/benchmark/selected_traces/profile/profile_trace.json` exists.
+
+   - Execute the script to generate CSV outputs with profiling trace:
+
+      ```bash
+      ./run_orbitflow.sh 0
+      ```
+
+   - Find the CSV files in `${ROOT}/outputs/benchmark/${EXP}/slo${SLO}/${METHOD}/${TRACE}/outputs.csv`.
+
+2. **Run the Profiling Script**:
+
+   - Use the CSV files from `NoPrefetch` and `NextLayer` runs as inputs.
+
+   - Example command:
+
+      ```bash
+      python $HOME/vllm/benchmark/data_analysis/profiling/extract_profiled_results.py \
+      ${ROOT}/outputs/benchmark/paper_main_exp/slo1.5/NoPrefetch/profile_trace/outputs.csv \
+      ${ROOT}/outputs/benchmark/paper_main_exp/slo1.5/NextLayer/profile_trace/outputs.csv \
+      --out ${ROOT}/benchmark/scripts/profiling_data/profiled_results_A6000.json
+      ```
+
+   - The script outputs a JSON file (e.g., `profiled_results_A6000.json`) containing linear fit parameters (`A`, `B`, `R2`) for `NoPrefetch` and `Communication` (NextLayer).
+
+3. **Update `run_orbitflow.sh`**:
+
+   - Set `profiled_path` to the generated JSON file path (e.g., `$HOME/vllm/benchmark/scripts/profiling_data/profiled_results_A6000.json`).
 
 ## KV Placement Methods
 
@@ -181,7 +220,7 @@ The following methods from `supported_methods.json` are available:
         ]
       }
       ```
-      
+
 Add or modify these methods in `supported_methods.json`, ensuring valid `orbitflow.py` arguments.
 
 ## Running the Script
