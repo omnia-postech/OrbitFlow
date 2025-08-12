@@ -279,16 +279,6 @@ class LocalOrDistributedWorkerBase(WorkerBase):
 
         cache_engine = self.cache_engine[worker_input.virtual_engine]
 
-        # logger.debug(f"[worker] registering block_manager to cache_engine#{worker_input.virtual_engine}")
-        # cache_engine.register_bm(bm)
-
-        # if cache_engine.pause_and_resume:
-        #     if pause_layers or resume_layers:
-        #         logger.debug(f"[worker] executing pause/resume on engine")
-        #         cache_engine.execute_pause_resume(
-        #             pause_layers, resume_layers
-        #         )
-
         if cache_plan.dealloc_layers or cache_plan.alloc_layers or cache_plan.prefetch_resize or cache_plan.pause_layers:
             logger.debug(f"[worker] executing cache_plan on engine#{worker_input.virtual_engine}")
             cache_engine.execute_cache_plan(cache_plan, model_input.attn_metadata, sid2row, new_gpu_blocks)
@@ -306,14 +296,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         # 1. update mapping
         logger.debug(f"================ [driver] start prepare_cache_plan() ================")
         cache_engine.update_mapping(attn_meta, seq_group_metadata,
-                                    finished_requests, paused_cpu_seq_groups)
-        
-        # 2. build pause/resume plan
-        # if cache_engine.pause_and_resume:
-        #     pause_plan, resume_plan = cache_engine.build_pause_resume_plan()
-        # else:
-        #     logger.debug(f"[driver] pause and resume feature => false")
-        #     pause_plan = resume_plan = None
+                                    finished_requests, paused_cpu_seq_groups)        
 
         # 3. build cache plan
         total_context_lens = attn_meta.seq_lens
@@ -321,9 +304,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
         logger.debug(f"[driver] is_decoding: {is_decoding}")
         cache_plan, dist = cache_engine.build_cache_plan(seq_group_metadata, total_context_lens, is_decoding, cache_engine.pause_and_resume)
         # pack into broadcastable structure
-        plan_data = {
-            # 'pause_layers': pause_plan,
-            # 'resume_layers': resume_plan,
+        plan_data = {            
             'cache_plan': cache_plan,
             'dist_dict': dist,
             'sid2row': cache_engine.mapping.sid2row,
@@ -334,12 +315,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             cache_engine.mapping.prev_dist_dict = dist
         plan_data['new_gpu_blocks'] = new_gpu_blocks
 
-        cache_engine._sync_active_gpu_cpu_map(cache_engine.mapping.seq_row_order)
-        # logger.critical(f"[driver] active_gpu_cpu_cache_map: {cache_engine.active_gpu_cpu_cache_map}")
-        # logger.critical(f"cache_engine.mapping: {cache_engine.mapping}")
-
-        # bm = cache_engine._get_bm()
-        # plan_data['bm'] = bm
+        cache_engine._sync_active_gpu_cpu_map(cache_engine.mapping.seq_row_order)    
 
         logger.debug(f"================ [driver] finish prepare_cache_plan() ================")
         return plan_data
@@ -467,9 +443,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             kv_caches layout: [|<-        32 GPU layers        ->|<-next offloaded layer->|]
             For each offloaded layer i, kv_caches[i] is assigned to None. 
             The next offloaded layer is always stored at kv_caches[-1], if prefetch is not done yet, it is None. 
-        """
-        
-        # self.cache_config = self.cache_engine[worker_input.virtual_engine].may_resize_gpu_cache(cached_all_position_ids, attn_metadata=model_input.attn_metadata), seq_group_metadata_list=execute_model_req.seq_group_metadata_list, finished_requests_ids=execute_model_req.finished_requests_ids, paused_cpu_seq_groups=execute_model_req.paused_cpu_seq_groups)
+        """        
 
         kv_caches=self.kv_cache[worker_input.virtual_engine] if self.kv_cache is not None else None,
         kv_caches_cpu=self.kv_cache_cpu[worker_input.virtual_engine] if self.kv_cache_cpu is not None else None,
