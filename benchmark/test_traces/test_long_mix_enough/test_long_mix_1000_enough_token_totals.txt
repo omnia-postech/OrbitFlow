@@ -1,2 +1,0 @@
-total_input_tokens  5128493
-total_output_tokens 1729993
