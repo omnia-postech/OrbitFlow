@@ -129,7 +129,7 @@ for SLO in "${SLO_RATIO_LIST[@]}"; do
           echo "    ↳ FIGURE_ONLY=1 → skipping execution"
         else
           echo "    ↳ running..."
-          python "${ROOT}/examples/test_distN.py" \
+          python "${ROOT}/examples/orbitflow.py" \
             --config-file "${TRACE_CFG_DIR}/${TRACE}.json" \
             --model "${MODEL_PATH}" \
             "${EXP_ARGS[@]}" \
