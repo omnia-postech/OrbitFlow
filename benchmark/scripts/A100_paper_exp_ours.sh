@@ -26,7 +26,7 @@ export NUM_LAYERS=32
 LOGGING_LEVEL=CRITICAL                 # CRITICAL│ERROR│WARNING│INFO│DEBUG
 ROOT="/home/xinyuema/vllm"               # project root
 MODEL_PATH="/home/xinyuema/models/llama-3-8b-gradientAI"   # ← set your model path or HF ID here
-profiled_path="/home/xinyuema/vllm/benchmark/scripts/profiled_results_A100_8B.json"
+profiled_path="/home/xinyuema/vllm/benchmark/scripts/profiling_data/profiled_results_A100_8B.json"
 export PROFILED_RESULTS_PATH="$profiled_path"
 
 FIGURE_ONLY="${1:-0}"                  # default = 0 (run + plot)
