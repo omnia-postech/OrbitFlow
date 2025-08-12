@@ -14,7 +14,7 @@ The script automates benchmarking with `orbitflow.py`. It loops over:
 ## Prerequisites
 1. **Environment**:
    
-   - Python 3.11 with vLLM.
+   - Python 3.11 with vLLM 0.6.6.
    - CUDA GPU version 12.1.
 
 2. **Directory Structure**:
