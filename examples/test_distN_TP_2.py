@@ -705,7 +705,7 @@ def main(configs):
     if configs.profiled_results:
         p_path = configs.profiled_results
     else:
-        p_path = "/home/heelim/vllm/benchmark/scripts/profiled_results_A6000.json"
+        p_path = "/home/heelim/vllm/benchmark/scripts/profiling_data/profiled_results_A6000.json"
     estimator = ProfileBasedEstimator(p_path)
     print("Available Profiled Fitters:", estimator.available_profiles())
     t_bt = estimator.estimate_by_profiled_results(tokens=2048,
@@ -817,7 +817,7 @@ if __name__ == "__main__":
                         help="whether to use use static batching instead of continuous batching")
     parser.add_argument("--profiled-results",
                         type=str,
-                        default="/home/heelim/vllm/benchmark/scripts/profiled_results.json",
+                        default="/home/heelim/vllm/benchmark/scripts/profiling_data/profiled_results.json",
                         help="profiling results. If not provided, use the default ones.")
     parser.add_argument("--slo-ratio",
                         type=float,
