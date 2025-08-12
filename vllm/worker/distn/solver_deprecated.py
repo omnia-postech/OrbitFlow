@@ -9,7 +9,7 @@ from pathlib import Path
 import json
 from vllm.logger import init_logger
 logger = init_logger(__name__)
-profiled_path = "/home/heelim/vllm/benchmark/scripts/profiled_results_A6000.json"
+profiled_path = "/home/heelim/vllm/benchmark/scripts/profiling_data/profiled_results_A6000.json"
 # ========= 1. INPUTS =====================================================
 
 TOKENS_PER_BLOCK = 16          # system constant

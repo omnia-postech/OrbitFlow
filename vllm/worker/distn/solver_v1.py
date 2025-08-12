@@ -9,7 +9,7 @@ from pathlib import Path
 import json
 from vllm.logger import init_logger
 logger = init_logger(__name__)
-profiled_path = "~/vllm/benchmark/scripts/profiled_results.json"
+profiled_path = "~/vllm/benchmark/scripts/profiling_data/profiled_results.json"
 class ProfileBasedEstimator:
     """
     Estimate per-token latency from pre-profiled polynomial fits.

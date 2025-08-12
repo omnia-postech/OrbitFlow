@@ -657,7 +657,7 @@ class DummySolver:
         return 0
 # ────── build generator from trace file ─────────────────────────────────────
 trace = Trace.load_from_json(args.trace)
-profiled_path = "/home/heelim/vllm/benchmark/scripts/profiled_results_A6000.json"
+profiled_path = "/home/heelim/vllm/benchmark/scripts/profiling_data/profiled_results_A6000.json"
 estimator     = ProfileBasedEstimator(profiled_path)
 
 cap_tokens = trace.num_gpu_blocks_override * BLOCK_SIZE

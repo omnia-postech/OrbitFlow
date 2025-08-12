@@ -14,7 +14,7 @@ logger = init_logger(__name__)
 # Use environment variable or default path for profiled results
 DEFAULT_PROFILED_PATH = os.environ.get(
     "PROFILED_RESULTS_PATH",
-    "/home/xinyuema/vllm/benchmark/scripts/profiled_results_A6000.json"
+    "/home/xinyuema/vllm/benchmark/scripts/profiling_data/profiled_results_A6000.json"
 )
 
 # ========= 1. INPUTS =====================================================
