@@ -968,8 +968,7 @@ class FlashAttentionImpl(AttentionImpl):
                 torch.cuda.synchronize()
 
                 # # # TODO(HONG): Copy only blocks that are updated with newly generated tokens.                
-                if layer >=0 : # ?
-                    # print(f"Writing new KV to CPU at layer{layer}")
+                if layer >=0 : # ?                    
                     if kv_cache_cpu is not None and updated_slot_mapping_cpu.numel()>0:
                         # compute the offsets for the cpu cache, since the cpu cache does not start from block 0 
                         with nvtx.annotate(f"Key Value Writing{layer}"):
@@ -978,10 +977,10 @@ class FlashAttentionImpl(AttentionImpl):
                             value_cpu = value.to('cpu')                             
 
                             PAGE_SIZE = 16 # Is this a parameter or set to match with BLOCK SIZE of paged kv cache? 
-                            page_idx = updated_slot_mapping_cpu // PAGE_SIZE      # 각 토큰이 들어갈 페이지 번호
+                            page_idx = updated_slot_mapping_cpu // PAGE_SIZE
                             page_idx -= attn_metadata.cpu_offset
                             assert ((page_idx >= 0).all()), f"slots {updated_slot_mapping_cpu}, offset {attn_metadata.cpu_offset}"
-                            offset_idx = updated_slot_mapping_cpu % PAGE_SIZE    # 해당 페이지 내부에서의 위치(0~15)
+                            offset_idx = updated_slot_mapping_cpu % PAGE_SIZE
 
                             num_tokens = updated_slot_mapping_cpu.shape[0]
                             for i in range(num_tokens):
